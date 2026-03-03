@@ -10,59 +10,82 @@
  *   Register each outgoing reply with `remember()` before sending. When the
  *   incoming-copy webhook arrives, `isEcho()` detects the match and the caller
  *   should drop the message. Each entry is consumed on first match so an
- *   identical human follow-up is never silently dropped. Entries expire after
- *   `ttlMs` (default 60 s) regardless of whether they were consumed.
+ *   identical human follow-up is never silently dropped.
  */
 
-interface SentEntry {
-	normText: string;
-	sentAt: number;
+// ── ExpiringSet ───────────────────────────────────────────────────────────────
+
+/**
+ * A multiset of strings where each entry expires after `ttlMs`.
+ * Supports consume-on-match: `has()` removes the entry it matched.
+ * Expired entries are pruned lazily on each read/write.
+ */
+interface ExpiringEntry {
+	value: string;
+	expiresAt: number;
 }
+
+function createExpiringSet(ttlMs: number) {
+	const entries: ExpiringEntry[] = [];
+
+	function prune(): void {
+		const now = Date.now();
+		for (let i = entries.length - 1; i >= 0; i--) {
+			if (entries[i].expiresAt <= now) entries.splice(i, 1);
+		}
+	}
+
+	function add(value: string): void {
+		prune();
+		entries.push({ value, expiresAt: Date.now() + ttlMs });
+	}
+
+	/** Returns true and consumes the entry if found, false otherwise. */
+	function consume(value: string): boolean {
+		prune();
+		const idx = entries.findIndex((e) => e.value === value);
+		if (idx === -1) return false;
+		entries.splice(idx, 1);
+		return true;
+	}
+
+	return { add, consume };
+}
+
+// ── SelfEchoFilter ────────────────────────────────────────────────────────────
 
 export interface SelfEchoFilter {
 	/** Register a message we just sent so its echo can be suppressed. */
-	remember(chatGuid: string, text: string): void;
+	remember(senderId: string, text: string): void;
 	/**
 	 * Returns true if this message looks like an echo of something we sent.
 	 * Consumes the entry on match so an identical human follow-up is not dropped.
 	 */
-	isEcho(chatGuid: string, text: string): boolean;
+	isEcho(senderId: string, text: string): boolean;
 }
 
 export function createSelfEchoFilter(ttlMs = 60_000): SelfEchoFilter {
-	const recentlySent = new Map<string, SentEntry[]>();
+	const buckets = new Map<string, ReturnType<typeof createExpiringSet>>();
 
 	function normalise(text: string): string {
 		return text.trim().toLowerCase();
 	}
 
-	function remember(chatGuid: string, text: string): void {
-		const entries = recentlySent.get(chatGuid) ?? [];
-		entries.push({ normText: normalise(text), sentAt: Date.now() });
-		recentlySent.set(chatGuid, entries);
+	function getBucket(senderId: string) {
+		let bucket = buckets.get(senderId);
+		if (!bucket) {
+			bucket = createExpiringSet(ttlMs);
+			buckets.set(senderId, bucket);
+		}
+		return bucket;
 	}
 
-	function isEcho(chatGuid: string, text: string): boolean {
-		const entries = recentlySent.get(chatGuid);
-		if (!entries) return false;
+	function remember(senderId: string, text: string): void {
+		getBucket(senderId).add(normalise(text));
+	}
 
-		const norm = normalise(text);
-		const cutoff = Date.now() - ttlMs;
-
-		// Prune expired entries while we're here.
-		const fresh = entries.filter((e) => e.sentAt >= cutoff);
-
-		const idx = fresh.findIndex((e) => e.normText === norm);
-		if (idx === -1) {
-			// Write back pruned array even on a miss so stale entries don't linger.
-			recentlySent.set(chatGuid, fresh);
-			return false;
-		}
-
-		// Consume the entry, then persist.
-		fresh.splice(idx, 1);
-		recentlySent.set(chatGuid, fresh);
-		return true;
+	function isEcho(senderId: string, text: string): boolean {
+		return getBucket(senderId).consume(normalise(text));
 	}
 
 	return { remember, isEcho };
