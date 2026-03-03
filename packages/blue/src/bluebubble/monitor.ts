@@ -56,8 +56,12 @@ export function createBBMonitor(config: MonitorConfig) {
 
 		const { data: message } = payload;
 
+		// BlueBubbles sets isFromMe=true for messages sent by this device (including
+		// bot replies). This is the single gate that prevents reply loops.
 		if (message.isFromMe) return;
 		if (!message.text?.trim()) return;
+
+    console.debug(`[blue] webhook body: ${JSON.stringify(payload)}`);
 
 		const chatGuid = message.chats?.[0]?.guid;
 		if (!chatGuid) return;

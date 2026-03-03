@@ -19,7 +19,6 @@ export function createBBClient(config: BBConfig) {
 		const controller = new AbortController();
 		const timer = setTimeout(() => controller.abort(), 10_000);
 		let status = "ERR";
-		let result = "";
 		try {
 			const res = await fetch(`${url}/api/v1${path}?password=${encodeURIComponent(password)}`, {
 				method: "POST",
@@ -27,25 +26,25 @@ export function createBBClient(config: BBConfig) {
 				body: JSON.stringify(body),
 				signal: controller.signal,
 			});
-			const text = await res.text();
 			status = String(res.status);
-			result = text;
 			if (!res.ok) {
+				const text = await res.text();
 				throw new Error(`BB API ${path} failed: ${res.status} ${text}`);
 			}
+			const text = await res.text();
 			let parsed: unknown;
 			try { parsed = JSON.parse(text); } catch { parsed = text; }
 			return parsed;
 		} catch (err) {
 			if ((err as Error).name === "AbortError") {
-				result = "timeout";
-			} else if (!result) {
-				result = (err as Error).message;
+				status = "timeout";
+			} else if (!status) {
+				status = "ERR";
 			}
 			throw err;
 		} finally {
 			clearTimeout(timer);
-			console.log(`[BB] POST ${url}/api/v1${path} ${JSON.stringify(body)} -> ${status} ${result}`);
+			console.log(`[BB] POST /api/v1${path} ${JSON.stringify(body)} -> ${status}`);
 		}
 	}
 
