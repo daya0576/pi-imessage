@@ -3,8 +3,10 @@
  */
 
 import "dotenv/config";
+import { join } from "node:path";
 import { createAgentManager } from "./agent.js";
-import { createBBClient, createBlueServer } from "./bluebubble/index.js";
+import { createBBClient } from "./bluebubble/index.js";
+import { createIMessageBot } from "./imessage.js";
 
 function requireEnv(name: string): string {
 	const value = process.env[name];
@@ -19,12 +21,14 @@ async function main() {
 	const blueBubblesUrl = requireEnv("BLUEBUBBLES_URL");
 	const blueBubblesPassword = requireEnv("BLUEBUBBLES_PASSWORD");
 	const port = Number.parseInt(process.env.BLUE_PORT || "7749", 10);
+	const workingDir = process.env.WORKING_DIR || join(process.cwd(), "data");
 
 	const blueBubblesClient = createBBClient({ url: blueBubblesUrl, password: blueBubblesPassword });
-	const agent = createAgentManager({ blueBubblesClient });
-	const server = createBlueServer({ port, agent });
+	const agent = createAgentManager({ workingDir });
+	const bot = createIMessageBot({ port, agent, blueBubblesClient });
 
-	server.start();
+	console.log(`[blue] Working directory: ${workingDir}`);
+	bot.start();
 }
 
 main().catch((error) => {

@@ -1,9 +1,8 @@
 /**
- * BlueBubbles webhook monitor — receives incoming messages and dispatches to agent.
+ * BlueBubbles webhook monitor — HTTP server that receives incoming messages.
  */
 
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
-import type { AgentManager } from "../agent.js";
 
 /** Incoming webhook payload from BlueBubbles (new-message event). */
 export interface BBWebhookPayload {
@@ -20,29 +19,28 @@ export interface BBMessage {
 
 export interface MonitorConfig {
 	port: number;
-	agent: AgentManager;
+	/** Called for each valid inbound message. */
+	onMessage: (chatGuid: string, text: string) => void;
 }
 
-export function createBlueServer(config: MonitorConfig) {
-	const { port, agent } = config;
+export function createBBMonitor(config: MonitorConfig) {
+	const { port, onMessage } = config;
 
 	const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-		if (req.method === "POST" && req.url === "/webhook") {
+		if (req.method === "POST" && (req.url === "/webhook" || req.url === "/")) {
 			try {
-				const body = await readBody(req);
-				const payload: BBWebhookPayload = JSON.parse(body);
+				const payload: BBWebhookPayload = JSON.parse(await readBody(req));
 				handleWebhook(payload);
 				res.writeHead(200);
 				res.end("ok");
-			} catch (err) {
-				console.error("[blue] Webhook error:", err);
+			} catch (error) {
+				console.error("[blue] Webhook parse error:", error);
 				res.writeHead(400);
 				res.end("bad request");
 			}
 			return;
 		}
 
-		// Health check
 		if (req.method === "GET" && req.url === "/health") {
 			res.writeHead(200);
 			res.end("ok");
@@ -53,39 +51,29 @@ export function createBlueServer(config: MonitorConfig) {
 		res.end("not found");
 	});
 
-	function handleWebhook(payload: BBWebhookPayload) {
+	function handleWebhook(payload: BBWebhookPayload): void {
 		if (payload.type !== "new-message") return;
 
-		const msg = payload.data;
+		const { data: message } = payload;
 
-		// Skip self-sent messages to avoid loops
-		if (msg.isFromMe) return;
+		if (message.isFromMe) return;
+		if (!message.text?.trim()) return;
 
-		// Skip messages without text
-		if (!msg.text?.trim()) return;
-
-		// Get chatGuid
-		const chatGuid = msg.chats?.[0]?.guid;
+		const chatGuid = message.chats?.[0]?.guid;
 		if (!chatGuid) return;
 
-		console.log(`[blue] ${chatGuid}: ${msg.text.substring(0, 80)}`);
-
-		// Fire and forget — processMessage handles queuing
-		agent.processMessage(chatGuid, msg.text).catch((err) => {
-			console.error("[blue] processMessage failed:", err);
-		});
+		onMessage(chatGuid, message.text);
 	}
 
 	return {
 		start() {
 			server.listen(port, () => {
-				console.log(`[blue] Server listening on port ${port}`);
+				console.log(`[blue] Listening on port ${port}`);
 			});
 		},
 		stop() {
 			server.close();
 		},
-		server,
 		/** Exposed for testing */
 		handleWebhook,
 	};

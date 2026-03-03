@@ -5,6 +5,8 @@
  * iMessages. Requires BLUEBUBBLES_URL and BLUEBUBBLES_PASSWORD env vars.
  */
 
+import { randomUUID } from "node:crypto";
+
 export interface BBConfig {
 	url: string;
 	password: string;
@@ -14,15 +16,37 @@ export function createBBClient(config: BBConfig) {
 	const { url, password } = config;
 
 	async function apiFetch(path: string, body: Record<string, unknown> = {}): Promise<unknown> {
-		const res = await fetch(`${url}/api/v1${path}?password=${encodeURIComponent(password)}`, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify(body),
-		});
-		if (!res.ok) {
-			throw new Error(`BB API ${path} failed: ${res.status} ${await res.text()}`);
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), 10_000);
+		let status = "ERR";
+		let result = "";
+		try {
+			const res = await fetch(`${url}/api/v1${path}?password=${encodeURIComponent(password)}`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(body),
+				signal: controller.signal,
+			});
+			const text = await res.text();
+			status = String(res.status);
+			result = text;
+			if (!res.ok) {
+				throw new Error(`BB API ${path} failed: ${res.status} ${text}`);
+			}
+			let parsed: unknown;
+			try { parsed = JSON.parse(text); } catch { parsed = text; }
+			return parsed;
+		} catch (err) {
+			if ((err as Error).name === "AbortError") {
+				result = "timeout";
+			} else if (!result) {
+				result = (err as Error).message;
+			}
+			throw err;
+		} finally {
+			clearTimeout(timer);
+			console.log(`[BB] POST ${url}/api/v1${path} ${JSON.stringify(body)} -> ${status} ${result}`);
 		}
-		return res.json();
 	}
 
 	return {
@@ -30,7 +54,7 @@ export function createBBClient(config: BBConfig) {
 			await apiFetch("/message/text", {
 				chatGuid,
 				message: text,
-				method: "private-api",
+				tempGuid: randomUUID(),
 			});
 		},
 
