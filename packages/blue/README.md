@@ -16,8 +16,56 @@ Key capabilities:
 
 How it works:
 ```
-
+  BlueBubbles Server
+        │
+  (webhook POST: new-message)
+        │
+        ▼
+┌──────────────────────────────────────────────────┐
+│             Blue Server (HTTP)                   │
+│                                                  │
+│  POST /webhook                                   │
+│    │                                             │
+│    ├─ Ignore isFromMe messages                   │
+│    │  (skip self-sent to avoid loop)             │
+│    │                                             │
+│    ▼                                             │
+│  SessionManager (pi-coding-agent)                │
+│    │  per chatGuid, persistent on disk           │
+│    │  └─ data/<chatGuid>/                        │
+│    │       ├─ log.jsonl      (full history)      │
+│    │       └─ context.jsonl  (LLM context)       │
+│    │                                             │
+│    ▼                                             │
+│  Agent loop (pi-agent-core)                      │
+│    │                                             │
+│    │  ┌─ outer: follow-up messages ────┐         │
+│    │  │  ┌─ inner: tool calls +      ┐ │         │
+│    │  │  │  steering messages        │ │         │
+│    │  │  └───────────────────────────┘ │         │
+│    │  └────────────────────────────────┘         │
+│    │                                             │
+│    ▼                                             │
+│  Collect assistant reply text                    │
+│    │                                             │
+│    ├─ sendMessage (BB REST API)                  │
+│    └─ digest.log one-line log                    │
+│                                                  │
+└──────────────────────────────────────────────────┘
+        │
+        ▼
+  iMessage (user receives reply)
 ```
+
+Dependencies:
+```
+blue
+ ├─ @mariozechner/pi-agent-core   (Agent loop, steering, tool execution)
+ ├─ @mariozechner/pi-coding-agent (SessionManager for persistence)
+ └─ @mariozechner/pi-ai           (getModel)
+```
+
+Env vars: `BLUEBUBBLES_URL` / `BLUEBUBBLES_PASSWORD` / `ANTHROPIC_API_KEY`
 
 ## [WIP] Message History
 
