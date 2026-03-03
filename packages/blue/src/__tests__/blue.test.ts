@@ -1,149 +1,139 @@
-import { describe, it, expect, vi } from "vitest";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import type { BBWebhookPayload } from "../bb.js";
+import { createBBClient } from "../bb.js";
+import { createLogger } from "../log.js";
+import { createBlueServer } from "../server.js";
+import { createStore } from "../store.js";
+import newMessageFixture from "./fixtures/new-message.json" with { type: "json" };
 
 /**
  * Unit tests for Blue server webhook handling.
  * These test the routing/filtering logic without real BB or agent connections.
  */
 
+/**
+ * Factory based on a real BlueBubbles new-message webhook payload.
+ * Sensitive values (phone numbers, ROWIDs, GUIDs) are replaced with fakes.
+ */
 function makePayload(overrides: Partial<BBWebhookPayload["data"]> = {}): BBWebhookPayload {
-  return {
-    type: "new-message",
-    data: {
-      guid: "msg-001",
-      text: "hello blue",
-      isFromMe: false,
-      chats: [{ guid: "iMessage;-;+1234567890", chatIdentifier: "+1234567890", displayName: null }],
-      handle: { address: "+1234567890" },
-      dateCreated: Date.now(),
-      attachments: [],
-      ...overrides,
-    },
-  };
+	return {
+		...newMessageFixture,
+		data: {
+			...newMessageFixture.data,
+			...overrides,
+		},
+	} as BBWebhookPayload;
 }
 
 describe("webhook filtering", () => {
-  // We test the filtering logic that would live in server.handleWebhook
-  // by importing and calling it directly
+	// We test the filtering logic that would live in server.handleWebhook
+	// by importing and calling it directly
 
-  it("should ignore isFromMe messages", async () => {
-    const processMessage = vi.fn();
-    const { createBlueServer } = await import("../server.js");
+	it("should ignore isFromMe messages", () => {
+		const processMessage = vi.fn();
 
-    const server = createBlueServer({
-      port: 0,
-      agent: { processMessage },
-    });
+		const server = createBlueServer({
+			port: 0,
+			agent: { processMessage },
+		});
 
-    server.handleWebhook(makePayload({ isFromMe: true }));
-    expect(processMessage).not.toHaveBeenCalled();
-  });
+		server.handleWebhook(makePayload({ isFromMe: true }));
+		expect(processMessage).not.toHaveBeenCalled();
+	});
 
-  it("should ignore messages without text", async () => {
-    const processMessage = vi.fn();
-    const { createBlueServer } = await import("../server.js");
+	it("should ignore messages without text", () => {
+		const processMessage = vi.fn();
 
-    const server = createBlueServer({
-      port: 0,
-      agent: { processMessage },
-    });
+		const server = createBlueServer({
+			port: 0,
+			agent: { processMessage },
+		});
 
-    server.handleWebhook(makePayload({ text: null }));
-    expect(processMessage).not.toHaveBeenCalled();
+		server.handleWebhook(makePayload({ text: null }));
+		expect(processMessage).not.toHaveBeenCalled();
 
-    server.handleWebhook(makePayload({ text: "  " }));
-    expect(processMessage).not.toHaveBeenCalled();
-  });
+		server.handleWebhook(makePayload({ text: "  " }));
+		expect(processMessage).not.toHaveBeenCalled();
+	});
 
-  it("should ignore non new-message events", async () => {
-    const processMessage = vi.fn();
-    const { createBlueServer } = await import("../server.js");
+	it("should ignore non new-message events", () => {
+		const processMessage = vi.fn();
 
-    const server = createBlueServer({
-      port: 0,
-      agent: { processMessage },
-    });
+		const server = createBlueServer({
+			port: 0,
+			agent: { processMessage },
+		});
 
-    server.handleWebhook({ type: "updated-message", data: makePayload().data });
-    expect(processMessage).not.toHaveBeenCalled();
-  });
+		server.handleWebhook({ type: "updated-message", data: makePayload().data });
+		expect(processMessage).not.toHaveBeenCalled();
+	});
 
-  it("should dispatch valid messages to agent", async () => {
-    const processMessage = vi.fn().mockResolvedValue(undefined);
-    const { createBlueServer } = await import("../server.js");
+	it("should dispatch valid messages to agent", async () => {
+		const processMessage = vi.fn().mockResolvedValue(undefined);
 
-    const server = createBlueServer({
-      port: 0,
-      agent: { processMessage },
-    });
+		const server = createBlueServer({
+			port: 0,
+			agent: { processMessage },
+		});
 
-    server.handleWebhook(makePayload());
+		server.handleWebhook(makePayload());
 
-    // processMessage is called async (fire-and-forget), give it a tick
-    await new Promise((r) => setTimeout(r, 10));
-    expect(processMessage).toHaveBeenCalledWith("iMessage;-;+1234567890", "hello blue");
-  });
+		// processMessage is called async (fire-and-forget), give it a tick
+		await new Promise((r) => setTimeout(r, 10));
+		expect(processMessage).toHaveBeenCalledWith("any;-;+1234567890", "hello blue");
+	});
 });
 
 describe("store", () => {
-  it("should create session managers per chatGuid", async () => {
-    const { createStore } = await import("../store.js");
-    const { mkdtempSync } = await import("node:fs");
-    const { join } = await import("node:path");
-    const { tmpdir } = await import("node:os");
+	it("should create session managers per chatGuid", () => {
+		const tmp = mkdtempSync(join(tmpdir(), "blue-test-"));
+		const store = createStore(tmp);
 
-    const tmp = mkdtempSync(join(tmpdir(), "blue-test-"));
-    const store = createStore(tmp);
+		const sm1 = store.getSessionManager("chat-a");
+		const sm2 = store.getSessionManager("chat-a");
+		const sm3 = store.getSessionManager("chat-b");
 
-    const sm1 = store.getSessionManager("chat-a");
-    const sm2 = store.getSessionManager("chat-a");
-    const sm3 = store.getSessionManager("chat-b");
-
-    // Same chatGuid returns same instance
-    expect(sm1).toBe(sm2);
-    // Different chatGuid returns different instance
-    expect(sm1).not.toBe(sm3);
-  });
+		// Same chatGuid returns same instance
+		expect(sm1).toBe(sm2);
+		// Different chatGuid returns different instance
+		expect(sm1).not.toBe(sm3);
+	});
 });
 
 describe("bb client", () => {
-  it("should construct proper API calls", async () => {
-    const { createBBClient } = await import("../bb.js");
+	it("should construct proper API calls", () => {
+		const client = createBBClient({ url: "http://localhost:1234", password: "test123" });
 
-    const client = createBBClient({ url: "http://localhost:1234", password: "test123" });
-
-    // We can't test actual API calls without a server,
-    // but we can verify the client is created without errors
-    expect(client).toBeDefined();
-    expect(client.sendMessage).toBeInstanceOf(Function);
-    expect(client.sendTypingIndicator).toBeInstanceOf(Function);
-    expect(client.sendReaction).toBeInstanceOf(Function);
-  });
+		// We can't test actual API calls without a server,
+		// but we can verify the client is created without errors
+		expect(client).toBeDefined();
+		expect(client.sendMessage).toBeInstanceOf(Function);
+		expect(client.sendTypingIndicator).toBeInstanceOf(Function);
+		expect(client.sendReaction).toBeInstanceOf(Function);
+	});
 });
 
 describe("logger", () => {
-  it("should write structured log lines", async () => {
-    const { createLogger } = await import("../log.js");
-    const { mkdtempSync, readFileSync } = await import("node:fs");
-    const { join } = await import("node:path");
-    const { tmpdir } = await import("node:os");
+	it("should write structured log lines", () => {
+		const tmp = mkdtempSync(join(tmpdir(), "blue-log-"));
+		const logFile = join(tmp, "test.log");
+		const logger = createLogger(logFile);
 
-    const tmp = mkdtempSync(join(tmpdir(), "blue-log-"));
-    const logFile = join(tmp, "test.log");
-    const logger = createLogger(logFile);
+		logger.info("test message", { chatGuid: "abc" });
+		logger.error("oops", { code: 500 });
 
-    logger.info("test message", { chatGuid: "abc" });
-    logger.error("oops", { code: 500 });
+		const lines = readFileSync(logFile, "utf-8").trim().split("\n");
+		expect(lines).toHaveLength(2);
 
-    const lines = readFileSync(logFile, "utf-8").trim().split("\n");
-    expect(lines).toHaveLength(2);
+		const entry1 = JSON.parse(lines[0]);
+		expect(entry1.level).toBe("info");
+		expect(entry1.message).toBe("test message");
+		expect(entry1.chatGuid).toBe("abc");
 
-    const entry1 = JSON.parse(lines[0]);
-    expect(entry1.level).toBe("info");
-    expect(entry1.message).toBe("test message");
-    expect(entry1.chatGuid).toBe("abc");
-
-    const entry2 = JSON.parse(lines[1]);
-    expect(entry2.level).toBe("error");
-  });
+		const entry2 = JSON.parse(lines[1]);
+		expect(entry2.level).toBe("error");
+	});
 });

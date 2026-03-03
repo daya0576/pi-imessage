@@ -1,0 +1,52 @@
+{
+	"type": "new-message",
+	"data": {
+		"originalROWID": 100001,
+		"guid": "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+		"text": "hello blue",
+		"attributedBody": null,
+		"handle": {
+			"originalROWID": 1001,
+			"address": "+1234567890",
+			"service": "iMessage",
+			"uncanonicalizedId": "1234567890",
+			"country": "US"
+		},
+		"handleId": 1001,
+		"otherHandle": 0,
+		"attachments": [],
+		"subject": null,
+		"error": 0,
+		"dateCreated": 1772533067186,
+		"dateRead": null,
+		"dateDelivered": null,
+		"isDelivered": true,
+		"isFromMe": false,
+		"hasDdResults": false,
+		"isArchived": false,
+		"itemType": 0,
+		"groupTitle": null,
+		"groupActionType": 0,
+		"balloonBundleId": null,
+		"associatedMessageGuid": null,
+		"associatedMessageType": null,
+		"expressiveSendStyleId": null,
+		"threadOriginatorGuid": null,
+		"hasPayloadData": false,
+		"chats": [
+			{
+				"originalROWID": 5001,
+				"guid": "any;-;+1234567890",
+				"style": 45,
+				"chatIdentifier": "+1234567890",
+				"isArchived": false,
+				"displayName": ""
+			}
+		],
+		"messageSummaryInfo": null,
+		"payloadData": null,
+		"dateEdited": null,
+		"dateRetracted": null,
+		"partCount": 1
+	}
+}

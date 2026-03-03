@@ -1,24 +1,22 @@
 {
-  "name": "pi-imessage",
-  "private": true,
-  "type": "module",
-  "workspaces": [
-    "packages/*"
-  ],
-  "engines": {
-    "node": ">=20.0.0"
-  },
-  "scripts": {
-    "build": "npm run build --workspaces --if-present",
-    "dev": "npm run dev -w packages/blue",
-    "start": "npm run start -w packages/blue",
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "lint": "biome check .",
-    "format": "biome format --write ."
-  },
-  "devDependencies": {
-    "@biomejs/biome": "^1.9.4",
-    "@types/node": "^22.0.0",
-    "typescript": "^5.7.3"
-  }
+	"name": "pi-imessage",
+	"private": true,
+	"type": "module",
+	"workspaces": ["packages/*"],
+	"engines": {
+		"node": ">=20.0.0"
+	},
+	"scripts": {
+		"build": "npm run build --workspaces --if-present",
+		"dev": "npm run dev -w packages/blue",
+		"start": "npm run start -w packages/blue",
+		"typecheck": "npm run typecheck --workspaces --if-present",
+		"lint": "biome check .",
+		"format": "biome format --write ."
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^1.9.4",
+		"@types/node": "^22.0.0",
+		"typescript": "^5.7.3"
+	}
 }

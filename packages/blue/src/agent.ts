@@ -5,106 +5,114 @@
  * sends user messages, and collects assistant replies.
  */
 
-import { createAgentSession, type AgentSession, type AgentSessionEvent, SessionManager } from "@mariozechner/pi-coding-agent";
 import { getModel } from "@mariozechner/pi-ai";
+import {
+	type AgentSession,
+	type AgentSessionEvent,
+	SessionManager,
+	createAgentSession,
+} from "@mariozechner/pi-coding-agent";
 import type { BBClient } from "./bb.js";
 import type { Store } from "./store.js";
 
+// Hardcoded model — TODO: make configurable
+const model = getModel("anthropic", "claude-sonnet-4-20250514");
+
 export interface AgentManagerConfig {
-  store: Store;
-  bb: BBClient;
+	store: Store;
+	bb: BBClient;
 }
 
 interface ChatSession {
-  session: AgentSession;
-  busy: boolean;
-  queue: Array<{ text: string; chatGuid: string }>;
+	session: AgentSession;
+	busy: boolean;
+	queue: Array<{ text: string; chatGuid: string }>;
 }
 
 export function createAgentManager(config: AgentManagerConfig) {
-  const { store, bb } = config;
-  const chatSessions = new Map<string, ChatSession>();
+	const { store, bb } = config;
+	const chatSessions = new Map<string, ChatSession>();
 
-  async function getOrCreateSession(chatGuid: string): Promise<ChatSession> {
-    let cs = chatSessions.get(chatGuid);
-    if (cs) return cs;
+	async function getOrCreateSession(chatGuid: string): Promise<ChatSession> {
+		let cs = chatSessions.get(chatGuid);
+		if (cs) return cs;
 
-    const sm = store.getSessionManager(chatGuid);
-    const model = getModel("anthropic", "claude-sonnet-4-20250514");
+		const sm = store.getSessionManager(chatGuid);
 
-    const { session } = await createAgentSession({
-      model,
-      thinkingLevel: "low",
-      sessionManager: sm,
-    });
+		const { session } = await createAgentSession({
+			model,
+			thinkingLevel: "low",
+			sessionManager: sm,
+		});
 
-    cs = { session, busy: false, queue: [] };
-    chatSessions.set(chatGuid, cs);
-    return cs;
-  }
+		cs = { session, busy: false, queue: [] };
+		chatSessions.set(chatGuid, cs);
+		return cs;
+	}
 
-  async function processMessage(chatGuid: string, text: string): Promise<void> {
-    const cs = await getOrCreateSession(chatGuid);
+	async function processMessage(chatGuid: string, text: string): Promise<void> {
+		const cs = await getOrCreateSession(chatGuid);
 
-    if (cs.busy) {
-      cs.queue.push({ text, chatGuid });
-      return;
-    }
+		if (cs.busy) {
+			cs.queue.push({ text, chatGuid });
+			return;
+		}
 
-    cs.busy = true;
-    try {
-      await runAgent(cs, chatGuid, text);
+		cs.busy = true;
+		try {
+			await runAgent(cs, chatGuid, text);
 
-      // Drain queue
-      while (cs.queue.length > 0) {
-        const next = cs.queue.shift()!;
-        await runAgent(cs, next.chatGuid, next.text);
-      }
-    } finally {
-      cs.busy = false;
-    }
-  }
+			// Drain queue
+			while (cs.queue.length > 0) {
+				const next = cs.queue.shift();
+				if (!next) break;
+				await runAgent(cs, next.chatGuid, next.text);
+			}
+		} finally {
+			cs.busy = false;
+		}
+	}
 
-  async function runAgent(cs: ChatSession, chatGuid: string, text: string): Promise<void> {
-    // Collect assistant reply text from events
-    let replyText = "";
+	async function runAgent(cs: ChatSession, chatGuid: string, text: string): Promise<void> {
+		// Collect assistant reply text from events
+		let replyText = "";
 
-    const unsub = cs.session.subscribe((event: AgentSessionEvent) => {
-      if (event.type === "message_end") {
-        const msg = event.message;
-        if (msg && "role" in msg && msg.role === "assistant" && "content" in msg) {
-          // Extract text from content blocks
-          const content = msg.content;
-          if (typeof content === "string") {
-            replyText += content;
-          } else if (Array.isArray(content)) {
-            for (const block of content) {
-              if (typeof block === "string") {
-                replyText += block;
-              } else if ("type" in block && block.type === "text" && "text" in block) {
-                replyText += (block as { type: "text"; text: string }).text;
-              }
-            }
-          }
-        }
-      }
-    });
+		const unsub = cs.session.subscribe((event: AgentSessionEvent) => {
+			if (event.type === "message_end") {
+				const msg = event.message;
+				if (msg && "role" in msg && msg.role === "assistant" && "content" in msg) {
+					// Extract text from content blocks
+					const content = msg.content;
+					if (typeof content === "string") {
+						replyText += content;
+					} else if (Array.isArray(content)) {
+						for (const block of content) {
+							if (typeof block === "string") {
+								replyText += block;
+							} else if ("type" in block && block.type === "text" && "text" in block) {
+								replyText += (block as { type: "text"; text: string }).text;
+							}
+						}
+					}
+				}
+			}
+		});
 
-    try {
-      await cs.session.prompt(text);
+		try {
+			await cs.session.prompt(text);
 
-      if (replyText.trim()) {
-        await bb.sendMessage(chatGuid, replyText.trim());
-      }
-    } catch (err) {
-      console.error(`[blue] Agent error for ${chatGuid}:`, err);
-      await bb.sendMessage(chatGuid, "⚠️ Something went wrong. Please try again.");
-    } finally {
-      unsub();
-    }
-  }
+			if (replyText.trim()) {
+				await bb.sendMessage(chatGuid, replyText.trim());
+			}
+		} catch (err) {
+			console.error(`[blue] Agent error for ${chatGuid}:`, err);
+			await bb.sendMessage(chatGuid, "⚠️ Something went wrong. Please try again.");
+		} finally {
+			unsub();
+		}
+	}
 
-  return { processMessage };
+	return { processMessage };
 }
 
 export type AgentManager = ReturnType<typeof createAgentManager>;

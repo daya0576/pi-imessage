@@ -67,7 +67,10 @@ blue
  └─ @mariozechner/pi-ai           (getModel)
 ```
 
-Env vars: `BLUEBUBBLES_URL` / `BLUEBUBBLES_PASSWORD` / `ANTHROPIC_API_KEY`
+Env vars: `BLUEBUBBLES_URL` / `BLUEBUBBLES_PASSWORD` 
+
+TODO:
+- [ ] Handle message images
 
 ## [WIP] Message History
 

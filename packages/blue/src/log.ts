@@ -3,23 +3,23 @@
  */
 
 import { appendFileSync, mkdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { dirname, join } from "node:path";
 
 export function createLogger(logFile: string) {
-  mkdirSync(dirname(logFile), { recursive: true });
+	mkdirSync(dirname(logFile), { recursive: true });
 
-  function log(level: string, message: string, meta?: Record<string, unknown>) {
-    const line = JSON.stringify({
-      ts: new Date().toISOString(),
-      level,
-      message,
-      ...meta,
-    });
-    appendFileSync(logFile, line + "\n");
-  }
+	function log(level: string, message: string, meta?: Record<string, unknown>) {
+		const line = JSON.stringify({
+			ts: new Date().toISOString(),
+			level,
+			message,
+			...meta,
+		});
+		appendFileSync(logFile, `${line}\n`);
+	}
 
-  return {
-    info: (msg: string, meta?: Record<string, unknown>) => log("info", msg, meta),
-    error: (msg: string, meta?: Record<string, unknown>) => log("error", msg, meta),
-  };
+	return {
+		info: (msg: string, meta?: Record<string, unknown>) => log("info", msg, meta),
+		error: (msg: string, meta?: Record<string, unknown>) => log("error", msg, meta),
+	};
 }
