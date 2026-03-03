@@ -1,26 +1,13 @@
 /**
  * BlueBubbles REST API client.
  *
- * Handles communication with the BlueBubbles server for sending/receiving
+ * Handles communication with the BlueBubbles server for sending
  * iMessages. Requires BLUEBUBBLES_URL and BLUEBUBBLES_PASSWORD env vars.
  */
 
 export interface BBConfig {
 	url: string;
 	password: string;
-}
-
-/** Incoming webhook payload from BlueBubbles (new-message event). */
-export interface BBWebhookPayload {
-	type: string;
-	data: BBMessage;
-}
-
-/** A BlueBubbles message object (subset of fields we care about). */
-export interface BBMessage {
-	text: string | null;
-	isFromMe: boolean;
-	chats: Array<{ guid: string }>;
 }
 
 export function createBBClient(config: BBConfig) {
@@ -48,7 +35,6 @@ export function createBBClient(config: BBConfig) {
 		},
 
 		async sendTypingIndicator(chatGuid: string): Promise<void> {
-			// BlueBubbles typing indicator (best-effort, may not be supported)
 			try {
 				await apiFetch(`/chat/${encodeURIComponent(chatGuid)}/typing`, {
 					status: "started",

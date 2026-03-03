@@ -1,17 +1,29 @@
 /**
- * HTTP server — receives BlueBubbles webhooks and dispatches to agent.
+ * BlueBubbles webhook monitor — receives incoming messages and dispatches to agent.
  */
 
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
-import type { AgentManager } from "./agent.js";
-import type { BBWebhookPayload } from "./bb.js";
+import type { AgentManager } from "../agent.js";
 
-export interface ServerConfig {
+/** Incoming webhook payload from BlueBubbles (new-message event). */
+export interface BBWebhookPayload {
+	type: string;
+	data: BBMessage;
+}
+
+/** A BlueBubbles message object (subset of fields we care about). */
+export interface BBMessage {
+	text: string | null;
+	isFromMe: boolean;
+	chats: Array<{ guid: string }>;
+}
+
+export interface MonitorConfig {
 	port: number;
 	agent: AgentManager;
 }
 
-export function createBlueServer(config: ServerConfig) {
+export function createBlueServer(config: MonitorConfig) {
 	const { port, agent } = config;
 
 	const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {

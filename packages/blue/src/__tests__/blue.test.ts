@@ -1,12 +1,6 @@
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import type { BBWebhookPayload } from "../bb.js";
-import { createBBClient } from "../bb.js";
-import { createLogger } from "../log.js";
-import { createBlueServer } from "../server.js";
-import { createStore } from "../store.js";
+import type { BBWebhookPayload } from "../bluebubble/index.js";
+import { createBBClient, createBlueServer } from "../bluebubble/index.js";
 import newMessageFixture from "./fixtures/new-message.json" with { type: "json" };
 
 /**
@@ -87,22 +81,6 @@ describe("webhook filtering", () => {
 	});
 });
 
-describe("store", () => {
-	it("should create session managers per chatGuid", () => {
-		const tmp = mkdtempSync(join(tmpdir(), "blue-test-"));
-		const store = createStore(tmp);
-
-		const sm1 = store.getSessionManager("chat-a");
-		const sm2 = store.getSessionManager("chat-a");
-		const sm3 = store.getSessionManager("chat-b");
-
-		// Same chatGuid returns same instance
-		expect(sm1).toBe(sm2);
-		// Different chatGuid returns different instance
-		expect(sm1).not.toBe(sm3);
-	});
-});
-
 describe("bb client", () => {
 	it("should construct proper API calls", () => {
 		const client = createBBClient({ url: "http://localhost:1234", password: "test123" });
@@ -113,27 +91,5 @@ describe("bb client", () => {
 		expect(client.sendMessage).toBeInstanceOf(Function);
 		expect(client.sendTypingIndicator).toBeInstanceOf(Function);
 		expect(client.sendReaction).toBeInstanceOf(Function);
-	});
-});
-
-describe("logger", () => {
-	it("should write structured log lines", () => {
-		const tmp = mkdtempSync(join(tmpdir(), "blue-log-"));
-		const logFile = join(tmp, "test.log");
-		const logger = createLogger(logFile);
-
-		logger.info("test message", { chatGuid: "abc" });
-		logger.error("oops", { code: 500 });
-
-		const lines = readFileSync(logFile, "utf-8").trim().split("\n");
-		expect(lines).toHaveLength(2);
-
-		const entry1 = JSON.parse(lines[0]);
-		expect(entry1.level).toBe("info");
-		expect(entry1.message).toBe("test message");
-		expect(entry1.chatGuid).toBe("abc");
-
-		const entry2 = JSON.parse(lines[1]);
-		expect(entry2.level).toBe("error");
 	});
 });

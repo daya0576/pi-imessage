@@ -2,36 +2,32 @@
  * Blue — iMessage bot entry point.
  */
 
-import { join } from "node:path";
+import "dotenv/config";
 import { createAgentManager } from "./agent.js";
-import { createBBClient } from "./bb.js";
-import { createBlueServer } from "./server.js";
-import { createStore } from "./store.js";
+import { createBBClient, createBlueServer } from "./bluebubble/index.js";
 
 function requireEnv(name: string): string {
-	const val = process.env[name];
-	if (!val) {
+	const value = process.env[name];
+	if (!value) {
 		console.error(`[blue] Missing required env var: ${name}`);
 		process.exit(1);
 	}
-	return val;
+	return value;
 }
 
 async function main() {
-	const bbUrl = requireEnv("BLUEBUBBLES_URL");
-	const bbPassword = requireEnv("BLUEBUBBLES_PASSWORD");
+	const blueBubblesUrl = requireEnv("BLUEBUBBLES_URL");
+	const blueBubblesPassword = requireEnv("BLUEBUBBLES_PASSWORD");
 	const port = Number.parseInt(process.env.BLUE_PORT || "7749", 10);
-	const dataDir = process.env.BLUE_DATA_DIR || join(process.cwd(), "data");
 
-	const bb = createBBClient({ url: bbUrl, password: bbPassword });
-	const store = createStore(dataDir);
-	const agent = createAgentManager({ store, bb });
+	const blueBubblesClient = createBBClient({ url: blueBubblesUrl, password: blueBubblesPassword });
+	const agent = createAgentManager({ blueBubblesClient });
 	const server = createBlueServer({ port, agent });
 
 	server.start();
 }
 
-main().catch((err) => {
-	console.error("[blue] Fatal:", err);
+main().catch((error) => {
+	console.error("[blue] Fatal:", error);
 	process.exit(1);
 });

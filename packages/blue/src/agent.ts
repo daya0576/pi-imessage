@@ -1,8 +1,16 @@
 /**
- * Agent module — creates and runs agent sessions per chat.
+ * Agent module — manages one AI agent session per iMessage chat.
  *
- * Uses pi-coding-agent SDK to create sessions with persistent storage,
- * sends user messages, and collects assistant replies.
+ * Architecture:
+ *   - Each chat (identified by chatGuid) gets a lazily-created AgentSession
+ *     with in-memory context (no persistence across restarts).
+ *   - Messages are processed sequentially per chat: if the agent is busy,
+ *     incoming messages are queued and drained in order once the current
+ *     prompt completes.
+ *   - Each session subscribes to AgentSessionEvent once at creation time.
+ *     On every `message_end` event from the assistant, reply text is accumulated
+ *     into `chatSession.replyText`, then sent back via BlueBubbles after the
+ *     prompt resolves.
  */
 
 import { getModel } from "@mariozechner/pi-ai";
@@ -12,103 +20,107 @@ import {
 	SessionManager,
 	createAgentSession,
 } from "@mariozechner/pi-coding-agent";
-import type { BBClient } from "./bb.js";
-import type { Store } from "./store.js";
+import type { BBClient } from "./bluebubble/index.js";
 
-// Hardcoded model — TODO: make configurable
-const model = getModel("anthropic", "claude-sonnet-4-20250514");
+const model = getModel("github-copilot", "claude-sonnet-4.6");
 
 export interface AgentManagerConfig {
-	store: Store;
-	bb: BBClient;
+	blueBubblesClient: BBClient;
 }
 
+/** Per-chat mutable state wrapping an AgentSession. */
 interface ChatSession {
 	session: AgentSession;
+	/** True while a prompt is in-flight; subsequent messages go to `queue`. */
 	busy: boolean;
-	queue: Array<{ text: string; chatGuid: string }>;
+	/** Messages waiting to be processed after the current prompt finishes. */
+	queue: string[];
+	/** Accumulated assistant reply text for the current prompt cycle. Reset before each `runAgent`. */
+	replyText: string;
+	chatGuid: string;
+}
+
+/**
+ * Extract concatenated text from an assistant `message_end` event.
+ * Content blocks may include text, thinking, or tool_use — we only want text.
+ */
+function extractReplyText(event: AgentSessionEvent & { type: "message_end" }): string {
+	const message = event.message;
+	if (message.role !== "assistant") return "";
+	return message.content
+		.filter((part) => part.type === "text")
+		.map((part) => (part as { type: "text"; text: string }).text)
+		.join("\n");
 }
 
 export function createAgentManager(config: AgentManagerConfig) {
-	const { store, bb } = config;
+	const { blueBubblesClient } = config;
+	/** One ChatSession per chatGuid, kept alive for the process lifetime. */
 	const chatSessions = new Map<string, ChatSession>();
 
+	/**
+	 * Lazily create an AgentSession for a chat.
+	 * The event subscription is set up once here and never torn down —
+	 * `replyText` is reset at the start of each `runAgent` call instead.
+	 */
 	async function getOrCreateSession(chatGuid: string): Promise<ChatSession> {
-		let cs = chatSessions.get(chatGuid);
-		if (cs) return cs;
-
-		const sm = store.getSessionManager(chatGuid);
+		const existing = chatSessions.get(chatGuid);
+		if (existing) return existing;
 
 		const { session } = await createAgentSession({
 			model,
 			thinkingLevel: "low",
-			sessionManager: sm,
+			sessionManager: SessionManager.inMemory(),
 		});
 
-		cs = { session, busy: false, queue: [] };
-		chatSessions.set(chatGuid, cs);
-		return cs;
+		const chatSession: ChatSession = { session, busy: false, queue: [], replyText: "", chatGuid };
+
+		session.subscribe((event: AgentSessionEvent) => {
+			if (event.type === "message_end") {
+				chatSession.replyText += extractReplyText(event as AgentSessionEvent & { type: "message_end" });
+			}
+		});
+
+		chatSessions.set(chatGuid, chatSession);
+		return chatSession;
 	}
 
-	async function processMessage(chatGuid: string, text: string): Promise<void> {
-		const cs = await getOrCreateSession(chatGuid);
+	/** Send a single user message to the agent and relay the reply via BlueBubbles. */
+	async function runAgent(chatSession: ChatSession, text: string): Promise<void> {
+		chatSession.replyText = "";
 
-		if (cs.busy) {
-			cs.queue.push({ text, chatGuid });
+		try {
+			await chatSession.session.prompt(text);
+			const reply = chatSession.replyText.trim();
+			if (reply) {
+				await blueBubblesClient.sendMessage(chatSession.chatGuid, reply);
+			}
+		} catch (error) {
+			console.error(`[blue] Agent error for ${chatSession.chatGuid}:`, error);
+		}
+	}
+
+	/**
+	 * Entry point called by the webhook monitor.
+	 * Ensures serial execution per chat — if the agent is already processing,
+	 * the message is queued and will be handled once the current run finishes.
+	 */
+	async function processMessage(chatGuid: string, text: string): Promise<void> {
+		const chatSession = await getOrCreateSession(chatGuid);
+
+		if (chatSession.busy) {
+			chatSession.queue.push(text);
 			return;
 		}
 
-		cs.busy = true;
+		chatSession.busy = true;
 		try {
-			await runAgent(cs, chatGuid, text);
-
-			// Drain queue
-			while (cs.queue.length > 0) {
-				const next = cs.queue.shift();
-				if (!next) break;
-				await runAgent(cs, next.chatGuid, next.text);
+			await runAgent(chatSession, text);
+			while (chatSession.queue.length > 0) {
+				await runAgent(chatSession, chatSession.queue.shift()!);
 			}
 		} finally {
-			cs.busy = false;
-		}
-	}
-
-	async function runAgent(cs: ChatSession, chatGuid: string, text: string): Promise<void> {
-		// Collect assistant reply text from events
-		let replyText = "";
-
-		const unsub = cs.session.subscribe((event: AgentSessionEvent) => {
-			if (event.type === "message_end") {
-				const msg = event.message;
-				if (msg && "role" in msg && msg.role === "assistant" && "content" in msg) {
-					// Extract text from content blocks
-					const content = msg.content;
-					if (typeof content === "string") {
-						replyText += content;
-					} else if (Array.isArray(content)) {
-						for (const block of content) {
-							if (typeof block === "string") {
-								replyText += block;
-							} else if ("type" in block && block.type === "text" && "text" in block) {
-								replyText += (block as { type: "text"; text: string }).text;
-							}
-						}
-					}
-				}
-			}
-		});
-
-		try {
-			await cs.session.prompt(text);
-
-			if (replyText.trim()) {
-				await bb.sendMessage(chatGuid, replyText.trim());
-			}
-		} catch (err) {
-			console.error(`[blue] Agent error for ${chatGuid}:`, err);
-			await bb.sendMessage(chatGuid, "⚠️ Something went wrong. Please try again.");
-		} finally {
-			unsub();
+			chatSession.busy = false;
 		}
 	}
 

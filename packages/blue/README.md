@@ -71,6 +71,7 @@ Env vars: `BLUEBUBBLES_URL` / `BLUEBUBBLES_PASSWORD`
 
 TODO:
 - [ ] Handle message images
+- [ ] Process different chats (DMs / group messages) concurrently
 
 ## [WIP] Message History
 
