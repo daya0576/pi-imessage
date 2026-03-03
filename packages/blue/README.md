@@ -86,3 +86,9 @@ Key capabilities:
 ## [WIP] Skills
 
 ## [WIP] Events (Scheduled Wake-ups)
+
+
+# References:
+- https://github.com/badlogic/pi-mono/blob/c65de34e11f114b53a5210f96c9b8d9bcdc80ac1/packages/agent/src/agent-loop.ts#L116C39-L116C57
+- https://github.com/openclaw/openclaw/tree/main/extensions/bluebubbles/src
+
