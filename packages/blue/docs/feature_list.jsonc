@@ -1,0 +1,89 @@
+{
+  /*
+  Example:
+  ```
+  "feature1": [
+    {
+      "description": "sub-feature description",
+      "test_cases": [
+        // Main workflows
+        "<workflow1(refrence to test case)>",
+        ...
+        // Edge cases:
+        "<edgecase1>"
+        ...
+      ],
+      "passes": false
+    }
+  ```
+  */
+
+  // Messaging
+  "messaging": [
+    {
+      "description": "Receive incoming iMessage via BlueBubbles webhook (POST /webhook)",
+      "test_cases": [
+        // Main workflows
+        "webhook filtering > dispatches valid inbound messages",
+        // Edge cases
+        "webhook filtering > ignores self-sent messages (isFromMe=true)",
+        "webhook filtering > ignores messages without text",
+        "webhook filtering > ignores non new-message events"
+      ],
+      "passes": true
+    },
+    {
+      "description": "Forward inbound message to agent and send reply back via BlueBubbles client",
+      "test_cases": [
+        // Main workflows
+        "createIMessageBot > normal flow: dispatches message to agent and sends reply"
+      ],
+      "passes": true
+    },
+    {
+      "description": "Suppress bot reply echo in self-chat scenarios to avoid re-processing bot's own messages",
+      "test_cases": [
+        // Main workflows
+        "createIMessageBot > self-chat: bot reply echo is suppressed",
+        "createSelfEchoFilter > detects an echo of a remembered message in the same chat",
+        // Edge cases
+        "createSelfEchoFilter > returns false before any message is registered",
+        "createSelfEchoFilter > does not suppress echo from a different chat",
+        "createSelfEchoFilter > consumes the entry — identical human follow-up is not suppressed",
+        "createSelfEchoFilter > matching is case-insensitive and trims whitespace",
+        "createSelfEchoFilter > allows the same text after TTL expires",
+        "createSelfEchoFilter > does not expire entries before TTL",
+        "createSelfEchoFilter > handles multiple chats independently"
+      ],
+      "passes": true
+    },
+    {
+      "description": "Create BlueBubbles API client",
+      "test_cases": [
+        // Main workflows
+        "bb client > creates client with expected methods"
+      ],
+      "passes": true
+    }
+  ],
+
+  // Message History
+  "message_history": [
+  ],
+
+  // Sandbox
+  "sandbox": [
+  ],
+
+  // Memory
+  "memory": [
+  ],
+
+  // Skills
+  "skills": [
+  ],
+
+  // Events (Scheduled Wake-ups)
+  "events": [
+  ]
+}

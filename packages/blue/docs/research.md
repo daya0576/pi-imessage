@@ -1,8 +1,8 @@
-# pi-mono
+# Research Notes 
 
-https://github.com/badlogic/pi-mono
+## Dependencies
 
-## coding agent 
+### pi-mono coding-agent
 
 Agent runtime with tool calling and state management:
 
@@ -65,8 +65,13 @@ user sends prompt ────────────────────�
 user sends another prompt ◄────────────────────────────────┘
 ```
 
+reference:
+1. https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent
 
-## pi-mom
+
+## Applications
+
+### pi-mom
 
 Slack bot that delegates messages to the pi coding agent.
 
@@ -91,4 +96,15 @@ Key capabilities:
   └── D456DEF/                  # DM channels also get directories
       └── ...
 ```
+
+references:
+1. https://github.com/badlogic/pi-mono/tree/main/packages/mom
+
+
+### openclaw
+
+
+references:
+1. https://docs.openclaw.ai/channels/bluebubbles#bluebubbles
+2. https://github.com/openclaw/openclaw/tree/main/extensions/bluebubbles/src
 

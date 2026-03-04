@@ -3,7 +3,7 @@
 ## Knowledge Base
 
 - When working on tasks involving pi-mono internals, message handling, or architecture decisions,
-read `docs/pi-mono.md` before proceeding.
+read `docs/research.md` before proceeding.
 
 ## Code Quality
 

@@ -8,7 +8,7 @@ An minimal iMessage bot powered by an LLM that can execute bash commands, read/w
 
 ## [WIP] Messaging
 
-Key capabilities:
+### Key capabilities:
 - Direct messages / group chats
 - Mentions
 - Typing indicators
@@ -16,7 +16,7 @@ Key capabilities:
 - Send attachments
 - ...
 
-How it works:
+### How it works:
 ```
   BlueBubbles Server
         │
@@ -59,17 +59,8 @@ How it works:
   iMessage (user receives reply)
 ```
 
-Dependencies:
-```
-blue
- ├─ @mariozechner/pi-agent-core   (Agent loop, steering, tool execution)
- ├─ @mariozechner/pi-coding-agent (SessionManager for persistence)
- └─ @mariozechner/pi-ai           (getModel)
-```
-
-Env vars: `BLUEBUBBLES_URL` / `BLUEBUBBLES_PASSWORD` 
-
-TODO:
+### TODO:
+- [ ] Handle group messages
 - [ ] Handle message images
 - [ ] Process different chats (DMs / group messages) concurrently
 
