@@ -8,3 +8,7 @@ Inspired by [pi-mom](https://github.com/badlogic/pi-mono) (Slack bot), but for i
 
 pi-imessage listens to iMessage conversations and routes them to a pi agent, enabling AI-assisted responses directly in iMessage.
 
+## TODO:
+
+- name alternatives: 
+    - Cookie Monster from Sesame Street (blue puppet)

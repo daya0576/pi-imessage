@@ -58,10 +58,21 @@
       "passes": true
     },
     {
-      "description": "Create BlueBubbles API client",
+      "description": "Create BlueBubbles API client and send messages/reactions/typing indicators",
       "test_cases": [
         // Main workflows
-        "bb client > creates client with expected methods"
+        "bb client > sendMessage > POSTs to the correct endpoint with chatGuid and message",
+        "bb client > sendMessage > resolves without error on 200",
+        "bb client > sendTypingIndicator > POSTs to the correct chat typing endpoint",
+        "bb client > sendReaction > POSTs to /message/react with correct fields",
+        // Edge cases
+        "bb client > sendMessage > throws on non-ok HTTP response (4xx)",
+        "bb client > sendMessage > throws on non-ok HTTP response (5xx)",
+        "bb client > sendMessage > throws on request timeout",
+        "bb client > sendTypingIndicator > does not throw when the request fails",
+        "bb client > sendReaction > throws on non-ok response",
+        "bb client > response parsing > returns parsed JSON on success",
+        "bb client > response parsing > falls back to raw text when response is not valid JSON"
       ],
       "passes": true
     }
