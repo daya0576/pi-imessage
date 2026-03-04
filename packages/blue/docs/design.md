@@ -4,79 +4,47 @@
 
 An minimal iMessage bot powered by an LLM that can execute bash commands, read/write files, and interact with your development environment. Blue is self-managing. She installs her own tools, programs CLI tools (aka "skills") she can use to help with your workflows and tasks, configures credentials, and maintains her workspace autonomously.
 
+
 # Features
 
 ## [WIP] Messaging
 
-### Key capabilities:
-- Direct messages / group chats
-- Mentions
-- Typing indicators
-- Reactions
-- Send attachments
-- ...
+### Key capabilities
+- [x] Direct messages
+- [x] Group chats
+- [ ] Mentions
+- [ ] Typing indicators
+- [ ] Reactions
+- [ ] Send attachments
+-  ...
 
-### How it works:
-```
-  BlueBubbles Server
-        │
-  (webhook POST: new-message)
-        │
-        ▼
-┌──────────────────────────────────────────────────┐
-│             Blue Server (HTTP)                   │
-│                                                  │
-│  POST /webhook                                   │
-│    │                                             │
-│    ├─ Ignore isFromMe messages                   │
-│    │  (skip self-sent to avoid loop)             │
-│    │                                             │
-│    ▼                                             │
-│  SessionManager (pi-coding-agent)                │
-│    │  per chatGuid, persistent on disk           │
-│    │  └─ data/<chatGuid>/                        │
-│    │       ├─ log.jsonl      (full history)      │
-│    │       └─ context.jsonl  (LLM context)       │
-│    │                                             │
-│    ▼                                             │
-│  Agent loop (pi-agent-core)                      │
-│    │                                             │
-│    │  ┌─ outer: follow-up messages ────┐         │
-│    │  │  ┌─ inner: tool calls +      ┐ │         │
-│    │  │  │  steering messages        │ │         │
-│    │  │  └───────────────────────────┘ │         │
-│    │  └────────────────────────────────┘         │
-│    │                                             │
-│    ▼                                             │
-│  Collect assistant reply text                    │
-│    │                                             │
-│    ├─ sendMessage (BB REST API)                  │
-│    └─ save logs (messages, digests)              │
-│                                                  │
-└──────────────────────────────────────────────────┘
-        │
-        ▼
-  iMessage (user receives reply)
-```
+### Key Components
 
-### TODO:
-- [ ] Handle group messages
-- [ ] Handle message images
-- [ ] Process different chats (DMs / group messages) concurrently
+- BlueBubbles Server (HTTP)
+    - Webhook receiver for DM/GROUP messages
+    - Filter messages from self
+- IMessageBot - receives messages from BlueBubbles Server, forwards to SessionManager, sends replies
+    - Maintains session state (per chatGuid)
+- BlueBubbles Client (REST API):
+    - Send message
 
-## [WIP] Message History
+
+## [PLAN] Message History
 
 Key capabilities:
 - Store message history persistently
 - Review messages in web page
 
-## [WIP] Sandbox
 
-## [WIP] Memory
+## [PLAN] Events (Scheduled Wake-ups)
 
-## [WIP] Skills
 
-## [WIP] Events (Scheduled Wake-ups)
+## [PLAN] Sandbox
+
+## [PLAN] Memory
+
+## [PLAN] Skills
+
 
 
 # References:

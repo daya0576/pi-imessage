@@ -1,0 +1,52 @@
+{
+	"type": "new-message",
+	"data": {
+		"originalROWID": 100001,
+		"guid": "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+		"text": "Test message",
+		"attributedBody": null,
+		"handle": {
+			"originalROWID": 10001,
+			"address": "alice@example.com",
+			"service": "iMessage",
+			"uncanonicalizedId": null,
+			"country": "CN"
+		},
+		"handleId": 10001,
+		"otherHandle": 0,
+		"attachments": [],
+		"subject": null,
+		"error": 0,
+		"dateCreated": 1772632659922,
+		"dateRead": null,
+		"dateDelivered": null,
+		"isDelivered": true,
+		"isFromMe": false,
+		"hasDdResults": true,
+		"isArchived": false,
+		"itemType": 0,
+		"groupTitle": null,
+		"groupActionType": 0,
+		"balloonBundleId": null,
+		"associatedMessageGuid": null,
+		"associatedMessageType": null,
+		"expressiveSendStyleId": null,
+		"threadOriginatorGuid": null,
+		"hasPayloadData": false,
+		"chats": [
+			{
+				"originalROWID": 10002,
+				"guid": "iMessage;+;chatdeadbeefdeadbeefdeadbeefdeadbeef",
+				"style": 43,
+				"chatIdentifier": "chatdeadbeefdeadbeefdeadbeefdeadbeef",
+				"isArchived": false,
+				"displayName": "Test Group"
+			}
+		],
+		"messageSummaryInfo": null,
+		"payloadData": null,
+		"dateEdited": null,
+		"dateRetracted": null,
+		"partCount": 1
+	}
+}

@@ -14,13 +14,21 @@ export interface BBWebhookPayload {
 export interface BBMessage {
 	text: string | null;
 	isFromMe: boolean;
-	chats: Array<{ guid: string }>;
+	handle: { address: string } | null;
+	chats: Array<{ guid: string; displayName: string }>;
 }
 
 export interface MonitorConfig {
 	port: number;
-	/** Called for each valid inbound message. */
-	onMessage: (chatGuid: string, text: string) => void;
+	/**
+	 * Called for each valid inbound message.
+	 * @param chatGuid  - The BlueBubbles chat GUID.
+	 * @param text      - The message text.
+	 * @param sender    - The sender's handle address (e.g. "+1234567890" or "alice@example.com").
+	 * @param isGroup   - True if the message came from a group chat.
+	 * @param groupName - Display name of the group chat (empty string for DMs).
+	 */
+	onMessage: (chatGuid: string, text: string, sender: string, isGroup: boolean, groupName: string) => void;
 }
 
 export function createBBMonitor(config: MonitorConfig) {
@@ -61,12 +69,18 @@ export function createBBMonitor(config: MonitorConfig) {
 		if (message.isFromMe) return;
 		if (!message.text?.trim()) return;
 
-    console.debug(`[blue] webhook body: ${JSON.stringify(payload)}`);
+    console.info(`[blue] webhook body: ${JSON.stringify(payload)}`);
 
 		const chatGuid = message.chats?.[0]?.guid;
 		if (!chatGuid) return;
 
-		onMessage(chatGuid, message.text);
+		const sender = message.handle?.address ?? "unknown";
+		// Group chats have "+" as the second segment of the guid (e.g. "iMessage;+;chatXXX").
+		// Direct messages use "-" (e.g. "iMessage;-;+1234567890").
+		const isGroup = chatGuid.split(";")[1] === "+";
+		const groupName = message.chats?.[0]?.displayName ?? "";
+
+		onMessage(chatGuid, message.text, sender, isGroup, groupName);
 	}
 
 	return {

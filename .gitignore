@@ -8,6 +8,9 @@ dist/
 # Data directory (runtime, not committed)
 data/
 
+# Workspace runtime data (logs, session state)
+workspace/
+
 # Environment
 .env
 .env.local

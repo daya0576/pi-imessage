@@ -14,10 +14,14 @@ export interface IMessageBotConfig {
 	blueBubblesClient: BBClient;
 }
 
-/** An inbound message from a specific iMessage DM. */
+/** An inbound message from a specific iMessage chat (DM or group). */
 export interface IMessage {
 	chatGuid: string;
 	text: string;
+	sender: string;
+	isGroup: boolean;
+	/** Display name of the group chat. Empty string for DMs. */
+	groupName: string;
 }
 
 export function createIMessageBot(config: IMessageBotConfig) {
@@ -25,28 +29,35 @@ export function createIMessageBot(config: IMessageBotConfig) {
 	const echoFilter = createSelfEchoFilter();
 
 	async function handleMessage(msg: IMessage): Promise<void> {
-    // Drop agent self-echo messages to prevent infinite loops.
+		// Drop agent self-echo messages to prevent infinite loops.
 		if (echoFilter.isEcho(msg.chatGuid, msg.text)) {
 			console.warn(`[blue] drop self-echo ${msg.chatGuid}: ${msg.text.substring(0, 40)}`);
 			return;
 		}
 
-		console.log(`[blue] <- ${msg.chatGuid}: ${msg.text.substring(0, 80)}`);
+		const chatType = msg.isGroup ? "GROUP" : "DM";
+		const inLabel = msg.isGroup
+			? `[${chatType}] ${msg.groupName}|${msg.sender}`
+			: `[${chatType}] ${msg.sender}`;
+		console.log(`[blue] <- ${inLabel}: ${msg.text.substring(0, 80)}`);
 
-    // Call LLM model and agent loop to get a reply.
-		const reply = await agent.processMessage(msg.chatGuid, msg.text);
+		// In group chats, prepend the sender so the LLM knows who is speaking.
+		const agentText = msg.isGroup ? `[${msg.sender}] ${msg.text}` : msg.text;
+
+		// Call LLM model and agent loop to get a reply.
+		const reply = await agent.processMessage(msg.chatGuid, agentText);
 		if (!reply) return;
 
-    // Reply message
-		console.log(`[blue] -> ${msg.chatGuid}: ${reply.substring(0, 80)}`);
+		const outLabel = msg.isGroup ? `[${chatType}] ${msg.groupName}` : `[${chatType}] ${msg.sender}`;
+		console.log(`[blue] -> ${outLabel}: ${reply.substring(0, 80)}`);
 		echoFilter.remember(msg.chatGuid, reply);
 		await blueBubblesClient.sendMessage(msg.chatGuid, reply);
 	}
 
 	const monitor = createBBMonitor({
 		port,
-		onMessage(chatGuid, text) {
-			handleMessage({ chatGuid: chatGuid, text }).catch((error) => {
+		onMessage(chatGuid, text, sender, isGroup, groupName) {
+			handleMessage({ chatGuid, text, sender, isGroup, groupName }).catch((error) => {
 				console.error(`[blue] Failed to handle message for ${chatGuid}:`, error);
 			});
 		},
