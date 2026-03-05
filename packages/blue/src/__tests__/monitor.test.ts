@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BBRawMessage, BBWebhookPayload } from "../bluebubble/index.js";
-import { createBBMonitor } from "../bluebubble/index.js";
+import { createBBMonitor, createRawMessageQueue } from "../bluebubble/index.js";
 import { makePayload, makeGroupPayload, makeMonitor, pullRawAfterWebhook } from "./helpers.js";
 
 // ── webhook monitor filtering ─────────────────────────────────────────────────
@@ -12,9 +12,9 @@ describe("webhook filtering", () => {
 	});
 
 	it("ignores messages without text and without attachments", async () => {
-		const monitor = makeMonitor();
-		const raw1 = await pullRawAfterWebhook(monitor, makePayload({ text: null, attachments: [] }));
-		const raw2 = await pullRawAfterWebhook(monitor, makePayload({ text: "  ", attachments: [] }));
+		const monitorHandle = makeMonitor();
+		const raw1 = await pullRawAfterWebhook(monitorHandle, makePayload({ text: null, attachments: [] }));
+		const raw2 = await pullRawAfterWebhook(monitorHandle, makePayload({ text: "  ", attachments: [] }));
 		expect(raw1).toBeNull();
 		expect(raw2).toBeNull();
 	});

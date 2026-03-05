@@ -2,12 +2,14 @@
  * BlueBubbles webhook monitor — HTTP server that receives raw webhook events.
  *
  * The monitor performs only basic filtering (event type, isFromMe, empty
- * messages) and pushes validated BBRawMessage objects into an async queue.
- * Higher-level assembly (deriving message type, downloading attachments,
- * constructing the unified IncomingMessage) is the consumer's responsibility.
+ * messages) and pushes validated BBRawMessage objects into an externally
+ * managed queue. Higher-level assembly (deriving message type, downloading
+ * attachments, constructing the unified IncomingMessage) is the consumer's
+ * responsibility.
  */
 
 import { type IncomingMessage as HttpIncomingMessage, type ServerResponse, createServer } from "node:http";
+import type { RawMessageQueue } from "./queue.js";
 
 /** A file attachment from a BlueBubbles message. */
 export interface BBAttachment {
@@ -33,67 +35,15 @@ export interface BBRawMessage {
 	attachments: BBAttachment[];
 }
 
-// ── Async queue ───────────────────────────────────────────────────────────────
-
-/** Thrown by pull() when the queue has been closed. */
-export class QueueClosedError extends Error {
-	constructor() {
-		super("Queue closed");
-		this.name = "QueueClosedError";
-	}
-}
-
-/**
- * Simple unbounded async queue. push() never blocks; pull() returns a
- * promise that resolves when an item is available.
- *
- * close() rejects all pending waiters with QueueClosedError and causes
- * future pull() calls to reject immediately — enabling graceful shutdown
- * of consumer loops.
- */
-function createAsyncQueue<T>() {
-	const buffer: T[] = [];
-	const waiters: Array<{ resolve: (item: T) => void; reject: (err: Error) => void }> = [];
-	let closed = false;
-
-	function push(item: T): void {
-		if (closed) return;
-		const waiter = waiters.shift();
-		if (waiter) {
-			waiter.resolve(item);
-		} else {
-			buffer.push(item);
-		}
-	}
-
-	function pull(): Promise<T> {
-		if (closed) return Promise.reject(new QueueClosedError());
-		const item = buffer.shift();
-		if (item !== undefined) return Promise.resolve(item);
-		return new Promise<T>((resolve, reject) => waiters.push({ resolve, reject }));
-	}
-
-	function close(): void {
-		closed = true;
-		for (const waiter of waiters) {
-			waiter.reject(new QueueClosedError());
-		}
-		waiters.length = 0;
-		buffer.length = 0;
-	}
-
-	return { push, pull, close };
-}
-
 // ── Monitor ───────────────────────────────────────────────────────────────────
 
 export interface MonitorConfig {
 	port: number;
+	queue: RawMessageQueue;
 }
 
 export function createBBMonitor(config: MonitorConfig) {
-	const { port } = config;
-	const queue = createAsyncQueue<BBRawMessage>();
+	const { port, queue } = config;
 
 	const server = createServer(async (req: HttpIncomingMessage, res: ServerResponse) => {
 		if (req.method === "POST" && (req.url === "/webhook" || req.url === "/")) {
@@ -148,11 +98,8 @@ export function createBBMonitor(config: MonitorConfig) {
 			});
 		},
 		stop() {
-			queue.close();
 			server.close();
 		},
-		/** Pull the next raw message from the queue. Awaits until one is available. */
-		pull: queue.pull,
 		/** Exposed for testing — bypasses HTTP, pushes directly into the queue. */
 		handleWebhook,
 	};

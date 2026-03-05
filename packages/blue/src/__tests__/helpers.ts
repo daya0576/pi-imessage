@@ -4,7 +4,7 @@
 
 import { vi } from "vitest";
 import type { BBRawMessage, BBWebhookPayload } from "../bluebubble/index.js";
-import { createBBMonitor } from "../bluebubble/index.js";
+import { createBBMonitor, createRawMessageQueue } from "../bluebubble/index.js";
 import type { BBClient } from "../bluebubble/client.js";
 import newMessageFixture from "./fixtures/new-message.json" with { type: "json" };
 import newMessageGroupFixture from "./fixtures/new-message-group.json" with { type: "json" };
@@ -41,7 +41,9 @@ export function makeGroupPayload(overrides: Partial<BBWebhookPayload["data"]> = 
 // ── Monitor helpers ───────────────────────────────────────────────────────────
 
 export function makeMonitor() {
-	return createBBMonitor({ port: 0 });
+	const queue = createRawMessageQueue();
+	const monitor = createBBMonitor({ port: 0, queue });
+	return { monitor, queue };
 }
 
 /**
@@ -49,13 +51,13 @@ export function makeMonitor() {
  * Useful for testing that filtered messages never enter the queue.
  */
 export async function pullRawAfterWebhook(
-	monitor: ReturnType<typeof createBBMonitor>,
+	{ monitor, queue }: ReturnType<typeof makeMonitor>,
 	payload: BBWebhookPayload,
 	timeoutMs = 200,
 ): Promise<BBRawMessage | null> {
 	monitor.handleWebhook(payload);
 	return Promise.race([
-		monitor.pull(),
+		queue.pull(),
 		new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
 	]);
 }

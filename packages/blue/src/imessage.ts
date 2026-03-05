@@ -1,9 +1,13 @@
 /**
- * iMessage bot — pulls raw BlueBubbles messages from the monitor queue,
- * assembles them into unified IncomingMessage objects, and runs them
+ * iMessage bot — pulls raw BlueBubbles messages from an externally managed
+ * queue, assembles them into unified IncomingMessage objects, and runs them
  * through the message pipeline (before → start → end).
  *
- *   monitor.pull() → assembleMessage() → pipeline.process()
+ *   queue.pull() → assembleMessage() → pipeline.process()
+ *
+ * The queue is created and owned by the caller (main.ts), which also creates
+ * the monitor that pushes into it. This keeps imessage.ts fully decoupled
+ * from monitor.ts — neither imports the other.
  *
  * Pipeline tasks (registered in createIMessageBot):
  *   before : logIncoming, dropSelfEcho
@@ -14,13 +18,13 @@
  * promise chain so messages reach the agent in webhook-arrival order.
  */
 
-import type { ImageContent } from "@mariozechner/pi-ai";
 import type { AgentManager } from "./agent.js";
-import { QueueClosedError, createBBMonitor, createSelfEchoFilter } from "./bluebubble/index.js";
-import type { BBAttachment, BBClient, BBRawMessage } from "./bluebubble/index.js";
+import { QueueClosedError, createSelfEchoFilter } from "./bluebubble/index.js";
+import type { BBClient, BBRawMessage, RawMessageQueue } from "./bluebubble/index.js";
 import { createMessagePipeline } from "./pipeline.js";
 import {
 	createCallAgentTask,
+	createDownloadImagesTask,
 	createDropSelfEchoTask,
 	createLogIncomingTask,
 	createLogOutgoingTask,
@@ -43,55 +47,31 @@ function deriveMessageType(raw: BBRawMessage, chatGuid: string): MessageType {
 }
 
 /**
- * Download image attachments into memory and return as ImageContent[].
- * Non-image attachments are skipped with a warning. Failed image downloads
- * are logged and silently skipped.
- */
-async function downloadImages(attachments: BBAttachment[], bbClient: BBClient): Promise<ImageContent[]> {
-	const images: ImageContent[] = [];
-	for (const attachment of attachments) {
-		const mimeType = attachment.mimeType;
-		if (!mimeType?.startsWith("image/")) {
-			console.warn(`[blue] skipping non-image attachment ${attachment.guid} (mimeType: ${mimeType ?? "null"})`);
-			continue;
-		}
-		try {
-			const bytes = await bbClient.downloadAttachmentBytes(attachment.guid);
-			images.push({ type: "image", mimeType, data: bytes.toString("base64") });
-		} catch (error) {
-			console.error(`[blue] failed to download image attachment ${attachment.guid}:`, error);
-		}
-	}
-	return images;
-}
-
-/**
  * Assemble a raw BlueBubbles message into a unified IncomingMessage.
- * Downloads image attachments and derives messageType / sender / groupName.
+ * Raw attachments are carried through for the downloadImages pipeline task;
+ * images[] starts empty and is populated during the start phase.
  */
-export async function assembleMessage(raw: BBRawMessage, bbClient: BBClient): Promise<IncomingMessage> {
+export function assembleMessage(raw: BBRawMessage): IncomingMessage {
 	const chatGuid = raw.chats[0].guid;
 	const messageType = deriveMessageType(raw, chatGuid);
 	const text = raw.text?.trim() ?? null;
 	const sender = raw.handle?.address ?? "unknown";
 	const groupName = raw.chats[0].displayName ?? "";
 	const attachments = raw.attachments ?? [];
-	const images = attachments.length > 0 ? await downloadImages(attachments, bbClient) : [];
-	return { chatGuid, text, sender, messageType, groupName, images };
+	return { chatGuid, text, sender, messageType, groupName, attachments, images: [] };
 }
 
 // ── iMessage bot ──────────────────────────────────────────────────────────────
 
 export interface IMessageBotConfig {
-	port: number;
+	queue: RawMessageQueue;
 	agent: AgentManager;
 	blueBubblesClient: BBClient;
 }
 
 export function createIMessageBot(config: IMessageBotConfig) {
-	const { port, agent, blueBubblesClient } = config;
+	const { queue, agent, blueBubblesClient } = config;
 	const echoFilter = createSelfEchoFilter();
-	const monitor = createBBMonitor({ port });
 	const pipeline = createMessagePipeline();
 
 	// ── Pipeline tasks ─────────────────────────────────────────────────────────
@@ -101,6 +81,7 @@ export function createIMessageBot(config: IMessageBotConfig) {
 	pipeline.before(createDropSelfEchoTask(echoFilter));
 
 	// start
+	pipeline.start(createDownloadImagesTask(blueBubblesClient));
 	pipeline.start(createCallAgentTask(agent));
 
 	// end
@@ -119,10 +100,10 @@ export function createIMessageBot(config: IMessageBotConfig) {
 	async function consumeLoop(): Promise<void> {
 		try {
 			while (true) {
-				const raw = await monitor.pull();
+				const raw = await queue.pull();
 				processChain = processChain
 					.then(async () => {
-						const msg = await assembleMessage(raw, blueBubblesClient);
+						const msg = assembleMessage(raw);
 						await pipeline.process(msg);
 					})
 					.catch((error) => {
@@ -141,13 +122,12 @@ export function createIMessageBot(config: IMessageBotConfig) {
 
 	return {
 		start() {
-			monitor.start();
 			consumeLoop().catch((error) => {
 				console.error("[blue] Consumer loop error:", error);
 			});
 		},
 		stop() {
-			monitor.stop();
+			queue.close();
 		},
 	};
 }
