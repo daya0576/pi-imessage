@@ -32,6 +32,20 @@ export interface LoggedMessage {
 	groupName?: string;
 }
 
+// ── Display helpers ───────────────────────────────────────────────────────────
+
+/** Sender label for display: "bot" for bot messages, otherwise the raw sender handle. */
+export function senderLabel(message: LoggedMessage): string {
+	return message.isBot ? "bot" : message.sender;
+}
+
+/** Collapse multiline text to its first line with "..." appended. */
+export function firstLinePreview(text: string | null): string {
+	const full = text && text.trim() !== "" ? text : "[image]";
+	const firstLine = full.split("\n")[0] ?? "";
+	return full.includes("\n") ? firstLine + "..." : full;
+}
+
 // ── ChatStore ─────────────────────────────────────────────────────────────────
 
 export interface ChatStoreConfig {

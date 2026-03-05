@@ -8,7 +8,7 @@ import { createAgentManager } from "./agent.js";
 import { createBBClient, createBBMonitor, createRawMessageQueue } from "./bluebubble/index.js";
 import { createIMessageBot } from "./imessage.js";
 import { createChatStore } from "./store.js";
-import { createWebServer } from "./web.js";
+import { createWebServer } from "./web/index.js";
 
 function requireEnv(name: string): string {
 	const value = process.env[name];
