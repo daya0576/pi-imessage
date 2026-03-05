@@ -8,6 +8,7 @@
  *   dropSelfEcho     — drops messages that are echoes of the bot's own replies
  *
  * start:
+ *   downloadImages   — downloads image attachments and populates incoming.images
  *   callAgent        — sends the message to the agent and sets the reply
  *
  * end:
@@ -15,6 +16,7 @@
  *   logOutgoing      — logs the outgoing reply
  */
 
+import type { ImageContent } from "@mariozechner/pi-ai";
 import type { AgentManager } from "./agent.js";
 import type { BBClient } from "./bluebubble/index.js";
 import type { SelfEchoFilter } from "./bluebubble/index.js";
@@ -57,6 +59,32 @@ export function createDropSelfEchoTask(echoFilter: SelfEchoFilter): BeforeTask {
 }
 
 // ── start tasks ───────────────────────────────────────────────────────────────
+
+/**
+ * Download image attachments from incoming.attachments and populate
+ * incoming.images in-place. Non-image attachments are skipped with a warning;
+ * failed downloads are logged and silently skipped.
+ */
+export function createDownloadImagesTask(bbClient: BBClient): StartTask {
+	return async (incoming, outgoing) => {
+		const images: ImageContent[] = [];
+		for (const attachment of incoming.attachments) {
+			const mimeType = attachment.mimeType;
+			if (!mimeType?.startsWith("image/")) {
+				console.warn(`[blue] skipping non-image attachment ${attachment.guid} (mimeType: ${mimeType ?? "null"})`);
+				continue;
+			}
+			try {
+				const bytes = await bbClient.downloadAttachmentBytes(attachment.guid);
+				images.push({ type: "image", mimeType, data: bytes.toString("base64") });
+			} catch (error) {
+				console.error(`[blue] failed to download image attachment ${attachment.guid}:`, error);
+			}
+		}
+		incoming.images = images;
+		return outgoing;
+	};
+}
 
 /** Send the message to the agent and set the reply action on the outgoing context. */
 export function createCallAgentTask(agent: AgentManager): StartTask {

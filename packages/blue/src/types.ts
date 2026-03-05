@@ -3,6 +3,7 @@
  */
 
 import type { ImageContent } from "@mariozechner/pi-ai";
+import type { BBAttachment } from "./bluebubble/index.js";
 
 /**
  * Message type, derived from the BlueBubbles handle service and chatGuid:
@@ -27,7 +28,9 @@ export interface IncomingMessage {
 	sender: string;
 	messageType: MessageType;
 	groupName: string;
-	/** Image attachments, already downloaded and base64-encoded. */
+	/** Raw attachments from BlueBubbles — populated during assembly. */
+	attachments: BBAttachment[];
+	/** Image attachments, downloaded and base64-encoded by the downloadImages pipeline task. */
 	images: ImageContent[];
 }
 

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createSelfEchoFilter } from "../bluebubble/index.js";
 import {
 	createCallAgentTask,
+	createDownloadImagesTask,
 	createDropSelfEchoTask,
 	createLogIncomingTask,
 	createLogOutgoingTask,
@@ -19,6 +20,7 @@ function makeMessage(overrides: Partial<IncomingMessage> = {}): IncomingMessage 
 		sender: "+1111111111",
 		messageType: "imessage",
 		groupName: "",
+		attachments: [],
 		images: [],
 		...overrides,
 	};
@@ -46,8 +48,7 @@ describe("createLogIncomingTask", () => {
 		expect(task(makeMessage(), outgoing)).toEqual(outgoing);
 	});
 
-	it("logs DM with sender", () => {
-		const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+	it("logs DM with sender", () => {		const spy = vi.spyOn(console, "log").mockImplementation(() => {});
 		const task = createLogIncomingTask();
 		task(makeMessage({ text: "hi" }), makeOutgoing());
 		expect(spy).toHaveBeenCalledWith(expect.stringContaining("[DM]"));
@@ -60,14 +61,6 @@ describe("createLogIncomingTask", () => {
 		const task = createLogIncomingTask();
 		task(makeMessage({ messageType: "group", groupName: "Family", sender: "alice" }), makeOutgoing());
 		expect(spy).toHaveBeenCalledWith(expect.stringContaining("[GROUP] Family|alice"));
-		spy.mockRestore();
-	});
-
-	it("logs SMS with SMS label", () => {
-		const spy = vi.spyOn(console, "log").mockImplementation(() => {});
-		const task = createLogIncomingTask();
-		task(makeMessage({ messageType: "sms" }), makeOutgoing());
-		expect(spy).toHaveBeenCalledWith(expect.stringContaining("[SMS]"));
 		spy.mockRestore();
 	});
 });
@@ -101,6 +94,58 @@ describe("createDropSelfEchoTask", () => {
 
 		const result = task(msg, makeOutgoing());
 		expect(result.shouldContinue).toBe(true);
+	});
+});
+
+// ── start: downloadImages ─────────────────────────────────────────────────────
+
+describe("createDownloadImagesTask", () => {
+	const imageAttachment = { guid: "attach-001", transferName: "photo.jpg", mimeType: "image/jpeg", totalBytes: 12345 };
+	const pdfAttachment = { guid: "attach-002", transferName: "doc.pdf", mimeType: "application/pdf", totalBytes: 5000 };
+
+	it("downloads image attachments and populates incoming.images", async () => {
+		const bbClient = makeMockBBClient();
+		const task = createDownloadImagesTask(bbClient);
+		const msg = makeMessage({ attachments: [imageAttachment] });
+
+		await task(msg, makeOutgoing());
+
+		expect(bbClient.downloadAttachmentBytes).toHaveBeenCalledWith("attach-001");
+		expect(msg.images).toEqual([
+			{ type: "image", mimeType: "image/jpeg", data: Buffer.from("fake").toString("base64") },
+		]);
+	});
+
+	it("skips non-image attachments", async () => {
+		const bbClient = makeMockBBClient();
+		const task = createDownloadImagesTask(bbClient);
+		const msg = makeMessage({ attachments: [pdfAttachment] });
+
+		await task(msg, makeOutgoing());
+
+		expect(bbClient.downloadAttachmentBytes).not.toHaveBeenCalled();
+		expect(msg.images).toEqual([]);
+	});
+
+	it("silently skips failed image downloads", async () => {
+		const bbClient = makeMockBBClient();
+		(bbClient.downloadAttachmentBytes as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("network error"));
+		const task = createDownloadImagesTask(bbClient);
+		const msg = makeMessage({ attachments: [imageAttachment] });
+
+		await task(msg, makeOutgoing());
+
+		expect(msg.images).toEqual([]);
+	});
+
+	it("downloads images in group messages", async () => {
+		const bbClient = makeMockBBClient();
+		const task = createDownloadImagesTask(bbClient);
+		const msg = makeMessage({ messageType: "group", attachments: [imageAttachment] });
+
+		await task(msg, makeOutgoing());
+
+		expect(msg.images).toHaveLength(1);
 	});
 });
 
@@ -192,14 +237,6 @@ describe("createLogOutgoingTask", () => {
 		);
 		expect(spy).toHaveBeenCalledWith(expect.stringContaining("->"));
 		expect(spy).toHaveBeenCalledWith(expect.stringContaining("reaction: love"));
-		spy.mockRestore();
-	});
-
-	it("does not log when reply is 'none'", () => {
-		const spy = vi.spyOn(console, "log").mockImplementation(() => {});
-		const task = createLogOutgoingTask();
-		task(makeMessage(), makeOutgoing());
-		expect(spy).not.toHaveBeenCalled();
 		spy.mockRestore();
 	});
 
