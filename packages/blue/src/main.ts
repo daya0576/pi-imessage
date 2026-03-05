@@ -8,6 +8,7 @@ import { createAgentManager } from "./agent.js";
 import { createBBClient, createBBMonitor, createRawMessageQueue } from "./bluebubble/index.js";
 import { createIMessageBot } from "./imessage.js";
 import { createChatStore } from "./store.js";
+import { createWebServer } from "./web.js";
 
 function requireEnv(name: string): string {
 	const value = process.env[name];
@@ -22,6 +23,7 @@ async function main() {
 	const blueBubblesUrl = requireEnv("BLUEBUBBLES_URL");
 	const blueBubblesPassword = requireEnv("BLUEBUBBLES_PASSWORD");
 	const port = Number.parseInt(process.env.BLUE_PORT || "7749", 10);
+	const webPort = Number.parseInt(process.env.WEB_PORT || "7750", 10);
 	const workingDir = process.env.WORKING_DIR || join(process.cwd(), "data");
 
 	const blueBubblesClient = createBBClient({ url: blueBubblesUrl, password: blueBubblesPassword });
@@ -30,14 +32,17 @@ async function main() {
 	const queue = createRawMessageQueue();
 	const monitor = createBBMonitor({ port, queue });
 	const bot = createIMessageBot({ queue, agent, blueBubblesClient, store });
+	const web = createWebServer({ workingDir, port: webPort });
 
 	console.log(`[blue] Working directory: ${workingDir}`);
 	monitor.start();
 	bot.start();
+	web.start();
 
 	function shutdown() {
 		console.log("[blue] Shutting down…");
 		bot.stop();
+		web.stop();
 		monitor.stop();
 		process.exit(0);
 	}

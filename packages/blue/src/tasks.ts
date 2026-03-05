@@ -161,7 +161,7 @@ export function createStoreOutgoingTask(store: ChatStore): EndTask {
 	return (incoming, outgoing) => {
 		const { reply } = outgoing;
 		if (reply.type === "message") {
-			store.logOutgoing(incoming.chatGuid, reply.text).catch((error) => {
+			store.logOutgoing(incoming.chatGuid, reply.text, incoming.messageType, incoming.groupName).catch((error) => {
 				console.error(`[blue] failed to store outgoing message for ${incoming.chatGuid}:`, error);
 			});
 		}

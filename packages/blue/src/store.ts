@@ -14,7 +14,7 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { IncomingMessage } from "./types.js";
+import type { IncomingMessage, MessageType } from "./types.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -27,6 +27,9 @@ export interface LoggedMessage {
 	/** Local paths of attachments, relative to workingDir. */
 	attachments: string[];
 	isBot: boolean;
+	messageType: MessageType;
+	/** Group name, only present when messageType is "group". */
+	groupName?: string;
 }
 
 // ── ChatStore ─────────────────────────────────────────────────────────────────
@@ -37,7 +40,7 @@ export interface ChatStoreConfig {
 
 export interface ChatStore {
 	logIncoming(message: IncomingMessage): Promise<void>;
-	logOutgoing(chatGuid: string, text: string): Promise<void>;
+	logOutgoing(chatGuid: string, text: string, messageType: MessageType, groupName?: string): Promise<void>;
 }
 
 export function createChatStore(config: ChatStoreConfig): ChatStore {
@@ -74,16 +77,20 @@ export function createChatStore(config: ChatStoreConfig): ChatStore {
 				text: message.text,
 				attachments: attachmentPaths,
 				isBot: false,
+				messageType: message.messageType,
+				...(message.messageType === "group" && { groupName: message.groupName }),
 			});
 		},
 
-		async logOutgoing(chatGuid: string, text: string): Promise<void> {
+		async logOutgoing(chatGuid: string, text: string, messageType: MessageType, groupName?: string): Promise<void> {
 			await append(chatGuid, {
 				date: new Date().toISOString(),
 				sender: "bot",
 				text,
 				attachments: [],
 				isBot: true,
+				messageType,
+				...(messageType === "group" && { groupName }),
 			});
 		},
 	};
