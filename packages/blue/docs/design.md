@@ -12,20 +12,20 @@ An minimal iMessage bot powered by an LLM that can execute bash commands, read/w
 ### Key capabilities
 - [x] Direct messages
 - [x] Group chats
-- [ ] Mentions
+- [ ] Receive message type: image
 - [ ] Typing indicators
 - [ ] Reactions
-- [ ] Send attachments
 -  ...
 
 ### Key Components
 
 - BlueBubbles Server (HTTP)
-    - Webhook receiver for DM/GROUP messages
+    - Webhook receiver for incoming messages
     - Filter messages from self
-- IMessageBot - receives messages from BlueBubbles Server, forwards to SessionManager, sends replies
+- IMessageBot 
+    - Process DM/GROUP/SMS messages
     - Maintains session state (per chatGuid)
-- BlueBubbles Client (REST API):
+- BlueBubbles Client (REST API)
     - Send message
 
 

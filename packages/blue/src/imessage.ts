@@ -1,12 +1,86 @@
 /**
- * iMessage bot — wires BlueBubbles monitor → agent → BlueBubbles client.
+ * iMessage bot — pulls raw BlueBubbles messages from the monitor queue,
+ * assembles them into unified IncomingMessage objects, and runs them
+ * through the message pipeline (before → start → end).
  *
- *   BB webhook → filter → onMessage → agent.processMessage → BBClient.sendMessage
+ *   monitor.pull() → assembleMessage() → pipeline.process()
+ *
+ * Pipeline tasks (registered in createIMessageBot):
+ *   before : logIncoming, dropSelfEcho
+ *   start  : callAgent
+ *   end    : sendReply, logOutgoing
+ *
+ * Message ordering: assembly + pipeline execution is serialised through a
+ * promise chain so messages reach the agent in webhook-arrival order.
  */
 
+import type { ImageContent } from "@mariozechner/pi-ai";
 import type { AgentManager } from "./agent.js";
-import { createBBMonitor, createSelfEchoFilter } from "./bluebubble/index.js";
-import type { BBClient } from "./bluebubble/index.js";
+import { QueueClosedError, createBBMonitor, createSelfEchoFilter } from "./bluebubble/index.js";
+import type { BBAttachment, BBClient, BBRawMessage } from "./bluebubble/index.js";
+import { createMessagePipeline } from "./pipeline.js";
+import {
+	createCallAgentTask,
+	createDropSelfEchoTask,
+	createLogIncomingTask,
+	createLogOutgoingTask,
+	createSendReplyTask,
+} from "./tasks.js";
+import type { IncomingMessage, MessageType } from "./types.js";
+
+// ── Raw → unified assembly ────────────────────────────────────────────────────
+
+/**
+ * Derive the MessageType from the handle service and chatGuid structure:
+ *   SMS service        → "sms"
+ *   iMessage + ";-;"   → "imessage" (direct message)
+ *   iMessage + ";+;"   → "group"    (group chat)
+ */
+function deriveMessageType(raw: BBRawMessage, chatGuid: string): MessageType {
+	const service = raw.handle?.service ?? "iMessage";
+	if (service === "SMS") return "sms";
+	return chatGuid.split(";")[1] === "+" ? "group" : "imessage";
+}
+
+/**
+ * Download image attachments into memory and return as ImageContent[].
+ * Non-image attachments are skipped with a warning. Failed image downloads
+ * are logged and silently skipped.
+ */
+async function downloadImages(attachments: BBAttachment[], bbClient: BBClient): Promise<ImageContent[]> {
+	const images: ImageContent[] = [];
+	for (const attachment of attachments) {
+		const mimeType = attachment.mimeType;
+		if (!mimeType?.startsWith("image/")) {
+			console.warn(`[blue] skipping non-image attachment ${attachment.guid} (mimeType: ${mimeType ?? "null"})`);
+			continue;
+		}
+		try {
+			const bytes = await bbClient.downloadAttachmentBytes(attachment.guid);
+			images.push({ type: "image", mimeType, data: bytes.toString("base64") });
+		} catch (error) {
+			console.error(`[blue] failed to download image attachment ${attachment.guid}:`, error);
+		}
+	}
+	return images;
+}
+
+/**
+ * Assemble a raw BlueBubbles message into a unified IncomingMessage.
+ * Downloads image attachments and derives messageType / sender / groupName.
+ */
+export async function assembleMessage(raw: BBRawMessage, bbClient: BBClient): Promise<IncomingMessage> {
+	const chatGuid = raw.chats[0].guid;
+	const messageType = deriveMessageType(raw, chatGuid);
+	const text = raw.text?.trim() ?? null;
+	const sender = raw.handle?.address ?? "unknown";
+	const groupName = raw.chats[0].displayName ?? "";
+	const attachments = raw.attachments ?? [];
+	const images = attachments.length > 0 ? await downloadImages(attachments, bbClient) : [];
+	return { chatGuid, text, sender, messageType, groupName, images };
+}
+
+// ── iMessage bot ──────────────────────────────────────────────────────────────
 
 export interface IMessageBotConfig {
 	port: number;
@@ -14,57 +88,66 @@ export interface IMessageBotConfig {
 	blueBubblesClient: BBClient;
 }
 
-/** An inbound message from a specific iMessage chat (DM or group). */
-export interface IMessage {
-	chatGuid: string;
-	text: string;
-	sender: string;
-	isGroup: boolean;
-	/** Display name of the group chat. Empty string for DMs. */
-	groupName: string;
-}
-
 export function createIMessageBot(config: IMessageBotConfig) {
 	const { port, agent, blueBubblesClient } = config;
 	const echoFilter = createSelfEchoFilter();
+	const monitor = createBBMonitor({ port });
+	const pipeline = createMessagePipeline();
 
-	async function handleMessage(msg: IMessage): Promise<void> {
-		// Drop agent self-echo messages to prevent infinite loops.
-		if (echoFilter.isEcho(msg.chatGuid, msg.text)) {
-			console.warn(`[blue] drop self-echo ${msg.chatGuid}: ${msg.text.substring(0, 40)}`);
-			return;
+	// ── Pipeline tasks ─────────────────────────────────────────────────────────
+
+	// before
+	pipeline.before(createLogIncomingTask());
+	pipeline.before(createDropSelfEchoTask(echoFilter));
+
+	// start
+	pipeline.start(createCallAgentTask(agent));
+
+	// end
+	pipeline.end(createSendReplyTask(echoFilter, blueBubblesClient));
+	pipeline.end(createLogOutgoingTask());
+
+	// ── Consumer loop ──────────────────────────────────────────────────────────
+
+	/**
+	 * Serial promise chain that ensures messages are assembled and processed
+	 * in webhook-arrival order, even when some messages require slow attachment
+	 * downloads and others are plain text.
+	 */
+	let processChain: Promise<void> = Promise.resolve();
+
+	async function consumeLoop(): Promise<void> {
+		try {
+			while (true) {
+				const raw = await monitor.pull();
+				processChain = processChain
+					.then(async () => {
+						const msg = await assembleMessage(raw, blueBubblesClient);
+						await pipeline.process(msg);
+					})
+					.catch((error) => {
+						const sender = raw.handle?.address ?? "unknown";
+						console.error(`[blue] failed to process message from ${sender}:`, error);
+					});
+			}
+		} catch (error) {
+			if (error instanceof QueueClosedError) {
+				console.log("[blue] Consumer loop stopped (queue closed)");
+				return;
+			}
+			throw error;
 		}
-
-		const chatType = msg.isGroup ? "GROUP" : "DM";
-		const inLabel = msg.isGroup
-			? `[${chatType}] ${msg.groupName}|${msg.sender}`
-			: `[${chatType}] ${msg.sender}`;
-		console.log(`[blue] <- ${inLabel}: ${msg.text.substring(0, 80)}`);
-
-		// In group chats, prepend the sender so the LLM knows who is speaking.
-		const agentText = msg.isGroup ? `[${msg.sender}] ${msg.text}` : msg.text;
-
-		// Call LLM model and agent loop to get a reply.
-		const reply = await agent.processMessage(msg.chatGuid, agentText);
-		if (!reply) return;
-
-		const outLabel = msg.isGroup ? `[${chatType}] ${msg.groupName}` : `[${chatType}] ${msg.sender}`;
-		console.log(`[blue] -> ${outLabel}: ${reply.substring(0, 80)}`);
-		echoFilter.remember(msg.chatGuid, reply);
-		await blueBubblesClient.sendMessage(msg.chatGuid, reply);
 	}
 
-	const monitor = createBBMonitor({
-		port,
-		onMessage(chatGuid, text, sender, isGroup, groupName) {
-			handleMessage({ chatGuid, text, sender, isGroup, groupName }).catch((error) => {
-				console.error(`[blue] Failed to handle message for ${chatGuid}:`, error);
+	return {
+		start() {
+			monitor.start();
+			consumeLoop().catch((error) => {
+				console.error("[blue] Consumer loop error:", error);
 			});
 		},
-	});
-
-	return {
-		start: monitor.start.bind(monitor),
-		stop: monitor.stop.bind(monitor),
+		stop() {
+			monitor.stop();
+		},
 	};
 }

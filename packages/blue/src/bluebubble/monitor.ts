@@ -1,40 +1,101 @@
 /**
- * BlueBubbles webhook monitor — HTTP server that receives incoming messages.
+ * BlueBubbles webhook monitor — HTTP server that receives raw webhook events.
+ *
+ * The monitor performs only basic filtering (event type, isFromMe, empty
+ * messages) and pushes validated BBRawMessage objects into an async queue.
+ * Higher-level assembly (deriving message type, downloading attachments,
+ * constructing the unified IncomingMessage) is the consumer's responsibility.
  */
 
-import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
+import { type IncomingMessage as HttpIncomingMessage, type ServerResponse, createServer } from "node:http";
+
+/** A file attachment from a BlueBubbles message. */
+export interface BBAttachment {
+	guid: string;
+	/** Original filename (e.g. "image.jpg"). */
+	transferName: string;
+	mimeType: string | null;
+	totalBytes: number;
+}
 
 /** Incoming webhook payload from BlueBubbles (new-message event). */
 export interface BBWebhookPayload {
 	type: string;
-	data: BBMessage;
+	data: BBRawMessage;
 }
 
-/** A BlueBubbles message object (subset of fields we care about). */
-export interface BBMessage {
+/** Raw BlueBubbles message object (subset of fields we care about). */
+export interface BBRawMessage {
 	text: string | null;
 	isFromMe: boolean;
-	handle: { address: string } | null;
+	handle: { address: string; service: string } | null;
 	chats: Array<{ guid: string; displayName: string }>;
+	attachments: BBAttachment[];
 }
+
+// ── Async queue ───────────────────────────────────────────────────────────────
+
+/** Thrown by pull() when the queue has been closed. */
+export class QueueClosedError extends Error {
+	constructor() {
+		super("Queue closed");
+		this.name = "QueueClosedError";
+	}
+}
+
+/**
+ * Simple unbounded async queue. push() never blocks; pull() returns a
+ * promise that resolves when an item is available.
+ *
+ * close() rejects all pending waiters with QueueClosedError and causes
+ * future pull() calls to reject immediately — enabling graceful shutdown
+ * of consumer loops.
+ */
+function createAsyncQueue<T>() {
+	const buffer: T[] = [];
+	const waiters: Array<{ resolve: (item: T) => void; reject: (err: Error) => void }> = [];
+	let closed = false;
+
+	function push(item: T): void {
+		if (closed) return;
+		const waiter = waiters.shift();
+		if (waiter) {
+			waiter.resolve(item);
+		} else {
+			buffer.push(item);
+		}
+	}
+
+	function pull(): Promise<T> {
+		if (closed) return Promise.reject(new QueueClosedError());
+		const item = buffer.shift();
+		if (item !== undefined) return Promise.resolve(item);
+		return new Promise<T>((resolve, reject) => waiters.push({ resolve, reject }));
+	}
+
+	function close(): void {
+		closed = true;
+		for (const waiter of waiters) {
+			waiter.reject(new QueueClosedError());
+		}
+		waiters.length = 0;
+		buffer.length = 0;
+	}
+
+	return { push, pull, close };
+}
+
+// ── Monitor ───────────────────────────────────────────────────────────────────
 
 export interface MonitorConfig {
 	port: number;
-	/**
-	 * Called for each valid inbound message.
-	 * @param chatGuid  - The BlueBubbles chat GUID.
-	 * @param text      - The message text.
-	 * @param sender    - The sender's handle address (e.g. "+1234567890" or "alice@example.com").
-	 * @param isGroup   - True if the message came from a group chat.
-	 * @param groupName - Display name of the group chat (empty string for DMs).
-	 */
-	onMessage: (chatGuid: string, text: string, sender: string, isGroup: boolean, groupName: string) => void;
 }
 
 export function createBBMonitor(config: MonitorConfig) {
-	const { port, onMessage } = config;
+	const { port } = config;
+	const queue = createAsyncQueue<BBRawMessage>();
 
-	const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+	const server = createServer(async (req: HttpIncomingMessage, res: ServerResponse) => {
 		if (req.method === "POST" && (req.url === "/webhook" || req.url === "/")) {
 			try {
 				const payload: BBWebhookPayload = JSON.parse(await readBody(req));
@@ -62,25 +123,22 @@ export function createBBMonitor(config: MonitorConfig) {
 	function handleWebhook(payload: BBWebhookPayload): void {
 		if (payload.type !== "new-message") return;
 
-		const { data: message } = payload;
+		const { data: raw } = payload;
 
-		// BlueBubbles sets isFromMe=true for messages sent by this device (including
-		// bot replies). This is the single gate that prevents reply loops.
-		if (message.isFromMe) return;
-		if (!message.text?.trim()) return;
+		if (raw.isFromMe) return;
 
-    console.info(`[blue] webhook body: ${JSON.stringify(payload)}`);
+		const hasText = Boolean(raw.text?.trim());
+		const attachments = raw.attachments ?? [];
+		const hasAttachments = attachments.length > 0;
 
-		const chatGuid = message.chats?.[0]?.guid;
+		if (!hasText && !hasAttachments) return;
+
+		const chatGuid = raw.chats?.[0]?.guid;
 		if (!chatGuid) return;
 
-		const sender = message.handle?.address ?? "unknown";
-		// Group chats have "+" as the second segment of the guid (e.g. "iMessage;+;chatXXX").
-		// Direct messages use "-" (e.g. "iMessage;-;+1234567890").
-		const isGroup = chatGuid.split(";")[1] === "+";
-		const groupName = message.chats?.[0]?.displayName ?? "";
+		console.info(`[blue] webhook received: chatGuid=${chatGuid}, hasText=${hasText}, attachments=${attachments.length}`);
 
-		onMessage(chatGuid, message.text, sender, isGroup, groupName);
+		queue.push(raw);
 	}
 
 	return {
@@ -90,14 +148,17 @@ export function createBBMonitor(config: MonitorConfig) {
 			});
 		},
 		stop() {
+			queue.close();
 			server.close();
 		},
-		/** Exposed for testing */
+		/** Pull the next raw message from the queue. Awaits until one is available. */
+		pull: queue.pull,
+		/** Exposed for testing — bypasses HTTP, pushes directly into the queue. */
 		handleWebhook,
 	};
 }
 
-function readBody(req: IncomingMessage): Promise<string> {
+function readBody(req: HttpIncomingMessage): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const chunks: Buffer[] = [];
 		req.on("data", (chunk) => chunks.push(chunk));

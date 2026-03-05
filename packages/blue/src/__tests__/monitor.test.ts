@@ -1,91 +1,56 @@
-import { describe, expect, it, vi } from "vitest";
-import type { BBWebhookPayload } from "../bluebubble/index.js";
+import { describe, expect, it } from "vitest";
+import type { BBRawMessage, BBWebhookPayload } from "../bluebubble/index.js";
 import { createBBMonitor } from "../bluebubble/index.js";
-import newMessageFixture from "./fixtures/new-message.json" with { type: "json" };
-import newMessageGroupFixture from "./fixtures/new-message-group.json" with { type: "json" };
-
-// ── fixtures ──────────────────────────────────────────────────────────────────
-
-function makePayload(overrides: Partial<BBWebhookPayload["data"]> = {}): BBWebhookPayload {
-	return {
-		...newMessageFixture,
-		data: { ...newMessageFixture.data, ...overrides },
-	} as BBWebhookPayload;
-}
-
-function makeGroupPayload(overrides: Partial<BBWebhookPayload["data"]> = {}): BBWebhookPayload {
-	return {
-		...newMessageGroupFixture,
-		data: { ...newMessageGroupFixture.data, ...overrides },
-	} as BBWebhookPayload;
-}
+import { makePayload, makeGroupPayload, makeMonitor, pullRawAfterWebhook } from "./helpers.js";
 
 // ── webhook monitor filtering ─────────────────────────────────────────────────
 
 describe("webhook filtering", () => {
-	it("ignores self-sent messages (isFromMe=true)", () => {
-		const onMessage = vi.fn();
-		const monitor = createBBMonitor({ port: 0, onMessage });
-		monitor.handleWebhook(makePayload({ isFromMe: true }));
-		expect(onMessage).not.toHaveBeenCalled();
+	it("ignores self-sent messages (isFromMe=true)", async () => {
+		const raw = await pullRawAfterWebhook(makeMonitor(), makePayload({ isFromMe: true }));
+		expect(raw).toBeNull();
 	});
 
-	it("ignores messages without text", () => {
-		const onMessage = vi.fn();
-		const monitor = createBBMonitor({ port: 0, onMessage });
-		monitor.handleWebhook(makePayload({ text: null }));
-		monitor.handleWebhook(makePayload({ text: "  " }));
-		expect(onMessage).not.toHaveBeenCalled();
+	it("ignores messages without text and without attachments", async () => {
+		const monitor = makeMonitor();
+		const raw1 = await pullRawAfterWebhook(monitor, makePayload({ text: null, attachments: [] }));
+		const raw2 = await pullRawAfterWebhook(monitor, makePayload({ text: "  ", attachments: [] }));
+		expect(raw1).toBeNull();
+		expect(raw2).toBeNull();
 	});
 
-	it("ignores non new-message events", () => {
-		const onMessage = vi.fn();
-		const monitor = createBBMonitor({ port: 0, onMessage });
-		monitor.handleWebhook({ type: "updated-message", data: makePayload().data });
-		expect(onMessage).not.toHaveBeenCalled();
+	it("ignores non new-message events", async () => {
+		const raw = await pullRawAfterWebhook(makeMonitor(), { type: "updated-message", data: makePayload().data });
+		expect(raw).toBeNull();
 	});
 
-	it("dispatches valid inbound DM messages", () => {
-		const onMessage = vi.fn();
-		const monitor = createBBMonitor({ port: 0, onMessage });
-		monitor.handleWebhook(makePayload());
-		expect(onMessage).toHaveBeenCalledWith("any;-;+1234567890", "hello blue", "+1234567890", false, "");
-	});
-});
-
-// ── group chat ────────────────────────────────────────────────────────────────
-
-describe("group chat", () => {
-	it("dispatches group chat messages with isGroup=true and correct sender", () => {
-		const onMessage = vi.fn();
-		const monitor = createBBMonitor({ port: 0, onMessage });
-		monitor.handleWebhook(makeGroupPayload());
-		expect(onMessage).toHaveBeenCalledWith(
-			"iMessage;+;chatdeadbeefdeadbeefdeadbeefdeadbeef",
-			"Test message",
-			"alice@example.com",
-			true,
-			"Test Group",
-		);
+	it("queues valid inbound message as BBRawMessage", async () => {
+		const raw = await pullRawAfterWebhook(makeMonitor(), makePayload());
+		expect(raw).not.toBeNull();
+		expect(raw!.text).toBe("hello blue");
+		expect(raw!.handle?.address).toBe("+1234567890");
+		expect(raw!.chats[0].guid).toBe("any;-;+1234567890");
 	});
 
-	it("ignores self-sent group messages (isFromMe=true)", () => {
-		const onMessage = vi.fn();
-		const monitor = createBBMonitor({ port: 0, onMessage });
-		monitor.handleWebhook(makeGroupPayload({ isFromMe: true }));
-		expect(onMessage).not.toHaveBeenCalled();
+	it("queues group message as BBRawMessage", async () => {
+		const raw = await pullRawAfterWebhook(makeMonitor(), makeGroupPayload());
+		expect(raw).not.toBeNull();
+		expect(raw!.text).toBe("Test message");
+		expect(raw!.handle?.address).toBe("alice@example.com");
+		expect(raw!.chats[0].guid).toBe("iMessage;+;chatdeadbeefdeadbeefdeadbeefdeadbeef");
+		expect(raw!.chats[0].displayName).toBe("Test Group");
 	});
 
-	it("falls back to 'unknown' sender when handle is null", () => {
-		const onMessage = vi.fn();
-		const monitor = createBBMonitor({ port: 0, onMessage });
-		monitor.handleWebhook(makeGroupPayload({ handle: null }));
-		expect(onMessage).toHaveBeenCalledWith(
-			expect.any(String),
-			expect.any(String),
-			"unknown",
-			true,
-			"Test Group",
-		);
+	it("queues messages with only attachments (no text)", async () => {
+		const imageAttachment = { guid: "attach-001", transferName: "photo.jpg", mimeType: "image/jpeg", totalBytes: 12345 };
+		const raw = await pullRawAfterWebhook(makeMonitor(), makePayload({ text: null, attachments: [imageAttachment] }));
+		expect(raw).not.toBeNull();
+		expect(raw!.text).toBeNull();
+		expect(raw!.attachments).toHaveLength(1);
+	});
+
+	it("ignores messages without a chatGuid", async () => {
+		const raw = await pullRawAfterWebhook(makeMonitor(), makePayload({ chats: [] }));
+		expect(raw).toBeNull();
 	});
 });

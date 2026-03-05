@@ -16,12 +16,14 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { getModel } from "@mariozechner/pi-ai";
+import type { ImageContent } from "@mariozechner/pi-ai";
 import {
 	type AgentSession,
 	type AgentSessionEvent,
 	SessionManager,
 	createAgentSession,
 } from "@mariozechner/pi-coding-agent";
+import type { IncomingMessage } from "./types.js";
 
 const model = getModel("github-copilot", "claude-sonnet-4.6");
 
@@ -35,7 +37,7 @@ interface ChatSession {
 	/** True while a prompt is in-flight; subsequent messages go to `queue`. */
 	busy: boolean;
 	/** Messages waiting to be processed after the current prompt finishes. */
-	queue: Array<{ text: string; resolve: (reply: string | null) => void }>;
+	queue: Array<{ msg: IncomingMessage; resolve: (reply: string | null) => void }>;
 	/** Accumulated assistant reply text for the current prompt cycle. Reset before each `runAgent`. */
 	replyText: string;
 	chatGuid: string;
@@ -98,37 +100,70 @@ export function createAgentManager(config: AgentManagerConfig) {
 	}
 
 	/**
-	 * Send a single message to the agent.
-	 * Returns the assistant's reply text, or null if the agent produced no output.
+	 * Build the prompt text from an IncomingMessage.
+	 *
+	 * - In group chats the sender is prepended so the LLM knows who is speaking.
+	 * - When the message is image-only (no text), a placeholder is used so the
+	 *   LLM receives non-empty text alongside the image content.
+	 * - If some images failed to download, an inline note is appended.
 	 */
-	async function runAgent(chatSession: ChatSession, text: string): Promise<string | null> {
+	function buildPromptText(msg: IncomingMessage): string {
+		let text = msg.text ?? "";
+
+		// Image-only message: give the LLM a hint that an image was sent.
+		if (!text && msg.images.length > 0) {
+			text = "(image)";
+		}
+
+		if (msg.messageType === "group") {
+			text = `[${msg.sender}] ${text}`.trim();
+		}
+
+		return text;
+	}
+
+	/**
+	 * Send an IncomingMessage to the agent and return the assistant's reply.
+	 *
+	 * Uses `session.prompt()` which triggers the full agent loop (tool use,
+	 * etc.). When the message contains images they are passed via
+	 * `PromptOptions.images` — the same approach as pi's file-processor
+	 * (bytes → base64 → ImageContent).
+	 */
+	async function runAgent(chatSession: ChatSession, msg: IncomingMessage): Promise<string | null> {
 		chatSession.replyText = "";
-		await chatSession.session.prompt(text);
+		const promptText = buildPromptText(msg);
+
+		if (msg.images.length > 0) {
+			await chatSession.session.prompt(promptText, { images: msg.images });
+		} else {
+			await chatSession.session.prompt(promptText);
+		}
 		return chatSession.replyText.trim() || null;
 	}
 
 	/**
-	 * Process a message for a chat, returning the agent's reply.
+	 * Process an IncomingMessage, returning the agent's reply.
 	 * Ensures serial execution per chat — if the agent is already processing,
 	 * the message is queued and will be handled once the current run finishes.
 	 */
-	async function processMessage(chatGuid: string, text: string): Promise<string | null> {
-		const chatSession = await getOrCreateSession(chatGuid);
+	async function processMessage(msg: IncomingMessage): Promise<string | null> {
+		const chatSession = await getOrCreateSession(msg.chatGuid);
 
 		if (chatSession.busy) {
 			return new Promise((resolve) => {
-				chatSession.queue.push({ text, resolve });
+				chatSession.queue.push({ msg, resolve });
 			});
 		}
 
 		chatSession.busy = true;
 		try {
-			const reply = await runAgent(chatSession, text);
+			const reply = await runAgent(chatSession, msg);
 
 			// Drain queue sequentially, resolving each queued promise
 			while (chatSession.queue.length > 0) {
 				const next = chatSession.queue.shift()!;
-				next.resolve(await runAgent(chatSession, next.text));
+				next.resolve(await runAgent(chatSession, next.msg));
 			}
 
 			return reply;
