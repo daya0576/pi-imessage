@@ -133,13 +133,24 @@ export function createAgentManager(config: AgentManagerConfig) {
 	async function runAgent(chatSession: ChatSession, msg: IncomingMessage): Promise<string | null> {
 		chatSession.replyText = "";
 		const promptText = buildPromptText(msg);
+		const timeoutMs = 120_000;
 
-		if (msg.images.length > 0) {
-			await chatSession.session.prompt(promptText, { images: msg.images });
-		} else {
-			await chatSession.session.prompt(promptText);
-		}
-		return chatSession.replyText.trim() || null;
+		console.log(`[blue] agent prompt start: ${chatSession.chatGuid} "${promptText.substring(0, 60)}"`);
+
+		const promptPromise =
+			msg.images.length > 0
+				? chatSession.session.prompt(promptText, { images: msg.images })
+				: chatSession.session.prompt(promptText);
+
+		const timeoutPromise = new Promise<never>((_, reject) =>
+			setTimeout(() => reject(new Error(`agent prompt timed out after ${timeoutMs / 1000}s`)), timeoutMs)
+		);
+
+		await Promise.race([promptPromise, timeoutPromise]);
+
+		const reply = chatSession.replyText.trim() || null;
+		console.log(`[blue] agent prompt end: ${chatSession.chatGuid} reply="${(reply ?? "(null)").substring(0, 60)}"`);
+		return reply;
 	}
 
 	/**
