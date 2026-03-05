@@ -5,7 +5,7 @@
 import "dotenv/config";
 import { join } from "node:path";
 import { createAgentManager } from "./agent.js";
-import { createBBClient } from "./bluebubble/index.js";
+import { createBBClient, createBBMonitor, createRawMessageQueue } from "./bluebubble/index.js";
 import { createIMessageBot } from "./imessage.js";
 
 function requireEnv(name: string): string {
@@ -25,10 +25,23 @@ async function main() {
 
 	const blueBubblesClient = createBBClient({ url: blueBubblesUrl, password: blueBubblesPassword });
 	const agent = createAgentManager({ workingDir });
-	const bot = createIMessageBot({ port, agent, blueBubblesClient });
+	const queue = createRawMessageQueue();
+	const monitor = createBBMonitor({ port, queue });
+	const bot = createIMessageBot({ queue, agent, blueBubblesClient });
 
 	console.log(`[blue] Working directory: ${workingDir}`);
+	monitor.start();
 	bot.start();
+
+	function shutdown() {
+		console.log("[blue] Shutting down…");
+		bot.stop();
+		monitor.stop();
+		process.exit(0);
+	}
+
+	process.on("SIGINT", shutdown);
+	process.on("SIGTERM", shutdown);
 }
 
 main().catch((error) => {
