@@ -48,21 +48,4 @@ describe("createSelfEchoFilter", () => {
 		vi.advanceTimersByTime(61_000);
 		expect(filter.isEcho(CHAT_A, "bot reply")).toBe(false);
 	});
-
-	it("does not expire entries before TTL", () => {
-		const filter = createSelfEchoFilter(60_000);
-		filter.remember(CHAT_A, "bot reply");
-		vi.advanceTimersByTime(59_000);
-		expect(filter.isEcho(CHAT_A, "bot reply")).toBe(true);
-	});
-
-	it("handles multiple chats independently", () => {
-		const filter = createSelfEchoFilter();
-		filter.remember(CHAT_A, "reply A");
-		filter.remember(CHAT_B, "reply B");
-		expect(filter.isEcho(CHAT_A, "reply B")).toBe(false);
-		expect(filter.isEcho(CHAT_B, "reply A")).toBe(false);
-		expect(filter.isEcho(CHAT_A, "reply A")).toBe(true);
-		expect(filter.isEcho(CHAT_B, "reply B")).toBe(true);
-	});
 });

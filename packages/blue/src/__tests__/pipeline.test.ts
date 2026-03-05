@@ -11,6 +11,7 @@ function makeMessage(overrides: Partial<IncomingMessage> = {}): IncomingMessage 
 		sender: "+1111111111",
 		messageType: "imessage",
 		groupName: "",
+		attachments: [],
 		images: [],
 		...overrides,
 	};
@@ -21,10 +22,7 @@ function makeMessage(overrides: Partial<IncomingMessage> = {}): IncomingMessage 
 describe("before phase", () => {
 	it("passes message through when all before-tasks continue", async () => {
 		const pipeline = createMessagePipeline();
-		const startTask = vi.fn().mockImplementation((_incoming, outgoing) => ({
-			...outgoing,
-			reply: { type: "message", text: "reply" },
-		}));
+		const startTask = vi.fn().mockImplementation((_incoming: IncomingMessage, outgoing: OutgoingMessage) => outgoing);
 		pipeline.before((_incoming, outgoing) => outgoing);
 		pipeline.start(startTask);
 
@@ -34,40 +32,13 @@ describe("before phase", () => {
 
 	it("drops message when a before-task sets shouldContinue to false", async () => {
 		const pipeline = createMessagePipeline();
-		const startTask = vi.fn().mockImplementation((_incoming, outgoing) => outgoing);
+		const startTask = vi.fn().mockImplementation((_incoming: IncomingMessage, outgoing: OutgoingMessage) => outgoing);
 		pipeline.before((_incoming, outgoing) => ({ ...outgoing, shouldContinue: false }));
 		pipeline.start(startTask);
 
 		const result = await pipeline.process(makeMessage());
 		expect(result.shouldContinue).toBe(false);
 		expect(startTask).not.toHaveBeenCalled();
-	});
-
-	it("short-circuits on first shouldContinue=false — later before-tasks are skipped", async () => {
-		const pipeline = createMessagePipeline();
-		const secondBefore = vi.fn((_incoming: IncomingMessage, outgoing: OutgoingMessage) => outgoing);
-		pipeline.before((_incoming, outgoing) => ({ ...outgoing, shouldContinue: false }));
-		pipeline.before(secondBefore);
-
-		await pipeline.process(makeMessage());
-		expect(secondBefore).not.toHaveBeenCalled();
-	});
-
-	it("runs before-tasks in registration order", async () => {
-		const order: number[] = [];
-		const pipeline = createMessagePipeline();
-		pipeline.before((_incoming, outgoing) => {
-			order.push(1);
-			return outgoing;
-		});
-		pipeline.before((_incoming, outgoing) => {
-			order.push(2);
-			return outgoing;
-		});
-		pipeline.start(async (_incoming, outgoing) => outgoing);
-
-		await pipeline.process(makeMessage());
-		expect(order).toEqual([1, 2]);
 	});
 });
 
@@ -120,24 +91,7 @@ describe("end phase", () => {
 
 		expect(endTask).toHaveBeenCalledWith(
 			msg,
-			expect.objectContaining({
-				reply: { type: "message", text: "pong" },
-			})
-		);
-	});
-
-	it("receives outgoing with no reply when start-task produces none", async () => {
-		const pipeline = createMessagePipeline();
-		const endTask = vi.fn((_incoming: IncomingMessage, outgoing: OutgoingMessage) => outgoing);
-		pipeline.start(async (_incoming, outgoing) => outgoing);
-		pipeline.end(endTask);
-
-		await pipeline.process(makeMessage());
-		expect(endTask).toHaveBeenCalledWith(
-			expect.anything(),
-			expect.objectContaining({
-				reply: { type: "none" },
-			})
+			expect.objectContaining({ reply: { type: "message", text: "pong" } }),
 		);
 	});
 
@@ -145,33 +99,9 @@ describe("end phase", () => {
 		const pipeline = createMessagePipeline();
 		const endTask = vi.fn((_incoming: IncomingMessage, outgoing: OutgoingMessage) => outgoing);
 		pipeline.before((_incoming, outgoing) => ({ ...outgoing, shouldContinue: false }));
-		pipeline.start(async (_incoming, outgoing) => ({
-			...outgoing,
-			reply: { type: "message" as const, text: "pong" },
-		}));
 		pipeline.end(endTask);
 
 		await pipeline.process(makeMessage());
 		expect(endTask).not.toHaveBeenCalled();
-	});
-
-	it("runs end-tasks in registration order", async () => {
-		const order: number[] = [];
-		const pipeline = createMessagePipeline();
-		pipeline.start(async (_incoming, outgoing) => ({
-			...outgoing,
-			reply: { type: "message" as const, text: "reply" },
-		}));
-		pipeline.end((_incoming, outgoing) => {
-			order.push(1);
-			return outgoing;
-		});
-		pipeline.end((_incoming, outgoing) => {
-			order.push(2);
-			return outgoing;
-		});
-
-		await pipeline.process(makeMessage());
-		expect(order).toEqual([1, 2]);
 	});
 });

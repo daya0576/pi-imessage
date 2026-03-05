@@ -19,6 +19,7 @@ read `docs/research.md` before proceeding.
 - NEVER remove or downgrade code to fix type errors from outdated dependencies; upgrade the dependency instead
 - Always ask before removing functionality or code that appears to be intentional
 - **No meaningless abbreviations for variable names** (e.g., `bb`, `cs`, `sm`, `cb`). Use descriptive names that convey intent (e.g., `blueBubblesClient`, `chatSession`, `sessionManager`).
+- **When writing tests, keep cases minimal**: only test distinct behaviours; delete duplicate, symmetric, or "nothing happened" cases. Prefer fewer focused assertions over exhaustive coverage of trivial paths.
 
 ## Commands
 
