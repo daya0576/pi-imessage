@@ -82,8 +82,8 @@ export function createIMessageBot(config: IMessageBotConfig) {
 
 	// before
 	pipeline.before(createLogIncomingTask());
-	pipeline.before(createStoreIncomingTask(store));
 	pipeline.before(createDropSelfEchoTask(echoFilter));
+	pipeline.before(createStoreIncomingTask(store));
 
 	// start
 	pipeline.start(createDownloadImagesTask(blueBubblesClient));

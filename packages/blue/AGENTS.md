@@ -12,3 +12,4 @@ read `docs/pi-mono.md` before proceeding.
 ## Always
 
 - Always keep modules minimal
+- Always keep the web UI minimal: single font (`13px/1.6 monospace`), no per-element font overrides, minimal CSS, ASCII aesthetic — no rounded corners, no shadows, no gradients, no colors beyond opacity
