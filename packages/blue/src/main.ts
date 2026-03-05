@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { createAgentManager } from "./agent.js";
 import { createBBClient, createBBMonitor, createRawMessageQueue } from "./bluebubble/index.js";
 import { createIMessageBot } from "./imessage.js";
+import { createChatStore } from "./store.js";
 
 function requireEnv(name: string): string {
 	const value = process.env[name];
@@ -25,9 +26,10 @@ async function main() {
 
 	const blueBubblesClient = createBBClient({ url: blueBubblesUrl, password: blueBubblesPassword });
 	const agent = createAgentManager({ workingDir });
+	const store = createChatStore({ workingDir });
 	const queue = createRawMessageQueue();
 	const monitor = createBBMonitor({ port, queue });
-	const bot = createIMessageBot({ queue, agent, blueBubblesClient });
+	const bot = createIMessageBot({ queue, agent, blueBubblesClient, store });
 
 	console.log(`[blue] Working directory: ${workingDir}`);
 	monitor.start();

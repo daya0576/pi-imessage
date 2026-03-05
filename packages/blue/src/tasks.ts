@@ -21,6 +21,7 @@ import type { AgentManager } from "./agent.js";
 import type { BBClient } from "./bluebubble/index.js";
 import type { SelfEchoFilter } from "./bluebubble/index.js";
 import type { BeforeTask, EndTask, StartTask } from "./pipeline.js";
+import type { ChatStore } from "./store.js";
 import type { IncomingMessage, OutgoingMessage } from "./types.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -36,13 +37,30 @@ function formatTarget(msg: IncomingMessage): string {
 
 // ── before tasks ──────────────────────────────────────────────────────────────
 
-/** Log the incoming message with type-appropriate formatting. Always passes through. */
+/**
+ * Log the incoming message to console. Always passes through.
+ *
+ * Examples:
+ *   [blue] <- [DM]    +16501234567: hey what's up
+ *   [blue] <- [SMS]   +16501234567: can you call me
+ *   [blue] <- [GROUP] Family|+16501234567: dinner at 6? [2 attachment(s)]
+ */
 export function createLogIncomingTask(): BeforeTask {
 	return (incoming, outgoing) => {
 		const label = messageTypeLabel(incoming);
 		const target = formatTarget(incoming);
-		const attachmentNote = incoming.images.length > 0 ? ` [${incoming.images.length} image(s)]` : "";
-		console.log(`[blue] <- [${label}] ${target}: ${(incoming.text ?? "(image)").substring(0, 80)}${attachmentNote}`);
+		const attachmentNote = incoming.attachments.length > 0 ? ` [${incoming.attachments.length} attachment(s)]` : "";
+		console.log(`[blue] <- [${label}] ${target}: ${(incoming.text ?? "(attachment)").substring(0, 80)}${attachmentNote}`);
+		return outgoing;
+	};
+}
+
+/** Persist the incoming message to log.jsonl. Always passes through. */
+export function createStoreIncomingTask(store: ChatStore): BeforeTask {
+	return (incoming, outgoing) => {
+		store.logIncoming(incoming).catch((error) => {
+			console.error(`[blue] failed to store incoming message for ${incoming.chatGuid}:`, error);
+		});
 		return outgoing;
 	};
 }
@@ -113,7 +131,15 @@ export function createSendReplyTask(echoFilter: SelfEchoFilter, blueBubblesClien
 	};
 }
 
-/** Log the outgoing reply. */
+/**
+ * Log the outgoing reply to console.
+ *
+ * Examples:
+ *   [blue] -> [DM]    +16501234567: sure, I'll check
+ *   [blue] -> [SMS]   +16501234567: got it
+ *   [blue] -> [GROUP] Family: sounds good!
+ *   [blue] -> [DM]    +16501234567: (reaction: love)
+ */
 export function createLogOutgoingTask(): EndTask {
 	return (incoming, outgoing) => {
 		const { reply } = outgoing;
@@ -125,6 +151,19 @@ export function createLogOutgoingTask(): EndTask {
 			const label = messageTypeLabel(incoming);
 			const target = incoming.messageType === "group" ? incoming.groupName : incoming.sender;
 			console.log(`[blue] -> [${label}] ${target}: (reaction: ${reply.reaction})`);
+		}
+		return outgoing;
+	};
+}
+
+/** Persist the outgoing reply to log.jsonl. */
+export function createStoreOutgoingTask(store: ChatStore): EndTask {
+	return (incoming, outgoing) => {
+		const { reply } = outgoing;
+		if (reply.type === "message") {
+			store.logOutgoing(incoming.chatGuid, reply.text).catch((error) => {
+				console.error(`[blue] failed to store outgoing message for ${incoming.chatGuid}:`, error);
+			});
 		}
 		return outgoing;
 	};
