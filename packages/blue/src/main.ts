@@ -7,6 +7,8 @@ import { join } from "node:path";
 import { createAgentManager } from "./agent.js";
 import { createBBClient, createBBMonitor, createRawMessageQueue } from "./bluebubble/index.js";
 import { createIMessageBot } from "./imessage.js";
+import { readSettings, writeSettings } from "./settings.js";
+import type { Settings } from "./settings.js";
 import { createChatStore } from "./store.js";
 import { createWebServer } from "./web/index.js";
 
@@ -31,8 +33,16 @@ async function main() {
 	const store = createChatStore({ workingDir });
 	const queue = createRawMessageQueue();
 	const monitor = createBBMonitor({ port, queue });
-	const bot = createIMessageBot({ queue, agent, blueBubblesClient, store });
-	const web = createWebServer({ workingDir, port: webPort });
+
+	let settings = readSettings(workingDir);
+	const getSettings = (): Settings => settings;
+	const setSettings = (updated: Settings): void => {
+		settings = updated;
+		writeSettings(workingDir, updated);
+	};
+
+	const bot = createIMessageBot({ queue, agent, blueBubblesClient, store, getSettings });
+	const web = createWebServer({ workingDir, port: webPort, getSettings, setSettings });
 
 	console.log(`[blue] Working directory: ${workingDir}`);
 	monitor.start();

@@ -48,13 +48,16 @@ export type ReplyAction =
  *   reply          — the reply action to perform (text, reaction, or nothing).
  *   shouldContinue — if false, remaining tasks in the current phase and all
  *                    later phases are skipped.
+ *   sendReply      — if false, the reply is logged but not sent to the user
+ *                    (e.g. agent encountered an error).
  */
 export interface OutgoingMessage {
 	reply: ReplyAction;
 	shouldContinue: boolean;
+	sendReply: boolean;
 }
 
 /** Create a default OutgoingMessage (no reply, continue processing). */
 export function createOutgoingMessage(): OutgoingMessage {
-	return { reply: { type: "none" }, shouldContinue: true };
+	return { reply: { type: "none" }, shouldContinue: true, sendReply: true };
 }

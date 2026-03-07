@@ -10,7 +10,7 @@
  * from monitor.ts — neither imports the other.
  *
  * Pipeline tasks (registered in createIMessageBot):
- *   before : logIncoming, dropSelfEcho
+ *   before : logIncoming, dropSelfEcho, storeIncoming, checkReplyEnabled
  *   start  : callAgent
  *   end    : sendReply, logOutgoing
  *
@@ -22,9 +22,11 @@ import type { AgentManager } from "./agent.js";
 import { QueueClosedError, createSelfEchoFilter } from "./bluebubble/index.js";
 import type { BBClient, BBRawMessage, RawMessageQueue } from "./bluebubble/index.js";
 import { createMessagePipeline } from "./pipeline.js";
+import type { Settings } from "./settings.js";
 import type { ChatStore } from "./store.js";
 import {
 	createCallAgentTask,
+	createCheckReplyEnabledTask,
 	createDownloadImagesTask,
 	createDropSelfEchoTask,
 	createLogIncomingTask,
@@ -71,10 +73,11 @@ export interface IMessageBotConfig {
 	agent: AgentManager;
 	blueBubblesClient: BBClient;
 	store: ChatStore;
+	getSettings: () => Settings;
 }
 
 export function createIMessageBot(config: IMessageBotConfig) {
-	const { queue, agent, blueBubblesClient, store } = config;
+	const { queue, agent, blueBubblesClient, store, getSettings } = config;
 	const echoFilter = createSelfEchoFilter();
 	const pipeline = createMessagePipeline();
 
@@ -84,6 +87,7 @@ export function createIMessageBot(config: IMessageBotConfig) {
 	pipeline.before(createLogIncomingTask());
 	pipeline.before(createDropSelfEchoTask(echoFilter));
 	pipeline.before(createStoreIncomingTask(store));
+	pipeline.before(createCheckReplyEnabledTask(getSettings));
 
 	// start
 	pipeline.start(createDownloadImagesTask(blueBubblesClient));

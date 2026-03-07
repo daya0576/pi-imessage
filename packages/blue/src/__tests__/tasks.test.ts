@@ -153,7 +153,7 @@ describe("createDownloadImagesTask", () => {
 
 describe("createCallAgentTask", () => {
 	it("delegates to agent.processMessage and sets reply action", async () => {
-		const agent = { processMessage: vi.fn().mockResolvedValue("pong") };
+		const agent = { processMessage: vi.fn().mockResolvedValue({ reply: "pong", errorMessage: null }) };
 		const task = createCallAgentTask(agent);
 		const msg = makeMessage({ text: "ping" });
 
@@ -162,12 +162,24 @@ describe("createCallAgentTask", () => {
 		expect(agent.processMessage).toHaveBeenCalledWith(msg);
 	});
 
-	it("keeps reply as 'none' when agent returns null", async () => {
-		const agent = { processMessage: vi.fn().mockResolvedValue(null) };
+	it("keeps reply as 'none' when agent returns null reply", async () => {
+		const agent = { processMessage: vi.fn().mockResolvedValue({ reply: null, errorMessage: null }) };
 		const task = createCallAgentTask(agent);
 
 		const result = await task(makeMessage(), makeOutgoing());
 		expect(result.reply).toEqual({ type: "none" });
+	});
+
+	it("sets reply text and sendReply=false when agent returns errorMessage", async () => {
+		const agent = {
+			processMessage: vi.fn().mockResolvedValue({ reply: null, errorMessage: "API key missing" }),
+		};
+		const task = createCallAgentTask(agent);
+		const msg = makeMessage({ text: "hi" });
+
+		const result = await task(msg, makeOutgoing());
+		expect(result.reply).toEqual({ type: "message", text: "API key missing" });
+		expect(result.sendReply).toBe(false);
 	});
 });
 

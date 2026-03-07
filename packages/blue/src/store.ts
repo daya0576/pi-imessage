@@ -30,6 +30,8 @@ export interface LoggedMessage {
 	messageType: MessageType;
 	/** Group name, only present when messageType is "group". */
 	groupName?: string;
+	/** Set when the bot encountered an error and did not send a reply. */
+	isError?: boolean;
 }
 
 // ── Display helpers ───────────────────────────────────────────────────────────
@@ -54,7 +56,7 @@ export interface ChatStoreConfig {
 
 export interface ChatStore {
 	logIncoming(message: IncomingMessage): Promise<void>;
-	logOutgoing(chatGuid: string, text: string, messageType: MessageType, groupName?: string): Promise<void>;
+	logOutgoing(chatGuid: string, text: string, messageType: MessageType, groupName?: string, isError?: boolean): Promise<void>;
 }
 
 export function createChatStore(config: ChatStoreConfig): ChatStore {
@@ -96,13 +98,14 @@ export function createChatStore(config: ChatStoreConfig): ChatStore {
 			});
 		},
 
-		async logOutgoing(chatGuid: string, text: string, messageType: MessageType, groupName?: string): Promise<void> {
+		async logOutgoing(chatGuid: string, text: string, messageType: MessageType, groupName?: string, isError?: boolean): Promise<void> {
 			await append(chatGuid, {
 				date: new Date().toISOString(),
 				sender: "bot",
 				text,
 				attachments: [],
 				isBot: true,
+				isError: isError === true ? true : undefined,
 				messageType,
 				...(messageType === "group" && { groupName }),
 			});

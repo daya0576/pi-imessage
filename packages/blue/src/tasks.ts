@@ -6,6 +6,7 @@
  * before:
  *   logIncoming      — logs the received message
  *   dropSelfEcho     — drops messages that are echoes of the bot's own replies
+ *   checkReplyEnabled — drops messages when reply is disabled by settings
  *
  * start:
  *   downloadImages   — downloads image attachments and populates incoming.images
@@ -21,6 +22,8 @@ import type { AgentManager } from "./agent.js";
 import type { BBClient } from "./bluebubble/index.js";
 import type { SelfEchoFilter } from "./bluebubble/index.js";
 import type { BeforeTask, EndTask, StartTask } from "./pipeline.js";
+import type { Settings } from "./settings.js";
+import { isReplyEnabled } from "./settings.js";
 import type { ChatStore } from "./store.js";
 import type { IncomingMessage, OutgoingMessage } from "./types.js";
 
@@ -50,7 +53,9 @@ export function createLogIncomingTask(): BeforeTask {
 		const label = messageTypeLabel(incoming);
 		const target = formatTarget(incoming);
 		const attachmentNote = incoming.attachments.length > 0 ? ` [${incoming.attachments.length} attachment(s)]` : "";
-		console.log(`[blue] <- [${label}] ${target}: ${(incoming.text ?? "(attachment)").substring(0, 80)}${attachmentNote}`);
+		console.log(
+			`[blue] <- [${label}] ${target}: ${(incoming.text ?? "(attachment)").substring(0, 80)}${attachmentNote}`
+		);
 		return outgoing;
 	};
 }
@@ -70,6 +75,30 @@ export function createDropSelfEchoTask(echoFilter: SelfEchoFilter): BeforeTask {
 	return (incoming, outgoing) => {
 		if (incoming.text && echoFilter.isEcho(incoming.chatGuid, incoming.text)) {
 			console.warn(`[blue] drop self-echo ${incoming.chatGuid}: ${incoming.text.substring(0, 40)}`);
+			return { ...outgoing, shouldContinue: false };
+		}
+		return outgoing;
+	};
+}
+
+/**
+ * Drop messages when reply is disabled for this chat by settings.
+ *
+ * Resolution priority (highest to lowest):
+ *   blacklist["chatGuid"] > whitelist["chatGuid"] > blacklist["*"] > whitelist["*"]
+ *
+ * Examples:
+ *   whitelist: ["*"]              → reply to everyone
+ *   whitelist: ["1"]              → reply only to "1"
+ *   whitelist: ["*"], bl: ["2"]   → reply to everyone except "2"
+ *   blacklist: ["*"]              → log-only for all
+ *   whitelist: ["1"], bl: ["*"]   → reply only to "1"
+ *   whitelist: ["1"], bl: ["1"]   → no reply (blacklist wins)
+ */
+export function createCheckReplyEnabledTask(getSettings: () => Settings): BeforeTask {
+	return (incoming, outgoing) => {
+		if (!isReplyEnabled(getSettings(), incoming.chatGuid)) {
+			console.log(`[blue] reply disabled for ${incoming.chatGuid}, log-only`);
 			return { ...outgoing, shouldContinue: false };
 		}
 		return outgoing;
@@ -107,9 +136,9 @@ export function createDownloadImagesTask(bbClient: BBClient): StartTask {
 /** Send the message to the agent and set the reply action on the outgoing context. */
 export function createCallAgentTask(agent: AgentManager): StartTask {
 	return async (incoming, outgoing) => {
-		const replyText = await agent.processMessage(incoming);
-		if (replyText) {
-			return { ...outgoing, reply: { type: "message" as const, text: replyText } };
+		const result = await agent.processMessage(incoming);
+		if (result) {
+			return { ...outgoing, reply: { type: "message" as const, text: result } };
 		}
 		return outgoing;
 	};
@@ -120,7 +149,8 @@ export function createCallAgentTask(agent: AgentManager): StartTask {
 /** Remember echo and send reply via BlueBubbles based on the reply action. */
 export function createSendReplyTask(echoFilter: SelfEchoFilter, blueBubblesClient: BBClient): EndTask {
 	return async (incoming, outgoing) => {
-		const { reply } = outgoing;
+		const { reply, sendReply } = outgoing;
+		if (!sendReply) return outgoing;
 		if (reply.type === "message") {
 			echoFilter.remember(incoming.chatGuid, reply.text);
 			await blueBubblesClient.sendMessage(incoming.chatGuid, reply.text);
@@ -159,11 +189,13 @@ export function createLogOutgoingTask(): EndTask {
 /** Persist the outgoing reply to log.jsonl. */
 export function createStoreOutgoingTask(store: ChatStore): EndTask {
 	return (incoming, outgoing) => {
-		const { reply } = outgoing;
+		const { reply, sendReply } = outgoing;
 		if (reply.type === "message") {
-			store.logOutgoing(incoming.chatGuid, reply.text, incoming.messageType, incoming.groupName).catch((error) => {
-				console.error(`[blue] failed to store outgoing message for ${incoming.chatGuid}:`, error);
-			});
+			store
+				.logOutgoing(incoming.chatGuid, reply.text, incoming.messageType, incoming.groupName, !sendReply)
+				.catch((error) => {
+					console.error(`[blue] failed to store outgoing message for ${incoming.chatGuid}:`, error);
+				});
 		}
 		return outgoing;
 	};
