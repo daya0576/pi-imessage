@@ -9,7 +9,7 @@ import { firstLinePreview, senderLabel } from "../store.js";
 import type { ChatBlock } from "./data.js";
 import { anchorId, formatTime } from "./html.js";
 
-const MAX_MESSAGES = 30;
+const MAX_MESSAGES = 15;
 const TEN_MINUTES_MS = 10 * 60 * 1000;
 
 const templateDir = join(dirname(fileURLToPath(import.meta.url)), "templates");

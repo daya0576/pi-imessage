@@ -3,23 +3,19 @@
  * queue, assembles them into unified IncomingMessage objects, and runs them
  * through the message pipeline (before → start → end).
  *
- *   queue.pull() → assembleMessage() → pipeline.process()
+ *   queue.subscribe() → assembleMessage() → pipeline.process()
  *
  * The queue is created and owned by the caller (main.ts), which also creates
  * the monitor that pushes into it. This keeps imessage.ts fully decoupled
  * from monitor.ts — neither imports the other.
- *
- * Pipeline tasks (registered in createIMessageBot):
- *   before : logIncoming, dropSelfEcho, storeIncoming, checkReplyEnabled
- *   start  : callAgent
- *   end    : sendReply, logOutgoing
  *
  * Message ordering: assembly + pipeline execution is serialised through a
  * promise chain so messages reach the agent in webhook-arrival order.
  */
 
 import type { AgentManager } from "./agent.js";
-import { QueueClosedError, createSelfEchoFilter } from "./bluebubble/index.js";
+import { createSelfEchoFilter } from "./bluebubble/index.js";
+import { QueueClosedError } from "./bluebubble/index.js";
 import type { BBClient, BBRawMessage, RawMessageQueue } from "./bluebubble/index.js";
 import { createMessagePipeline } from "./pipeline.js";
 import type { Settings } from "./settings.js";
@@ -66,6 +62,20 @@ export function assembleMessage(raw: BBRawMessage): IncomingMessage {
 	return { chatGuid, text, sender, messageType, groupName, attachments, images: [] };
 }
 
+// ── Per-guid serial queue ─────────────────────────────────────────────────────
+
+/** Queues async tasks and runs them one at a time in submission order. */
+function createSerialQueue() {
+	let tail = Promise.resolve();
+	return function enqueue<T>(fn: () => Promise<T>): Promise<T> {
+		const result = tail.then(fn);
+		tail = result.then(() => {}, () => {}); // swallow errors so the queue always advances
+		return result;
+	};
+}
+
+type SerialQueue = ReturnType<typeof createSerialQueue>;
+
 // ── iMessage bot ──────────────────────────────────────────────────────────────
 
 export interface IMessageBotConfig {
@@ -82,15 +92,19 @@ export function createIMessageBot(config: IMessageBotConfig) {
 	const pipeline = createMessagePipeline();
 
 	// ── Pipeline tasks ─────────────────────────────────────────────────────────
+	//
+	//   before -> start ──┬── yield reply -> end 
+	//                     ├── yield reply -> end
+	//                     └── ...done
 
 	// before
 	pipeline.before(createLogIncomingTask());
 	pipeline.before(createDropSelfEchoTask(echoFilter));
 	pipeline.before(createStoreIncomingTask(store));
 	pipeline.before(createCheckReplyEnabledTask(getSettings));
+	pipeline.before(createDownloadImagesTask(blueBubblesClient));
 
 	// start
-	pipeline.start(createDownloadImagesTask(blueBubblesClient));
 	pipeline.start(createCallAgentTask(agent));
 
 	// end
@@ -98,42 +112,44 @@ export function createIMessageBot(config: IMessageBotConfig) {
 	pipeline.end(createLogOutgoingTask());
 	pipeline.end(createStoreOutgoingTask(store));
 
-	// ── Consumer loop ──────────────────────────────────────────────────────────
+	return {
+		start() {
+			const guidQueues = new Map<string, SerialQueue>();
 
-	/**
-	 * Serial promise chain that ensures messages are assembled and processed
-	 * in webhook-arrival order, even when some messages require slow attachment
-	 * downloads and others are plain text.
-	 */
-	let processChain: Promise<void> = Promise.resolve();
+			function getOrCreateGuidQueue(chatGuid: string): SerialQueue {
+				let guidQueue = guidQueues.get(chatGuid);
+				if (!guidQueue) {
+					guidQueue = createSerialQueue();
+					guidQueues.set(chatGuid, guidQueue);
+				}
+				return guidQueue;
+			}
 
-	async function consumeLoop(): Promise<void> {
-		try {
-			while (true) {
-				const raw = await queue.pull();
-				processChain = processChain
-					.then(async () => {
-						const msg = assembleMessage(raw);
-						await pipeline.process(msg);
-					})
-					.catch((error) => {
+			async function loop(): Promise<void> {
+				while (true) {
+					const raw = await queue.pull();
+					const msg = assembleMessage(raw);
+					const guidQueue = getOrCreateGuidQueue(msg.chatGuid);
+
+					// Enqueue: same guid runs serially, different guids run concurrently.
+					//
+					//   pull msg(guid=A) → enqueue to A's queue  (A starts immediately)
+					//   pull msg(guid=B) → enqueue to B's queue  (B starts immediately, A still running)
+					//   pull msg(guid=A) → enqueue to A's queue  (waits for previous A to finish)
+					//
+					guidQueue(() => pipeline.process(msg)).catch((error: unknown) => {
 						const sender = raw.handle?.address ?? "unknown";
 						console.error(`[blue] failed to process message from ${sender}:`, error);
 					});
+				}
 			}
-		} catch (error) {
-			if (error instanceof QueueClosedError) {
-				console.log("[blue] Consumer loop stopped (queue closed)");
-				return;
-			}
-			throw error;
-		}
-	}
 
-	return {
-		start() {
-			consumeLoop().catch((error) => {
-				console.error("[blue] Consumer loop error:", error);
+			loop().catch((error: unknown) => {
+				if (error instanceof QueueClosedError) {
+					console.log("[blue] Message queue closed, consumer stopped");
+				} else {
+					console.error("[blue] Message consumer crashed:", error);
+				}
 			});
 		},
 		stop() {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { assembleMessage } from "../imessage.js";
-import { makePayload, makeGroupPayload } from "./helpers.js";
+import { makeGroupPayload, makePayload } from "./helpers.js";
 
 // ── message assembly ──────────────────────────────────────────────────────────
 

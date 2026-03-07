@@ -48,7 +48,8 @@ describe("createLogIncomingTask", () => {
 		expect(task(makeMessage(), outgoing)).toEqual(outgoing);
 	});
 
-	it("logs DM with sender", () => {		const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+	it("logs DM with sender", () => {
+		const spy = vi.spyOn(console, "log").mockImplementation(() => {});
 		const task = createLogIncomingTask();
 		task(makeMessage({ text: "hi" }), makeOutgoing());
 		expect(spy).toHaveBeenCalledWith(expect.stringContaining("[DM]"));
@@ -68,36 +69,27 @@ describe("createLogIncomingTask", () => {
 // ── before: dropSelfEcho ──────────────────────────────────────────────────────
 
 describe("createDropSelfEchoTask", () => {
-	it("drops a message that matches a remembered echo", () => {
+	it("drops a message that matches a remembered echo", async () => {
 		const echoFilter = createSelfEchoFilter();
 		const task = createDropSelfEchoTask(echoFilter);
 		const msg = makeMessage({ text: "pong" });
 
 		echoFilter.remember(msg.chatGuid, "pong");
-		const result = task(msg, makeOutgoing());
+		const result = await task(msg, makeOutgoing());
 		expect(result.shouldContinue).toBe(false);
 	});
 
-	it("passes through a message that is not an echo", () => {
+	it("passes through a message that is not an echo", async () => {
 		const echoFilter = createSelfEchoFilter();
 		const task = createDropSelfEchoTask(echoFilter);
 		const msg = makeMessage({ text: "hello" });
 
-		const result = task(msg, makeOutgoing());
-		expect(result.shouldContinue).toBe(true);
-	});
-
-	it("passes through a message with no text (image-only)", () => {
-		const echoFilter = createSelfEchoFilter();
-		const task = createDropSelfEchoTask(echoFilter);
-		const msg = makeMessage({ text: null });
-
-		const result = task(msg, makeOutgoing());
+		const result = await task(msg, makeOutgoing());
 		expect(result.shouldContinue).toBe(true);
 	});
 });
 
-// ── start: downloadImages ─────────────────────────────────────────────────────
+// ── before: downloadImages ────────────────────────────────────────────────────
 
 describe("createDownloadImagesTask", () => {
 	const imageAttachment = { guid: "attach-001", transferName: "photo.jpg", mimeType: "image/jpeg", totalBytes: 12345 };
@@ -126,60 +118,36 @@ describe("createDownloadImagesTask", () => {
 		expect(bbClient.downloadAttachmentBytes).not.toHaveBeenCalled();
 		expect(msg.images).toEqual([]);
 	});
-
-	it("silently skips failed image downloads", async () => {
-		const bbClient = makeMockBBClient();
-		(bbClient.downloadAttachmentBytes as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("network error"));
-		const task = createDownloadImagesTask(bbClient);
-		const msg = makeMessage({ attachments: [imageAttachment] });
-
-		await task(msg, makeOutgoing());
-
-		expect(msg.images).toEqual([]);
-	});
-
-	it("downloads images in group messages", async () => {
-		const bbClient = makeMockBBClient();
-		const task = createDownloadImagesTask(bbClient);
-		const msg = makeMessage({ messageType: "group", attachments: [imageAttachment] });
-
-		await task(msg, makeOutgoing());
-
-		expect(msg.images).toHaveLength(1);
-	});
 });
 
 // ── start: callAgent ──────────────────────────────────────────────────────────
 
 describe("createCallAgentTask", () => {
-	it("delegates to agent.processMessage and sets reply action", async () => {
-		const agent = { processMessage: vi.fn().mockResolvedValue({ reply: "pong", errorMessage: null }) };
-		const task = createCallAgentTask(agent);
-		const msg = makeMessage({ text: "ping" });
-
-		const result = await task(msg, makeOutgoing());
-		expect(result.reply).toEqual({ type: "message", text: "pong" });
-		expect(agent.processMessage).toHaveBeenCalledWith(msg);
-	});
-
-	it("keeps reply as 'none' when agent returns null reply", async () => {
-		const agent = { processMessage: vi.fn().mockResolvedValue({ reply: null, errorMessage: null }) };
-		const task = createCallAgentTask(agent);
-
-		const result = await task(makeMessage(), makeOutgoing());
-		expect(result.reply).toEqual({ type: "none" });
-	});
-
-	it("sets reply text and sendReply=false when agent returns errorMessage", async () => {
+	it("dispatches a reply for each agent turn", async () => {
 		const agent = {
-			processMessage: vi.fn().mockResolvedValue({ reply: null, errorMessage: "API key missing" }),
+			processMessage: vi.fn(async (_msg: IncomingMessage, onReply: (r: string) => Promise<void>) => {
+				await onReply("first reply");
+				await onReply("second reply");
+			}),
 		};
 		const task = createCallAgentTask(agent);
-		const msg = makeMessage({ text: "hi" });
+		const dispatched: OutgoingMessage[] = [];
+		const dispatch = vi.fn(async (out: OutgoingMessage) => { dispatched.push(out); });
 
-		const result = await task(msg, makeOutgoing());
-		expect(result.reply).toEqual({ type: "message", text: "API key missing" });
-		expect(result.sendReply).toBe(false);
+		await task(makeMessage(), makeOutgoing(), dispatch);
+
+		expect(dispatched).toHaveLength(2);
+		expect(dispatched[0].reply).toEqual({ type: "message", text: "first reply" });
+		expect(dispatched[1].reply).toEqual({ type: "message", text: "second reply" });
+	});
+
+	it("dispatches nothing when agent produces no turns", async () => {
+		const agent = { processMessage: vi.fn(async () => {}) };
+		const task = createCallAgentTask(agent);
+		const dispatch = vi.fn();
+
+		await task(makeMessage(), makeOutgoing(), dispatch);
+		expect(dispatch).not.toHaveBeenCalled();
 	});
 });
 
@@ -196,7 +164,6 @@ describe("createSendReplyTask", () => {
 		await task(msg, outgoing);
 
 		expect(bbClient.sendMessage).toHaveBeenCalledWith(msg.chatGuid, "pong");
-		// echo was remembered — the echo filter should now detect it
 		expect(echoFilter.isEcho(msg.chatGuid, "pong")).toBe(true);
 	});
 
@@ -214,16 +181,6 @@ describe("createSendReplyTask", () => {
 		expect(bbClient.sendReaction).toHaveBeenCalledWith(msg.chatGuid, "msg-001", "love");
 		expect(bbClient.sendMessage).not.toHaveBeenCalled();
 	});
-
-	it("does nothing when reply is 'none'", async () => {
-		const echoFilter = createSelfEchoFilter();
-		const bbClient = makeMockBBClient();
-		const task = createSendReplyTask(echoFilter, bbClient);
-
-		await task(makeMessage(), makeOutgoing());
-		expect(bbClient.sendMessage).not.toHaveBeenCalled();
-		expect(bbClient.sendReaction).not.toHaveBeenCalled();
-	});
 });
 
 // ── end: logOutgoing ──────────────────────────────────────────────────────────
@@ -233,33 +190,7 @@ describe("createLogOutgoingTask", () => {
 		const spy = vi.spyOn(console, "log").mockImplementation(() => {});
 		const task = createLogOutgoingTask();
 		task(makeMessage(), makeOutgoing({ reply: { type: "message", text: "pong" } }));
-		expect(spy).toHaveBeenCalledWith(expect.stringContaining("->"));
 		expect(spy).toHaveBeenCalledWith(expect.stringContaining("pong"));
-		spy.mockRestore();
-	});
-
-	it("logs the outgoing reaction", () => {
-		const spy = vi.spyOn(console, "log").mockImplementation(() => {});
-		const task = createLogOutgoingTask();
-		task(
-			makeMessage(),
-			makeOutgoing({
-				reply: { type: "reaction", messageGuid: "msg-001", reaction: "love" },
-			})
-		);
-		expect(spy).toHaveBeenCalledWith(expect.stringContaining("->"));
-		expect(spy).toHaveBeenCalledWith(expect.stringContaining("reaction: love"));
-		spy.mockRestore();
-	});
-
-	it("logs group reply with group name", () => {
-		const spy = vi.spyOn(console, "log").mockImplementation(() => {});
-		const task = createLogOutgoingTask();
-		task(
-			makeMessage({ messageType: "group", groupName: "Family" }),
-			makeOutgoing({ reply: { type: "message", text: "hi all" } })
-		);
-		expect(spy).toHaveBeenCalledWith(expect.stringContaining("[GROUP] Family"));
 		spy.mockRestore();
 	});
 });

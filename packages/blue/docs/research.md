@@ -104,7 +104,7 @@ references:
 ### openclaw
 
 
-references:
+## references:
 1. https://docs.openclaw.ai/channels/bluebubbles#bluebubbles
 2. https://github.com/openclaw/openclaw/tree/main/extensions/bluebubbles/src
 

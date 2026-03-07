@@ -1,44 +1,30 @@
 /**
  * Message pipeline — lifecycle-based processing for incoming messages.
  *
- * Three phases run in order for each message:
+ *   before (× 1) ──► start ──┬── dispatch reply ──► end (× 1)
+ *                            ├── dispatch reply ──► end (× 1)
+ *                            └── ...done
  *
- *   before  →  start  →  end
- *
- *   before : Pre-processing & filtering (echo detection, logging, etc.).
- *            Any task setting `shouldContinue = false` drops the message —
- *            remaining before-tasks and all later phases are skipped.
- *   start  : Core handling — calls the bot/agent to produce a reply.
- *   end    : Post-processing — send reply, log outgoing, remember echo, etc.
- *
- * Both IncomingMessage and OutgoingMessage flow through every phase as context.
- * Tasks within each phase run sequentially in registration order.
+ *   before : Filter & prepare. Runs once. Sets shouldContinue=false to drop.
+ *   start  : Calls agent. Invokes dispatch() for each reply produced.
+ *   end    : Runs once per dispatched reply (send, log, store).
  */
 
 import type { IncomingMessage, OutgoingMessage } from "./types.js";
 import { createOutgoingMessage } from "./types.js";
 
-// ── Task types ────────────────────────────────────────────────────────────────
+export type BeforeTask = (incoming: IncomingMessage, outgoing: OutgoingMessage) => Promise<OutgoingMessage> | OutgoingMessage;
 
-/** A before-task may filter (set shouldContinue=false) or mutate the outgoing context. */
-export type BeforeTask = (incoming: IncomingMessage, outgoing: OutgoingMessage) => OutgoingMessage;
+/** dispatch() runs the full end phase for one reply. */
+export type DispatchFn = (outgoing: OutgoingMessage) => Promise<void>;
+export type StartTask = (incoming: IncomingMessage, outgoing: OutgoingMessage, dispatch: DispatchFn) => Promise<void>;
 
-/** The start-task receives both messages and produces an updated outgoing context. */
-export type StartTask = (incoming: IncomingMessage, outgoing: OutgoingMessage) => Promise<OutgoingMessage>;
-
-/** An end-task receives both messages and may produce an updated outgoing context. */
-export type EndTask = (
-	incoming: IncomingMessage,
-	outgoing: OutgoingMessage
-) => Promise<OutgoingMessage> | OutgoingMessage;
-
-// ── Pipeline ──────────────────────────────────────────────────────────────────
+export type EndTask = (incoming: IncomingMessage, outgoing: OutgoingMessage) => Promise<OutgoingMessage> | OutgoingMessage;
 
 export interface MessagePipeline {
 	before(task: BeforeTask): void;
 	start(task: StartTask): void;
 	end(task: EndTask): void;
-	/** Run all phases. Returns the final OutgoingMessage. */
 	process(incoming: IncomingMessage): Promise<OutgoingMessage>;
 }
 
@@ -47,25 +33,25 @@ export function createMessagePipeline(): MessagePipeline {
 	const startTasks: StartTask[] = [];
 	const endTasks: EndTask[] = [];
 
+	async function runEndTasks(incoming: IncomingMessage, outgoing: OutgoingMessage): Promise<void> {
+		let result = outgoing;
+		for (const task of endTasks) {
+			result = await task(incoming, result);
+			if (!result.shouldContinue) return;
+		}
+	}
+
 	async function process(incoming: IncomingMessage): Promise<OutgoingMessage> {
 		let outgoing = createOutgoingMessage();
 
-		// ── before: filter & pre-process ───────────────────────────────────────
 		for (const task of beforeTasks) {
-			outgoing = task(incoming, outgoing);
+			outgoing = await task(incoming, outgoing);
 			if (!outgoing.shouldContinue) return outgoing;
 		}
 
-		// ── start: produce reply (last registered start-task wins) ─────────────
+		const dispatch: DispatchFn = (out) => runEndTasks(incoming, out);
 		for (const task of startTasks) {
-			outgoing = await task(incoming, outgoing);
-			if (!outgoing.shouldContinue) return outgoing;
-		}
-
-		// ── end: post-process ──────────────────────────────────────────────────
-		for (const task of endTasks) {
-			outgoing = await task(incoming, outgoing);
-			if (!outgoing.shouldContinue) return outgoing;
+			await task(incoming, outgoing, dispatch);
 		}
 
 		return outgoing;

@@ -1,26 +1,16 @@
 /**
- * Agent module — pure text-in / text-out AI processor per iMessage chat.
+ * Agent module — text-in / text-out AI processor per iMessage chat.
  *
- * Architecture:
- *   - Each chat (identified by chatGuid) gets a lazily-created AgentSession
- *     with its own persistent context stored under `<workingDir>/<chatGuid>/context.jsonl`.
- *     Conversation history survives process restarts.
- *   - Messages are processed sequentially per chat: if the agent is busy,
- *     incoming messages are queued and drained in order once the current
- *     prompt completes.
- *   - After `session.prompt()` resolves, the assistant message is already
- *     present in `session.messages`. The reply is read directly from there,
- *     matching how pi-mono/mom handles this.
+ * Each chat gets a lazily-created AgentSession with persistent context.
+ * Messages are processed sequentially per chat via a serial queue.
+ * Replies are streamed per message: each message_end event (assistant or toolResult) invokes onReply,
+ * serialized via replyChain so iMessages are sent in order.
  */
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { getModel } from "@mariozechner/pi-ai";
-import {
-	type AgentSession,
-	SessionManager,
-	createAgentSession,
-} from "@mariozechner/pi-coding-agent";
+import { type Message, type TextContent, getModel } from "@mariozechner/pi-ai";
+import { type AgentSession, SessionManager, createAgentSession } from "@mariozechner/pi-coding-agent";
 import type { IncomingMessage } from "./types.js";
 
 const model = getModel("github-copilot", "claude-sonnet-4.6");
@@ -29,35 +19,61 @@ export interface AgentManagerConfig {
 	workingDir: string;
 }
 
-/** Per-chat mutable state wrapping an AgentSession. */
 interface ChatSession {
 	session: AgentSession;
-	/** True while a prompt is in-flight; subsequent messages go to `queue`. */
-	busy: boolean;
-	/** Messages waiting to be processed after the current prompt finishes. */
-	queue: Array<{ msg: IncomingMessage; resolve: (reply: string | null) => void }>;
 	chatGuid: string;
 }
 
-/** Sanitize chatGuid for safe use as a directory name. */
 function sanitizeChatGuid(chatGuid: string): string {
 	return chatGuid.replace(/[^a-zA-Z0-9_\-;+.@]/g, "_");
 }
 
+function extractMessageText(message: Message): string | null {
+	if (typeof message.content === "string") return message.content;
+	
+  const texts = message.content
+		.filter((part): part is TextContent => part.type === "text" && "text" in part)
+		.map((part) => part.text);
+	const joined = texts.join("\n").trim();
+	return joined || null;
+}
+
+function extractToolResultText(result: unknown): string {
+	if (typeof result === "string") return result;
+	
+  if (result && typeof result === "object" && "content" in result) {
+		const content = (result as { content: unknown }).content;
+		if (Array.isArray(content)) {
+			const parts: string[] = [];
+			for (const part of content) {
+				if (part && typeof part === "object" && part.type === "text" && "text" in part) {
+					parts.push(part.text as string);
+				}
+			}
+			const joined = parts.join("\n").trim();
+			if (joined) return joined;
+		}
+	}
+	return JSON.stringify(result);
+}
+
+/** Pick a human-readable label for a tool invocation. */
+function extractToolLabel(toolName: string, args: Record<string, unknown>): string {
+	// bash → show the command
+	if (toolName === "bash" && typeof args.command === "string") return args.command;
+	// read/write/edit → show the path
+	if (typeof args.path === "string") return `${toolName}: ${args.path}`;
+	// fallback to explicit label or tool name
+	if (typeof args.label === "string") return args.label;
+	return toolName;
+}
+
 export function createAgentManager(config: AgentManagerConfig) {
 	const { workingDir } = config;
-	/** One ChatSession per chatGuid, kept alive for the process lifetime. */
-	const chatSessions = new Map<string, ChatSession>();
+	const sessionMap = new Map<string, ChatSession>();
 
-	/**
-	 * Lazily create an AgentSession for a chat.
-	 * Each chat gets its own `context.jsonl` under `<workingDir>/<chatGuid>/`,
-	 * mirroring how pi-mono/mom persists sessions per Slack channel.
-	 * The event subscription is set up once here and never torn down —
-	 * `replyText` is reset at the start of each `runAgent` call instead.
-	 */
 	async function getOrCreateSession(chatGuid: string): Promise<ChatSession> {
-		const existing = chatSessions.get(chatGuid);
+		const existing = sessionMap.get(chatGuid);
 		if (existing) return existing;
 
 		const chatDir = join(workingDir, sanitizeChatGuid(chatGuid));
@@ -70,99 +86,74 @@ export function createAgentManager(config: AgentManagerConfig) {
 			sessionManager,
 		});
 
-		const chatSession: ChatSession = { session, busy: false, queue: [], chatGuid };
-
-		chatSessions.set(chatGuid, chatSession);
-		return chatSession;
+		const entry: ChatSession = { session, chatGuid };
+		sessionMap.set(chatGuid, entry);
+		return entry;
 	}
 
-	/**
-	 * Build the prompt text from an IncomingMessage.
-	 *
-	 * - In group chats the sender is prepended so the LLM knows who is speaking.
-	 * - When the message is image-only (no text), a placeholder is used so the
-	 *   LLM receives non-empty text alongside the image content.
-	 * - If some images failed to download, an inline note is appended.
-	 */
-	function buildPromptText(msg: IncomingMessage): string {
-		let text = msg.text ?? "";
+	/** Prompt the agent and invoke onReply for each message_end (assistant or toolResult) that produces text. Replies are serialized. */
+	async function processMessage(msg: IncomingMessage, onReply: (reply: string) => Promise<void>): Promise<void> {
+		const entry = await getOrCreateSession(msg.chatGuid);
 
-		// Image-only message: give the LLM a hint that an image was sent.
-		if (!text && msg.images.length > 0) {
-			text = "(image)";
-		}
+		// Track pending tool calls for duration and args
+		const pendingTools = new Map<string, { toolName: string; args: Record<string, unknown>; startTime: number }>();
 
-		if (msg.messageType === "group") {
-			text = `[${msg.sender}] ${text}`.trim();
-		}
+		// Serialize onReply calls — subscribe is sync so we chain promises
+		let replyChain = Promise.resolve();
+		const unsub = entry.session.subscribe((event) => {
+			if (event.type === "message_end" && event.message.role === "assistant") {
+				const text = extractMessageText(event.message);
+				console.log(`[blue] message end: ${entry.chatGuid} role=assistant text="${(text ?? "(empty)").substring(0, 60)}"`);
+				if (text) {
+					replyChain = replyChain.then(() => onReply(text));
+				}
+      } else if (event.type === "tool_execution_start") {
+				const toolArgs = event.args as Record<string, unknown>;
+				const label = extractToolLabel(event.toolName, toolArgs);
 
-		return text;
-	}
+				pendingTools.set(event.toolCallId, {
+					toolName: event.toolName,
+					args: toolArgs,
+					startTime: Date.now(),
+				});
 
-	/**
-	 * Send an IncomingMessage to the agent and return the assistant's reply.
-	 *
-	 * Uses `session.prompt()` which triggers the full agent loop (tool use,
-	 * etc.). When the message contains images they are passed via
-	 * `PromptOptions.images` — the same approach as pi's file-processor
-	 * (bytes → base64 → ImageContent).
-	 */
-	async function runAgent(chatSession: ChatSession, msg: IncomingMessage): Promise<string | null> {
-		const promptText = buildPromptText(msg);
-		const timeoutMs = 120_000;
+				console.log(`[blue] tool execution start: ${entry.chatGuid} → ${label}`);
+				replyChain = replyChain.then(() => onReply(`→ ${label}`));
+			} else if (event.type === "tool_execution_end") {
+				const resultText = extractToolResultText(event.result);
+				const pending = pendingTools.get(event.toolCallId);
+				pendingTools.delete(event.toolCallId);
 
-		console.log(`[blue] agent prompt start: ${chatSession.chatGuid} "${promptText.substring(0, 60)}"`);
+				const durationMs = pending ? Date.now() - pending.startTime : 0;
+				const duration = (durationMs / 1000).toFixed(1);
+				const symbol = event.isError ? "✗" : "✓";
+				const truncatedResult = resultText.length > 500 ? `${resultText.substring(0, 500)}…` : resultText;
+
+				const message = `${symbol} ${event.toolName} (${duration}s)\n${truncatedResult}`;
+
+				console.log(`[blue] tool execution end: ${entry.chatGuid} ${symbol} ${event.toolName} (${duration}s) result="${resultText.substring(0, 60)}"`);
+				replyChain = replyChain.then(() => onReply(message));
+			}
+		});
+
+		const promptText = msg.text ?? "";
+		console.log(`[agent] agent prompt start: ${entry.chatGuid} "${promptText.substring(0, 60)}"`);
 
 		const promptPromise =
 			msg.images.length > 0
-				? chatSession.session.prompt(promptText, { images: msg.images })
-				: chatSession.session.prompt(promptText);
+				? entry.session.prompt(promptText, { images: msg.images })
+				: entry.session.prompt(promptText);
 
 		const timeoutPromise = new Promise<never>((_, reject) =>
-			setTimeout(() => reject(new Error(`agent prompt timed out after ${timeoutMs / 1000}s`)), timeoutMs)
+			setTimeout(() => reject(new Error("agent prompt timed out after 120s")), 120_000)
 		);
 
-		await Promise.race([promptPromise, timeoutPromise]);
-
-		const messages = chatSession.session.messages;
-		const lastAssistant = messages.filter((m) => m.role === "assistant").pop();
-		const reply =
-			lastAssistant?.content
-				.filter((c): c is { type: "text"; text: string } => c.type === "text")
-				.map((c) => c.text)
-				.join("\n")
-				.trim() || null;
-		console.log(`[blue] agent prompt end: ${chatSession.chatGuid} reply="${(reply ?? "(null)").substring(0, 60)}"`);
-		return reply;
-	}
-
-	/**
-	 * Process an IncomingMessage, returning the agent's reply.
-	 * Ensures serial execution per chat — if the agent is already processing,
-	 * the message is queued and will be handled once the current run finishes.
-	 */
-	async function processMessage(msg: IncomingMessage): Promise<string | null> {
-		const chatSession = await getOrCreateSession(msg.chatGuid);
-
-		if (chatSession.busy) {
-			return new Promise((resolve) => {
-				chatSession.queue.push({ msg, resolve });
-			});
-		}
-
-		chatSession.busy = true;
 		try {
-			const reply = await runAgent(chatSession, msg);
-
-			// Drain queue sequentially, resolving each queued promise
-			while (chatSession.queue.length > 0) {
-				const next = chatSession.queue.shift()!;
-				next.resolve(await runAgent(chatSession, next.msg));
-			}
-
-			return reply;
+			await Promise.race([promptPromise, timeoutPromise]);
+			await replyChain; // wait for all dispatched replies to finish
+			console.log(`[blue] agent prompt end: ${entry.chatGuid}`);
 		} finally {
-			chatSession.busy = false;
+			unsub();
 		}
 	}
 

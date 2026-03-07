@@ -10,7 +10,7 @@
  *
  * start:
  *   downloadImages   — downloads image attachments and populates incoming.images
- *   callAgent        — sends the message to the agent and sets the reply
+ *   callAgent        — sends the message to the agent and yields replies as they arrive
  *
  * end:
  *   sendReply        — remembers echo, sends reply via BlueBubbles
@@ -21,7 +21,7 @@ import type { ImageContent } from "@mariozechner/pi-ai";
 import type { AgentManager } from "./agent.js";
 import type { BBClient } from "./bluebubble/index.js";
 import type { SelfEchoFilter } from "./bluebubble/index.js";
-import type { BeforeTask, EndTask, StartTask } from "./pipeline.js";
+import type { BeforeTask, DispatchFn, EndTask, StartTask } from "./pipeline.js";
 import type { Settings } from "./settings.js";
 import { isReplyEnabled } from "./settings.js";
 import type { ChatStore } from "./store.js";
@@ -112,7 +112,7 @@ export function createCheckReplyEnabledTask(getSettings: () => Settings): Before
  * incoming.images in-place. Non-image attachments are skipped with a warning;
  * failed downloads are logged and silently skipped.
  */
-export function createDownloadImagesTask(bbClient: BBClient): StartTask {
+export function createDownloadImagesTask(bbClient: BBClient): BeforeTask {
 	return async (incoming, outgoing) => {
 		const images: ImageContent[] = [];
 		for (const attachment of incoming.attachments) {
@@ -133,14 +133,12 @@ export function createDownloadImagesTask(bbClient: BBClient): StartTask {
 	};
 }
 
-/** Send the message to the agent and set the reply action on the outgoing context. */
+/** Send the message to the agent and dispatch a reply for each agent turn. */
 export function createCallAgentTask(agent: AgentManager): StartTask {
-	return async (incoming, outgoing) => {
-		const result = await agent.processMessage(incoming);
-		if (result) {
-			return { ...outgoing, reply: { type: "message" as const, text: result } };
-		}
-		return outgoing;
+	return async (incoming, outgoing, dispatch) => {
+		await agent.processMessage(incoming, async (reply) => {
+			await dispatch({ ...outgoing, reply: { type: "message" as const, text: reply } });
+		});
 	};
 }
 
