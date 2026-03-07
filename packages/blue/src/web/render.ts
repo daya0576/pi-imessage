@@ -3,6 +3,8 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Eta } from "eta";
+import { isReplyEnabled } from "../settings.js";
+import type { Settings } from "../settings.js";
 import { firstLinePreview, senderLabel } from "../store.js";
 import type { ChatBlock } from "./data.js";
 import { anchorId, formatTime } from "./html.js";
@@ -30,10 +32,6 @@ interface CardData {
 /** Prepare the row data for a single chat card. */
 function prepareCard(block: ChatBlock): CardData {
 	const recent = block.messages.slice(-MAX_MESSAGES);
-
-	const senders = recent.map((message) => senderLabel(message));
-	const maxSenderLen = Math.max(...senders.map((s) => s.length));
-
 	const rows: MessageRow[] = [];
 
 	for (let i = 0; i < recent.length; i++) {
@@ -51,7 +49,7 @@ function prepareCard(block: ChatBlock): CardData {
 		rows.push({
 			gap: false,
 			time: formatTime(message.date),
-			sender: senderLabel(message).padStart(maxSenderLen),
+			sender: senderLabel(message),
 			arrow: message.isBot ? "&lt;-" : "-&gt;",
 			text: firstLinePreview(message.text),
 		});
@@ -60,6 +58,7 @@ function prepareCard(block: ChatBlock): CardData {
 	return { rows };
 }
 
-export function renderPage(blocks: ChatBlock[]): string {
-	return eta.render("page", { blocks, prepareCard, anchorId });
+export function renderPage(blocks: ChatBlock[], settings: Settings): string {
+	const replyEnabledMap = (chatGuid: string) => isReplyEnabled(settings, chatGuid);
+	return eta.render("page", { blocks, prepareCard, anchorId, replyEnabledMap });
 }
