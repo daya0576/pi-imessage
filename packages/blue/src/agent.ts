@@ -8,18 +8,16 @@
  *   - Messages are processed sequentially per chat: if the agent is busy,
  *     incoming messages are queued and drained in order once the current
  *     prompt completes.
- *   - Each session subscribes to AgentSessionEvent once at creation time.
- *     On every `message_end` event from the assistant, reply text is accumulated
- *     into `chatSession.replyText`, returned to the caller after the prompt resolves.
+ *   - After `session.prompt()` resolves, the assistant message is already
+ *     present in `session.messages`. The reply is read directly from there,
+ *     matching how pi-mono/mom handles this.
  */
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { getModel } from "@mariozechner/pi-ai";
-import type { ImageContent } from "@mariozechner/pi-ai";
 import {
 	type AgentSession,
-	type AgentSessionEvent,
 	SessionManager,
 	createAgentSession,
 } from "@mariozechner/pi-coding-agent";
@@ -38,22 +36,7 @@ interface ChatSession {
 	busy: boolean;
 	/** Messages waiting to be processed after the current prompt finishes. */
 	queue: Array<{ msg: IncomingMessage; resolve: (reply: string | null) => void }>;
-	/** Accumulated assistant reply text for the current prompt cycle. Reset before each `runAgent`. */
-	replyText: string;
 	chatGuid: string;
-}
-
-/**
- * Extract concatenated text from an assistant `message_end` event.
- * Content blocks may include text, thinking, or tool_use — we only want text.
- */
-function extractReplyText(event: AgentSessionEvent & { type: "message_end" }): string {
-	const message = event.message;
-	if (message.role !== "assistant") return "";
-	return message.content
-		.filter((part) => part.type === "text")
-		.map((part) => (part as { type: "text"; text: string }).text)
-		.join("\n");
 }
 
 /** Sanitize chatGuid for safe use as a directory name. */
@@ -87,13 +70,7 @@ export function createAgentManager(config: AgentManagerConfig) {
 			sessionManager,
 		});
 
-		const chatSession: ChatSession = { session, busy: false, queue: [], replyText: "", chatGuid };
-
-		session.subscribe((event: AgentSessionEvent) => {
-			if (event.type === "message_end") {
-				chatSession.replyText += extractReplyText(event as AgentSessionEvent & { type: "message_end" });
-			}
-		});
+		const chatSession: ChatSession = { session, busy: false, queue: [], chatGuid };
 
 		chatSessions.set(chatGuid, chatSession);
 		return chatSession;
@@ -131,7 +108,6 @@ export function createAgentManager(config: AgentManagerConfig) {
 	 * (bytes → base64 → ImageContent).
 	 */
 	async function runAgent(chatSession: ChatSession, msg: IncomingMessage): Promise<string | null> {
-		chatSession.replyText = "";
 		const promptText = buildPromptText(msg);
 		const timeoutMs = 120_000;
 
@@ -148,7 +124,14 @@ export function createAgentManager(config: AgentManagerConfig) {
 
 		await Promise.race([promptPromise, timeoutPromise]);
 
-		const reply = chatSession.replyText.trim() || null;
+		const messages = chatSession.session.messages;
+		const lastAssistant = messages.filter((m) => m.role === "assistant").pop();
+		const reply =
+			lastAssistant?.content
+				.filter((c): c is { type: "text"; text: string } => c.type === "text")
+				.map((c) => c.text)
+				.join("\n")
+				.trim() || null;
 		console.log(`[blue] agent prompt end: ${chatSession.chatGuid} reply="${(reply ?? "(null)").substring(0, 60)}"`);
 		return reply;
 	}
