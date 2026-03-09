@@ -10,7 +10,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { type Message, type TextContent, getModel } from "@mariozechner/pi-ai";
-import { type AgentSession, SessionManager, createAgentSession } from "@mariozechner/pi-coding-agent";
+import { DefaultResourceLoader, type AgentSession, SessionManager, createAgentSession } from "@mariozechner/pi-coding-agent";
 import type { IncomingMessage } from "./types.js";
 
 const model = getModel("github-copilot", "claude-sonnet-4.6");
@@ -27,6 +27,13 @@ interface ChatSession {
 function sanitizeChatGuid(chatGuid: string): string {
 	return chatGuid.replace(/[^a-zA-Z0-9_\-;+.@]/g, "_");
 }
+
+function buildSystemPrompt(): string {
+	return `You are a helpful personal assistant communicating via iMessage.
+- Plain text only. Do not use Markdown formatting, double asterisks (**like this**), or [markdown](links).
+- Reply in the same language the user is writing in.`;
+}
+
 
 function extractMessageText(message: Message): string | null {
 	if (typeof message.content === "string") return message.content;
@@ -80,12 +87,17 @@ export function createAgentManager(config: AgentManagerConfig) {
 		mkdirSync(chatDir, { recursive: true });
 		const sessionManager = SessionManager.open(join(chatDir, "context.jsonl"), chatDir);
 
+		const resourceLoader = new DefaultResourceLoader({
+			systemPrompt: buildSystemPrompt(),
+		});
+		await resourceLoader.reload();
+
 		const { session } = await createAgentSession({
 			model,
 			thinkingLevel: "low",
 			sessionManager,
+			resourceLoader,
 		});
-
 		const entry: ChatSession = { session, chatGuid };
 		sessionMap.set(chatGuid, entry);
 		return entry;

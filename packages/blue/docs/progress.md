@@ -2,16 +2,20 @@
 
 ## [WIP] Messaging
 
+### Bluebubbles
 - [x] DM/Group/SMS messages
 - [x] Handle attachments (images)
 - [ ] Typing indicators
 - [ ] Reactions
--  ...
+- ...
+
+### Sqlite
+
 
 ## [PLAN] Message History
 
 - [x] Store message history persistently
-- [ ] Review messages in web page with realtime preveiew
+- [x] Review messages in web page with realtime preveiew
 - [ ] Send messages in web page
 
 
