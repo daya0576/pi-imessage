@@ -295,8 +295,9 @@ export function createAgentManager(config: AgentManagerConfig) {
 	 * Get a formatted status string for a chat session.
 	 * Returns null if no session exists for the given chatGuid.
 	 *
-	 * Format:
-	 *   ↑5.9k ↓12k R1.8M W197k $0.000 50.0%/128k (auto)   (github-copilot) claude-opus-4.6 • thinking off
+	 * Format (two lines):
+	 *   ↑7.2k ↓505 1.1%/128k
+	 *   github-copilot/gpt-5-mini • thinking minimal
 	 */
 	function getSessionStatus(chatGuid: string): string | null {
 		const existing = sessionMap.get(chatGuid);
@@ -307,42 +308,22 @@ export function createAgentManager(config: AgentManagerConfig) {
 		const contextUsage = session.getContextUsage();
 		const model = session.model;
 		const thinkingLevel = session.thinkingLevel;
-		const autoCompaction = session.autoCompactionEnabled;
 
-		const parts: string[] = [];
-
-		// Token counts: ↑input ↓output Rcache_read Wcache_write
-		parts.push(`↑${formatTokenCount(stats.tokens.input)}`);
-		parts.push(`↓${formatTokenCount(stats.tokens.output)}`);
-		parts.push(`R${formatTokenCount(stats.tokens.cacheRead)}`);
-		parts.push(`W${formatTokenCount(stats.tokens.cacheWrite)}`);
-
-		// Cost
-		parts.push(`$${stats.cost.toFixed(3)}`);
-
-		// Context usage: percent/window
+		// Line 1: token counts + context usage
+		const line1Parts: string[] = [];
+		line1Parts.push(`↑${formatTokenCount(stats.tokens.input)}`);
+		line1Parts.push(`↓${formatTokenCount(stats.tokens.output)}`);
 		if (contextUsage) {
 			const percent = contextUsage.percent !== null ? `${contextUsage.percent.toFixed(1)}%` : "?%";
 			const window = formatTokenCount(contextUsage.contextWindow);
-			parts.push(`${percent}/${window}`);
+			line1Parts.push(`${percent}/${window}`);
 		}
 
-		// Auto compaction
-		if (autoCompaction) {
-			parts.push("(auto)");
-		}
+		// Line 2: provider/model • thinking level
+		const modelLabel = model ? `${model.provider}/${model.id}` : existing.modelLabel;
+		const line2 = `${modelLabel} • thinking ${thinkingLevel ?? "off"}`;
 
-		// Provider and model
-		if (model) {
-			parts.push(`(${model.provider}) ${model.id}`);
-		} else {
-			parts.push(existing.modelLabel);
-		}
-
-		// Thinking level
-		parts.push(`• thinking ${thinkingLevel ?? "off"}`);
-
-		return parts.join(" ");
+		return `${line1Parts.join(" ")}\n${line2}`;
 	}
 
 	return { processMessage, resetSession, getSessionStatus };
