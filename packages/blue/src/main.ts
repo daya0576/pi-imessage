@@ -3,6 +3,7 @@
  */
 
 import "dotenv/config";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { createAgentManager } from "./agent.js";
 import { createBBClient, createBBMonitor, createRawMessageQueue } from "./bluebubble/index.js";
@@ -27,19 +28,18 @@ async function main() {
 	const blueBubblesPassword = requireEnv("BLUEBUBBLES_PASSWORD");
 	const port = Number.parseInt(process.env.BLUE_PORT || "7749", 10);
 	const webPort = Number.parseInt(process.env.WEB_PORT || "7750", 10);
-	const workingDir = process.env.WORKING_DIR || join(process.cwd(), "data");
+	const workingDir = process.env.WORKING_DIR || join(homedir(), ".pi", "imessage");
 
 	// Loggers must be created before anything else so all console output is captured.
 	const appLogger = createAppLogger(workingDir);
 	const digestLogger = createDigestLogger(workingDir);
 
 	const blueBubblesClient = createBBClient({ url: blueBubblesUrl, password: blueBubblesPassword });
-	const agent = createAgentManager({ workingDir });
+	let settings = readSettings(workingDir);
+	const agent = createAgentManager({ workingDir, modelSettings: settings.model });
 	const store = createChatStore({ workingDir });
 	const queue = createRawMessageQueue();
 	const monitor = createBBMonitor({ port, queue });
-
-	let settings = readSettings(workingDir);
 	const getSettings = (): Settings => settings;
 	const setSettings = (updated: Settings): void => {
 		settings = updated;

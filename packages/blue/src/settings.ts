@@ -25,8 +25,14 @@ export interface ChatAllowlist {
 	blacklist: string[];
 }
 
+export interface ModelSettings {
+	defaultProvider?: string;
+	defaultModel?: string;
+}
+
 export interface Settings {
 	chatAllowlist: ChatAllowlist;
+	model?: ModelSettings;
 }
 
 const DEFAULT_CHAT_ALLOWLIST: ChatAllowlist = { whitelist: ["*"], blacklist: [] };
@@ -58,11 +64,19 @@ export function readSettings(workingDir: string): Settings {
 	try {
 		const raw = JSON.parse(readFileSync(filePath, "utf-8")) as Partial<Settings>;
 		const chatAllowlist: Partial<ChatAllowlist> = raw.chatAllowlist ?? {};
+		const model: ModelSettings | undefined =
+			raw.model && typeof raw.model === "object"
+				? {
+						defaultProvider: typeof raw.model.defaultProvider === "string" ? raw.model.defaultProvider : undefined,
+						defaultModel: typeof raw.model.defaultModel === "string" ? raw.model.defaultModel : undefined,
+					}
+				: undefined;
 		return {
 			chatAllowlist: {
 				whitelist: Array.isArray(chatAllowlist.whitelist) ? chatAllowlist.whitelist : DEFAULT_CHAT_ALLOWLIST.whitelist,
 				blacklist: Array.isArray(chatAllowlist.blacklist) ? chatAllowlist.blacklist : DEFAULT_CHAT_ALLOWLIST.blacklist,
 			},
+			model,
 		};
 	} catch {
 		return { ...DEFAULT_SETTINGS };

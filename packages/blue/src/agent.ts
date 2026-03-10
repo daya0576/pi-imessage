@@ -9,14 +9,14 @@
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { type Message, type TextContent, getModel } from "@mariozechner/pi-ai";
-import { DefaultResourceLoader, type AgentSession, SessionManager, createAgentSession } from "@mariozechner/pi-coding-agent";
+import type { Message, TextContent } from "@mariozechner/pi-ai";
+import { type AgentSession, DefaultResourceLoader, SessionManager, SettingsManager, createAgentSession } from "@mariozechner/pi-coding-agent";
+import type { ModelSettings } from "./settings.js";
 import type { IncomingMessage } from "./types.js";
-
-const model = getModel("github-copilot", "claude-sonnet-4.5");
 
 export interface AgentManagerConfig {
 	workingDir: string;
+	modelSettings?: ModelSettings;
 }
 
 interface ChatSession {
@@ -76,7 +76,7 @@ function extractToolLabel(toolName: string, args: Record<string, unknown>): stri
 }
 
 export function createAgentManager(config: AgentManagerConfig) {
-	const { workingDir } = config;
+	const { workingDir, modelSettings } = config;
 	const sessionMap = new Map<string, ChatSession>();
 
 	async function getOrCreateSession(chatGuid: string): Promise<ChatSession> {
@@ -92,10 +92,19 @@ export function createAgentManager(config: AgentManagerConfig) {
 		});
 		await resourceLoader.reload();
 
+		// Build a SettingsManager: global (~/.pi/agent/settings.json) as base,
+		// with workspace model settings applied on top if configured.
+		const settingsManager = SettingsManager.create();
+		if (modelSettings?.defaultProvider && modelSettings?.defaultModel) {
+			settingsManager.applyOverrides({
+				defaultProvider: modelSettings.defaultProvider,
+				defaultModel: modelSettings.defaultModel,
+			});
+		}
+
 		const { session } = await createAgentSession({
-			model,
-			thinkingLevel: "low",
 			sessionManager,
+			settingsManager,
 			resourceLoader,
 		});
 		const entry: ChatSession = { session, chatGuid };
