@@ -47,12 +47,14 @@ td { vertical-align: top; padding: 1px 0 }
       <table>
 <% card.rows.forEach(function(row) { %>
 <% if (row.gap) { %>
-        <tr><td colspan="4">&nbsp;</td></tr>
+        <tr><td colspan="6">&nbsp;</td></tr>
 <% } else { %>
         <tr>
           <td class="c-fix c-time"><%= row.time %></td>
-          <td class="c-fix c-sender"><%= row.sender %></td>
-          <td class="c-fix c-arrow"><%~ row.arrow %></td>
+          <td class="c-fix c-source">[blue]</td>
+          <td class="c-fix c-arrow"><%= row.arrow %></td>
+          <td class="c-fix c-channel"><%= row.channel %></td>
+          <td class="c-fix c-sender"><%= row.sender %>:</td>
           <td class="c-msg"><%= row.text %></td>
         </tr>
 <% } %>

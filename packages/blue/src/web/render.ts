@@ -6,6 +6,7 @@ import { Eta } from "eta";
 import { isReplyEnabled } from "../settings.js";
 import type { Settings } from "../settings.js";
 import { firstLinePreview, senderLabel } from "../store.js";
+import type { MessageType } from "../types.js";
 import type { ChatBlock } from "./data.js";
 import { anchorId, formatTime } from "./html.js";
 
@@ -19,9 +20,17 @@ const eta = new Eta({ views: templateDir, autoEscape: true });
 interface MessageRow {
 	gap: boolean;
 	time: string;
-	sender: string;
 	arrow: string;
+	channel: string;
+	sender: string;
 	text: string;
+}
+
+/** Map MessageType to a display channel tag. */
+function channelLabel(messageType: MessageType): string {
+	if (messageType === "group") return "[GROUP]";
+	if (messageType === "sms") return "[SMS]";
+	return "[DM]";
 }
 
 /** Pre-processed card data passed to the template. */
@@ -42,15 +51,16 @@ function prepareCard(block: ChatBlock): CardData {
 		if (prev) {
 			const gapMs = new Date(message.date).getTime() - new Date(prev.date).getTime();
 			if (gapMs > TEN_MINUTES_MS) {
-				rows.push({ gap: true, time: "", sender: "", arrow: "", text: "" });
+				rows.push({ gap: true, time: "", arrow: "", channel: "", sender: "", text: "" });
 			}
 		}
 
 		rows.push({
 			gap: false,
 			time: formatTime(message.date),
+			arrow: message.isBot ? "->" : "<-",
+			channel: channelLabel(message.messageType),
 			sender: senderLabel(message),
-			arrow: message.isBot ? "&lt;-" : "-&gt;",
 			text: firstLinePreview(message.text),
 		});
 	}
