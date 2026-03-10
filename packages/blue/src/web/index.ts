@@ -8,6 +8,7 @@ import { renderPage } from "./render.js";
 
 export interface WebServerConfig {
 	workingDir: string;
+	host: string;
 	port: number;
 	getSettings: () => Settings;
 	setSettings: (settings: Settings) => void;
@@ -19,7 +20,7 @@ export interface WebServer {
 }
 
 export function createWebServer(config: WebServerConfig): WebServer {
-	const { workingDir, port, getSettings, setSettings } = config;
+	const { workingDir, host, port, getSettings, setSettings } = config;
 	const sseClients = new Set<ServerResponse>();
 	let watcher: ReturnType<typeof watch> | null = null;
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -105,8 +106,8 @@ export function createWebServer(config: WebServerConfig): WebServer {
 	return {
 		start(): void {
 			startWatcher();
-			server.listen(port, () => {
-				console.log(`[web] UI available at http://localhost:${port}`);
+			server.listen(port, host, () => {
+				console.log(`[web] UI available at http://${host}:${port}`);
 			});
 		},
 		stop(): void {
