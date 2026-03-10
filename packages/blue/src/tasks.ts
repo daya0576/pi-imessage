@@ -131,8 +131,7 @@ export function createCommandHandlerTask(agent: AgentManager): StartTask {
 		}
 
 		if (text === "/status") {
-			const status = agent.getSessionStatus(incoming.chatGuid);
-			const replyText = status ?? "No active session.";
+			const replyText = await agent.getSessionStatus(incoming.chatGuid);
 			console.log(`[blue] /status command: ${incoming.chatGuid} → ${replyText}`);
 			await dispatch({ ...outgoing, reply: { type: "message", text: replyText } });
 			outgoing.shouldContinue = false;

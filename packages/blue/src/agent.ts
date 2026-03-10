@@ -293,17 +293,15 @@ export function createAgentManager(config: AgentManagerConfig) {
 
 	/**
 	 * Get a formatted status string for a chat session.
-	 * Returns null if no session exists for the given chatGuid.
+	 * Lazily creates/resumes the session from disk if not already in memory.
 	 *
 	 * Format (two lines):
 	 *   ↑7.2k ↓505 1.1%/128k
 	 *   github-copilot/gpt-5-mini • thinking minimal
 	 */
-	function getSessionStatus(chatGuid: string): string | null {
-		const existing = sessionMap.get(chatGuid);
-		if (!existing) return null;
-
-		const { session } = existing;
+	async function getSessionStatus(chatGuid: string): Promise<string> {
+		const entry = await getOrCreateSession(chatGuid);
+		const { session } = entry;
 		const stats = session.getSessionStats();
 		const contextUsage = session.getContextUsage();
 		const model = session.model;
@@ -320,7 +318,7 @@ export function createAgentManager(config: AgentManagerConfig) {
 		}
 
 		// Line 2: provider/model • thinking level
-		const modelLabel = model ? `${model.provider}/${model.id}` : existing.modelLabel;
+		const modelLabel = model ? `${model.provider}/${model.id}` : entry.modelLabel;
 		const line2 = `${modelLabel} • thinking ${thinkingLevel ?? "off"}`;
 
 		return `${line1Parts.join(" ")}\n${line2}`;
