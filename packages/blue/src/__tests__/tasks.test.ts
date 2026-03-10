@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createSelfEchoFilter } from "../bluebubble/index.js";
+import type { DigestLogger } from "../logger.js";
 import {
 	createCallAgentTask,
 	createDownloadImagesTask,
@@ -30,6 +31,10 @@ function makeOutgoing(overrides: Partial<OutgoingMessage> = {}): OutgoingMessage
 	return { ...createOutgoingMessage(), ...overrides };
 }
 
+function makeDigestLogger(): DigestLogger {
+	return { log: (msg: string) => console.log(msg), close: () => {} };
+}
+
 function makeMockBBClient() {
 	return {
 		sendMessage: vi.fn().mockResolvedValue(undefined),
@@ -43,14 +48,14 @@ function makeMockBBClient() {
 
 describe("createLogIncomingTask", () => {
 	it("passes the outgoing through unchanged", () => {
-		const task = createLogIncomingTask();
+		const task = createLogIncomingTask(makeDigestLogger());
 		const outgoing = makeOutgoing();
 		expect(task(makeMessage(), outgoing)).toEqual(outgoing);
 	});
 
 	it("logs DM with sender", () => {
 		const spy = vi.spyOn(console, "log").mockImplementation(() => {});
-		const task = createLogIncomingTask();
+		const task = createLogIncomingTask(makeDigestLogger());
 		task(makeMessage({ text: "hi" }), makeOutgoing());
 		expect(spy).toHaveBeenCalledWith(expect.stringContaining("[DM]"));
 		expect(spy).toHaveBeenCalledWith(expect.stringContaining("+1111111111"));
@@ -59,7 +64,7 @@ describe("createLogIncomingTask", () => {
 
 	it("logs group with group name and sender", () => {
 		const spy = vi.spyOn(console, "log").mockImplementation(() => {});
-		const task = createLogIncomingTask();
+		const task = createLogIncomingTask(makeDigestLogger());
 		task(makeMessage({ messageType: "group", groupName: "Family", sender: "alice" }), makeOutgoing());
 		expect(spy).toHaveBeenCalledWith(expect.stringContaining("[GROUP] Family|alice"));
 		spy.mockRestore();
@@ -188,7 +193,7 @@ describe("createSendReplyTask", () => {
 describe("createLogOutgoingTask", () => {
 	it("logs the outgoing text reply", () => {
 		const spy = vi.spyOn(console, "log").mockImplementation(() => {});
-		const task = createLogOutgoingTask();
+		const task = createLogOutgoingTask(makeDigestLogger());
 		task(makeMessage(), makeOutgoing({ reply: { type: "message", text: "pong" } }));
 		expect(spy).toHaveBeenCalledWith(expect.stringContaining("pong"));
 		spy.mockRestore();

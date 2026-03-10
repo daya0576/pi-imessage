@@ -17,6 +17,7 @@ import type { AgentManager } from "./agent.js";
 import { createSelfEchoFilter } from "./bluebubble/index.js";
 import { QueueClosedError } from "./bluebubble/index.js";
 import type { BBClient, BBRawMessage, RawMessageQueue } from "./bluebubble/index.js";
+import type { DigestLogger } from "./logger.js";
 import { createMessagePipeline } from "./pipeline.js";
 import type { Settings } from "./settings.js";
 import type { ChatStore } from "./store.js";
@@ -84,10 +85,11 @@ export interface IMessageBotConfig {
 	blueBubblesClient: BBClient;
 	store: ChatStore;
 	getSettings: () => Settings;
+	digestLogger: DigestLogger;
 }
 
 export function createIMessageBot(config: IMessageBotConfig) {
-	const { queue, agent, blueBubblesClient, store, getSettings } = config;
+	const { queue, agent, blueBubblesClient, store, getSettings, digestLogger } = config;
 	const echoFilter = createSelfEchoFilter();
 	const pipeline = createMessagePipeline();
 
@@ -98,7 +100,7 @@ export function createIMessageBot(config: IMessageBotConfig) {
 	//                     └── ...done
 
 	// before
-	pipeline.before(createLogIncomingTask());
+	pipeline.before(createLogIncomingTask(digestLogger));
 	pipeline.before(createDropSelfEchoTask(echoFilter));
 	pipeline.before(createStoreIncomingTask(store));
 	pipeline.before(createCheckReplyEnabledTask(getSettings));
@@ -109,7 +111,7 @@ export function createIMessageBot(config: IMessageBotConfig) {
 
 	// end
 	pipeline.end(createSendReplyTask(echoFilter, blueBubblesClient));
-	pipeline.end(createLogOutgoingTask());
+	pipeline.end(createLogOutgoingTask(digestLogger));
 	pipeline.end(createStoreOutgoingTask(store));
 
 	return {

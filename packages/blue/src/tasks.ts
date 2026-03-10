@@ -21,6 +21,7 @@ import type { ImageContent } from "@mariozechner/pi-ai";
 import type { AgentManager } from "./agent.js";
 import type { BBClient } from "./bluebubble/index.js";
 import type { SelfEchoFilter } from "./bluebubble/index.js";
+import type { DigestLogger } from "./logger.js";
 import type { BeforeTask, DispatchFn, EndTask, StartTask } from "./pipeline.js";
 import type { Settings } from "./settings.js";
 import { isReplyEnabled } from "./settings.js";
@@ -48,13 +49,13 @@ function formatTarget(msg: IncomingMessage): string {
  *   [blue] <- [SMS]   +16501234567: can you call me
  *   [blue] <- [GROUP] Family|+16501234567: dinner at 6? [2 attachment(s)]
  */
-export function createLogIncomingTask(): BeforeTask {
+export function createLogIncomingTask(digestLogger: DigestLogger): BeforeTask {
 	return (incoming, outgoing) => {
 		const label = messageTypeLabel(incoming);
 		const target = formatTarget(incoming);
 		const attachmentNote = incoming.attachments.length > 0 ? ` [${incoming.attachments.length} attachment(s)]` : "";
-		console.log(
-			`[blue] <- [${label}] ${target}: ${(incoming.text ?? "(attachment)").substring(0, 80)}${attachmentNote}`
+		digestLogger.log(
+			`[blue] <- [${label}] ${target}: ${(incoming.text ?? "(attachment)").substring(0, 80)}${attachmentNote}`,
 		);
 		return outgoing;
 	};
@@ -168,17 +169,17 @@ export function createSendReplyTask(echoFilter: SelfEchoFilter, blueBubblesClien
  *   [blue] -> [GROUP] Family: sounds good!
  *   [blue] -> [DM]    +16501234567: (reaction: love)
  */
-export function createLogOutgoingTask(): EndTask {
+export function createLogOutgoingTask(digestLogger: DigestLogger): EndTask {
 	return (incoming, outgoing) => {
 		const { reply } = outgoing;
 		if (reply.type === "message") {
 			const label = messageTypeLabel(incoming);
 			const target = incoming.messageType === "group" ? incoming.groupName : incoming.sender;
-			console.log(`[blue] -> [${label}] ${target}: ${reply.text.substring(0, 80)}`);
+			digestLogger.log(`[blue] -> [${label}] ${target}: ${reply.text.substring(0, 80)}`);
 		} else if (reply.type === "reaction") {
 			const label = messageTypeLabel(incoming);
 			const target = incoming.messageType === "group" ? incoming.groupName : incoming.sender;
-			console.log(`[blue] -> [${label}] ${target}: (reaction: ${reply.reaction})`);
+			digestLogger.log(`[blue] -> [${label}] ${target}: (reaction: ${reply.reaction})`);
 		}
 		return outgoing;
 	};

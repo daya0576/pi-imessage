@@ -13,7 +13,7 @@ import { type Message, type TextContent, getModel } from "@mariozechner/pi-ai";
 import { DefaultResourceLoader, type AgentSession, SessionManager, createAgentSession } from "@mariozechner/pi-coding-agent";
 import type { IncomingMessage } from "./types.js";
 
-const model = getModel("github-copilot", "claude-sonnet-4.6");
+const model = getModel("github-copilot", "claude-sonnet-4.5");
 
 export interface AgentManagerConfig {
 	workingDir: string;

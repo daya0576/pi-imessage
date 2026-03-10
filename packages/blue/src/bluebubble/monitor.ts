@@ -86,7 +86,7 @@ export function createBBMonitor(config: MonitorConfig) {
 		const chatGuid = raw.chats?.[0]?.guid;
 		if (!chatGuid) return;
 
-		console.info(`[blue] webhook received: chatGuid=${chatGuid}, hasText=${hasText}, attachments=${attachments.length}`);
+		console.info(`[blue] webhook received: chatGuid=${chatGuid}, hasText=${hasText}, attachments=${attachments.length}, body=${JSON.stringify(raw)}`);
 
 		queue.push(raw);
 	}

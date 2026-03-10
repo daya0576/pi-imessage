@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { createAgentManager } from "./agent.js";
 import { createBBClient, createBBMonitor, createRawMessageQueue } from "./bluebubble/index.js";
 import { createIMessageBot } from "./imessage.js";
+import { createAppLogger, createDigestLogger } from "./logger.js";
 import { readSettings, writeSettings } from "./settings.js";
 import type { Settings } from "./settings.js";
 import { createChatStore } from "./store.js";
@@ -28,6 +29,10 @@ async function main() {
 	const webPort = Number.parseInt(process.env.WEB_PORT || "7750", 10);
 	const workingDir = process.env.WORKING_DIR || join(process.cwd(), "data");
 
+	// Loggers must be created before anything else so all console output is captured.
+	const appLogger = createAppLogger(workingDir);
+	const digestLogger = createDigestLogger(workingDir);
+
 	const blueBubblesClient = createBBClient({ url: blueBubblesUrl, password: blueBubblesPassword });
 	const agent = createAgentManager({ workingDir });
 	const store = createChatStore({ workingDir });
@@ -41,7 +46,7 @@ async function main() {
 		writeSettings(workingDir, updated);
 	};
 
-	const bot = createIMessageBot({ queue, agent, blueBubblesClient, store, getSettings });
+	const bot = createIMessageBot({ queue, agent, blueBubblesClient, store, getSettings, digestLogger });
 	const web = createWebServer({ workingDir, port: webPort, getSettings, setSettings });
 
 	console.log(`[blue] Working directory: ${workingDir}`);
@@ -54,6 +59,8 @@ async function main() {
 		bot.stop();
 		web.stop();
 		monitor.stop();
+		digestLogger.close();
+		appLogger.close();
 		process.exit(0);
 	}
 
