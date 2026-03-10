@@ -18,18 +18,6 @@ An minimal iMessage bot powered by an LLM that can execute bash commands, read/w
 
 Credentials are shared with pi-coding-agent and stored in `~/.pi/agent/auth.json`.
 
-**OAuth login** (recommended for Claude Pro/Max):
-
-```bash
-npx @mariozechner/pi-coding-agent
-# then run /login → Anthropic/GitHub Copilot/... → follow browser instructions
-```
-
-**API key** via environment variable:
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-```
 
 ## Commands
 
@@ -40,44 +28,20 @@ Send these as iMessage text to interact with Blue:
 | `/new` | Reset the session, starting a fresh conversation | `✓ New session started` |
 | `/status` | Show session stats: tokens, context, model | `💬 3 msgs - ↑7.2k ↓505 1.1%/128k`<br>`🤖 github-copilot/gpt-5-mini • 💭 minimal` |
 
-## Model Configuration
+## Settings (`WORKING_DIR/settings.json`)
 
-Blue uses the model from `~/.pi/agent/settings.json` (`defaultProvider` + `defaultModel`) by default.
-
-To override, add model fields to `WORKING_DIR/settings.json`:
+All fields are optional.
 
 ```json
 {
   "defaultProvider": "anthropic",
   "defaultModel": "claude-sonnet-4.6",
-  "defaultThinkingLevel": "minimal"
-}
-```
-
-## Chat Allowlist
-
-Controls whether the bot replies to a given chat. Messages are always logged regardless.
-
-Configure via `chatAllowlist` in `WORKING_DIR/settings.json`:
-
-```json
-{
+  "defaultThinkingLevel": "minimal",
   "chatAllowlist": {
     "whitelist": ["*"],
-    "blacklist": []
+    "blacklist": ["iMessage;-;+11234567890"]
   }
 }
 ```
 
-Resolution priority (highest → lowest):
-
-`blacklist[chatGuid]` > `whitelist[chatGuid]` > `blacklist["*"]` > `whitelist["*"]`
-
-| whitelist | blacklist | Effect |
-|---|---|---|
-| `["*"]` | `[]` | Reply to everyone |
-| `["chatGuid-1"]` | `[]` | Reply only to `chatGuid-1` |
-| `["*"]` | `["chatGuid-2"]` | Reply to everyone except `chatGuid-2` |
-| `[]` | `["*"]` | Reply to nobody (log-only) |
-| `["chatGuid-1"]` | `["*"]` | Reply only to `chatGuid-1` |
-| `["chatGuid-1"]` | `["chatGuid-1"]` | No reply (blacklist wins) |
+`chatAllowlist` controls which chats receive replies (messages are always logged). Resolution priority: `blacklist[guid]` > `whitelist[guid]` > `blacklist["*"]` > `whitelist["*"]`. The example above replies to everyone except one number.
