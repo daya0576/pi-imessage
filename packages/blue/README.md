@@ -31,41 +31,53 @@ npx @mariozechner/pi-coding-agent
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-## Model Configuration
-
-Blue uses the model from `~/.pi/agent/settings.json` (`defaultProvider` + `defaultModel`) by default.
-
-To override, add a `model` section to `WORKING_DIR/settings.json`:
-
-```json
-{
-  "model": {
-    "defaultProvider": "anthropic",
-    "defaultModel": "claude-sonnet-4.6"
-  }
-}
-```
-
 ## Commands
 
 Send these as iMessage text to interact with Blue:
 
-| Command | Description |
-|---|---|
-| `/new` | Reset the session, starting a fresh conversation (forgets previous context) |
-| `/status` | Show current session stats: message count, tokens, context usage, model, thinking level |
+| Command | Description | Example Reply |
+|---|---|---|
+| `/new` | Reset the session, starting a fresh conversation | `✓ New session started` |
+| `/status` | Show session stats: tokens, context, model | `💬 3 msgs - ↑7.2k ↓505 1.1%/128k`<br>`🤖 github-copilot/gpt-5-mini • 💭 minimal` |
 
-### Examples
+## Model Configuration
 
-**`/new`** replies:
+Blue uses the model from `~/.pi/agent/settings.json` (`defaultProvider` + `defaultModel`) by default.
 
+To override, add model fields to `WORKING_DIR/settings.json`:
+
+```json
+{
+  "defaultProvider": "anthropic",
+  "defaultModel": "claude-sonnet-4.6",
+  "defaultThinkingLevel": "minimal"
+}
 ```
-✓ New session started
+
+## Chat Allowlist
+
+Controls whether the bot replies to a given chat. Messages are always logged regardless.
+
+Configure via `chatAllowlist` in `WORKING_DIR/settings.json`:
+
+```json
+{
+  "chatAllowlist": {
+    "whitelist": ["*"],
+    "blacklist": []
+  }
+}
 ```
 
-**`/status`** replies:
+Resolution priority (highest → lowest):
 
-```
-💬 3 msgs - ↑7.2k ↓505 1.1%/128k
-🤖 github-copilot/gpt-5-mini • 💭 minimal
-```
+`blacklist[chatGuid]` > `whitelist[chatGuid]` > `blacklist["*"]` > `whitelist["*"]`
+
+| whitelist | blacklist | Effect |
+|---|---|---|
+| `["*"]` | `[]` | Reply to everyone |
+| `["chatGuid-1"]` | `[]` | Reply only to `chatGuid-1` |
+| `["*"]` | `["chatGuid-2"]` | Reply to everyone except `chatGuid-2` |
+| `[]` | `["*"]` | Reply to nobody (log-only) |
+| `["chatGuid-1"]` | `["*"]` | Reply only to `chatGuid-1` |
+| `["chatGuid-1"]` | `["chatGuid-1"]` | No reply (blacklist wins) |
