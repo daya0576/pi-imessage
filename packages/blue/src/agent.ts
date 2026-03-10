@@ -1,29 +1,76 @@
 /**
  * Agent module — text-in / text-out AI processor per iMessage chat.
  *
- * Each chat gets a lazily-created AgentSession with persistent context.
- * Messages are processed sequentially per chat via a serial queue.
- * Replies are streamed per message: each message_end event (assistant or toolResult) invokes onReply,
- * serialized via replyChain so iMessages are sent in order.
+ * Each chat gets a lazily-created AgentSession with persistent context
+ * (context.jsonl per chat directory).
+ *
+ * Reply delivery: each tool or assistant event enqueues an onReply call
+ * through replyChain, so iMessages arrive in order.
+ *
+ * Model resolution priority:
+ *   1. settings.json modelOverride (defaultProvider / defaultModel / defaultThinkingLevel)
+ *   2. ~/.pi/agent/ defaults (via createAgentSession)
  */
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { Message, TextContent } from "@mariozechner/pi-ai";
-import { type AgentSession, DefaultResourceLoader, SessionManager, SettingsManager, createAgentSession } from "@mariozechner/pi-coding-agent";
-import type { ModelSettings } from "./settings.js";
+import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
+import type { Api, AssistantMessage, Message, Model, TextContent } from "@mariozechner/pi-ai";
+import {
+	type AgentSession,
+	AuthStorage,
+	DefaultResourceLoader,
+	ModelRegistry,
+	SessionManager,
+	createAgentSession,
+} from "@mariozechner/pi-coding-agent";
+import type { Settings } from "./settings.js";
 import type { IncomingMessage } from "./types.js";
+
+// ── Config & Types ────────────────────────────────────────────────────────────
 
 export interface AgentManagerConfig {
 	workingDir: string;
-	modelSettings?: ModelSettings;
+	getSettings: () => Settings;
 }
 
 interface ChatSession {
 	session: AgentSession;
 	chatGuid: string;
+	/** Human-readable model label, e.g. "anthropic/claude-sonnet-4" or "default". */
+	modelLabel: string;
 }
 
+// ── Shared Resources (initialized once) ───────────────────────────────────────
+
+/** Resources that are expensive to create and shared across all chat sessions. */
+interface SharedResources {
+	authStorage: AuthStorage;
+	modelRegistry: ModelRegistry;
+	resourceLoader: DefaultResourceLoader;
+}
+
+/** Create and initialize shared resources (auth, model registry, resource loader). */
+async function initSharedResources(): Promise<SharedResources> {
+	const authStorage = AuthStorage.create();
+	const modelRegistry = new ModelRegistry(authStorage);
+
+	// Resource loader with iMessage-specific system prompt; no extensions/skills needed.
+	const resourceLoader = new DefaultResourceLoader({
+		systemPrompt: buildSystemPrompt(),
+		noExtensions: true,
+		noSkills: true,
+		noPromptTemplates: true,
+		noThemes: true,
+	});
+	await resourceLoader.reload();
+
+	return { authStorage, modelRegistry, resourceLoader };
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Replace characters that are invalid in directory names. */
 function sanitizeChatGuid(chatGuid: string): string {
 	return chatGuid.replace(/[^a-zA-Z0-9_\-;+.@]/g, "_");
 }
@@ -34,21 +81,22 @@ function buildSystemPrompt(): string {
 - Reply in the same language the user is writing in.`;
 }
 
-
+/** Extract concatenated text from a Message, ignoring non-text content parts. */
 function extractMessageText(message: Message): string | null {
 	if (typeof message.content === "string") return message.content;
-	
-  const texts = message.content
+
+	const texts = message.content
 		.filter((part): part is TextContent => part.type === "text" && "text" in part)
 		.map((part) => part.text);
 	const joined = texts.join("\n").trim();
 	return joined || null;
 }
 
+/** Extract human-readable text from a tool result (string or content-array). */
 function extractToolResultText(result: unknown): string {
 	if (typeof result === "string") return result;
-	
-  if (result && typeof result === "object" && "content" in result) {
+
+	if (result && typeof result === "object" && "content" in result) {
 		const content = (result as { content: unknown }).content;
 		if (Array.isArray(content)) {
 			const parts: string[] = [];
@@ -66,80 +114,119 @@ function extractToolResultText(result: unknown): string {
 
 /** Pick a human-readable label for a tool invocation. */
 function extractToolLabel(toolName: string, args: Record<string, unknown>): string {
-	// bash → show the command
 	if (toolName === "bash" && typeof args.command === "string") return args.command;
-	// read/write/edit → show the path
 	if (typeof args.path === "string") return `${toolName}: ${args.path}`;
-	// fallback to explicit label or tool name
 	if (typeof args.label === "string") return args.label;
 	return toolName;
 }
 
-export interface EffectiveModelInfo {
-	provider: string;
-	model: string;
-	source: "workspace settings" | "~/.pi/agent/settings.json";
+// ── Model Resolution ──────────────────────────────────────────────────────────
+
+interface ResolvedModel {
+	model: Model<Api> | undefined;
+	thinkingLevel: ThinkingLevel | undefined;
 }
 
-export function createAgentManager(config: AgentManagerConfig) {
-	const { workingDir, modelSettings } = config;
-	const sessionMap = new Map<string, ChatSession>();
+/**
+ * Resolve the model from settings.json modelOverride, falling back to
+ * createAgentSession defaults (undefined = let the SDK pick).
+ */
+function resolveModel(modelRegistry: ModelRegistry, settings: Settings): ResolvedModel {
+	const override = settings.modelOverride;
+	if (!override) return { model: undefined, thinkingLevel: undefined };
 
-	// Build SettingsManager once: global as base, workspace overrides on top if set.
-	const settingsManager = SettingsManager.create();
-	if (modelSettings?.defaultProvider && modelSettings?.defaultModel) {
-		settingsManager.applyOverrides({
-			defaultProvider: modelSettings.defaultProvider,
-			defaultModel: modelSettings.defaultModel,
-		});
+	const model = modelRegistry.find(override.defaultProvider, override.defaultModel);
+	if (model) {
+		console.log(
+			`[agent] model override: ${override.defaultProvider}/${override.defaultModel}${override.defaultThinkingLevel ? ` thinking=${override.defaultThinkingLevel}` : ""}`
+		);
+		return { model, thinkingLevel: override.defaultThinkingLevel };
 	}
 
-	const effectiveModel: EffectiveModelInfo = {
-		provider: settingsManager.getDefaultProvider() ?? "(default)",
-		model: settingsManager.getDefaultModel() ?? "(default)",
-		source: modelSettings?.defaultModel ? "workspace settings" : "~/.pi/agent/settings.json",
-	};
+	// Override specified but model not found — fall back to SDK defaults
+	console.log(`[agent] model override not found: ${override.defaultProvider}/${override.defaultModel}, using default`);
+	return { model: undefined, thinkingLevel: undefined };
+}
 
+// ── Agent Manager ─────────────────────────────────────────────────────────────
+
+export function createAgentManager(config: AgentManagerConfig) {
+	const { workingDir, getSettings } = config;
+	const sessionMap = new Map<string, ChatSession>();
+
+	// Lazily initialized shared resources (created once on first session request).
+	let sharedResourcesPromise: Promise<SharedResources> | null = null;
+
+	/** Get or lazily create shared resources (exactly once). */
+	function getSharedResources(): Promise<SharedResources> {
+		if (!sharedResourcesPromise) {
+			sharedResourcesPromise = initSharedResources();
+		}
+		return sharedResourcesPromise;
+	}
+
+	/** Lazily create one AgentSession per chat, persisted to context.jsonl. */
 	async function getOrCreateSession(chatGuid: string): Promise<ChatSession> {
 		const existing = sessionMap.get(chatGuid);
 		if (existing) return existing;
 
+		// Shared resources are created once and reused across all sessions.
+		const { modelRegistry, resourceLoader } = await getSharedResources();
+
+		// Per-chat session manager — each chat gets its own context.jsonl.
 		const chatDir = join(workingDir, sanitizeChatGuid(chatGuid));
 		mkdirSync(chatDir, { recursive: true });
 		const sessionManager = SessionManager.open(join(chatDir, "context.jsonl"), chatDir);
 
-		const resourceLoader = new DefaultResourceLoader({
-			systemPrompt: buildSystemPrompt(),
-		});
-		await resourceLoader.reload();
+		// Resolve model from settings (may be undefined → SDK picks default).
+		const { model, thinkingLevel } = resolveModel(modelRegistry, getSettings());
 
 		const { session } = await createAgentSession({
+			model,
+			thinkingLevel,
+			modelRegistry,
 			sessionManager,
-			settingsManager,
 			resourceLoader,
 		});
-		const entry: ChatSession = { session, chatGuid };
+
+		const modelLabel = model ? `${model.provider}/${model.id}` : "default";
+		console.log(`[agent] session created: ${chatGuid} model=${modelLabel}`);
+
+		const entry: ChatSession = { session, chatGuid, modelLabel };
 		sessionMap.set(chatGuid, entry);
 		return entry;
 	}
 
-	/** Prompt the agent and invoke onReply for each message_end (assistant or toolResult) that produces text. Replies are serialized. */
+	/**
+	 * Send a user message through the agent and deliver replies via onReply.
+	 *
+	 * Events are serialized: each tool_execution_start/end and assistant
+	 * message_end enqueues an onReply call through replyChain so iMessages
+	 * arrive in order.
+	 */
 	async function processMessage(msg: IncomingMessage, onReply: (reply: string) => Promise<void>): Promise<void> {
 		const entry = await getOrCreateSession(msg.chatGuid);
 
-		// Track pending tool calls for duration and args
+		// Track pending tool calls for duration logging
 		const pendingTools = new Map<string, { toolName: string; args: Record<string, unknown>; startTime: number }>();
 
 		// Serialize onReply calls — subscribe is sync so we chain promises
 		let replyChain = Promise.resolve();
 		const unsub = entry.session.subscribe((event) => {
 			if (event.type === "message_end" && event.message.role === "assistant") {
+				const assistantMsg = event.message as AssistantMessage;
 				const text = extractMessageText(event.message);
-				console.log(`[blue] message end: ${entry.chatGuid} role=assistant text="${(text ?? "(empty)").substring(0, 60)}"`);
+				const stopReason = assistantMsg.stopReason;
+				const errorMessage = assistantMsg.errorMessage;
+				console.log(
+					`[agent] message end: ${entry.chatGuid} role=assistant stopReason=${stopReason}` +
+						`${errorMessage ? ` error="${errorMessage}"` : ""}` +
+						` text="${(text ?? "(empty)").substring(0, 60)}"`
+				);
 				if (text) {
 					replyChain = replyChain.then(() => onReply(text));
 				}
-      } else if (event.type === "tool_execution_start") {
+			} else if (event.type === "tool_execution_start") {
 				const toolArgs = event.args as Record<string, unknown>;
 				const label = extractToolLabel(event.toolName, toolArgs);
 
@@ -149,7 +236,7 @@ export function createAgentManager(config: AgentManagerConfig) {
 					startTime: Date.now(),
 				});
 
-				console.log(`[blue] tool execution start: ${entry.chatGuid} → ${label}`);
+				console.log(`[agent] tool start: ${entry.chatGuid} → ${label}`);
 				replyChain = replyChain.then(() => onReply(`→ ${label}`));
 			} else if (event.type === "tool_execution_end") {
 				const resultText = extractToolResultText(event.result);
@@ -160,16 +247,18 @@ export function createAgentManager(config: AgentManagerConfig) {
 				const duration = (durationMs / 1000).toFixed(1);
 				const symbol = event.isError ? "✗" : "✓";
 				const truncatedResult = resultText.length > 500 ? `${resultText.substring(0, 500)}…` : resultText;
-
 				const message = `${symbol} ${event.toolName} (${duration}s)\n${truncatedResult}`;
 
-				console.log(`[blue] tool execution end: ${entry.chatGuid} ${symbol} ${event.toolName} (${duration}s) result="${resultText.substring(0, 60)}"`);
+				console.log(
+					`[agent] tool end: ${entry.chatGuid} ${symbol} ${event.toolName} (${duration}s)` +
+						` result="${resultText.substring(0, 60)}"`
+				);
 				replyChain = replyChain.then(() => onReply(message));
 			}
 		});
 
 		const promptText = msg.text ?? "";
-		console.log(`[agent] agent prompt start: ${entry.chatGuid} "${promptText.substring(0, 60)}"`);
+		console.log(`[agent] prompt start: ${entry.chatGuid} model=${entry.modelLabel} "${promptText.substring(0, 60)}"`);
 
 		const promptPromise =
 			msg.images.length > 0
@@ -183,13 +272,13 @@ export function createAgentManager(config: AgentManagerConfig) {
 		try {
 			await Promise.race([promptPromise, timeoutPromise]);
 			await replyChain; // wait for all dispatched replies to finish
-			console.log(`[blue] agent prompt end: ${entry.chatGuid}`);
+			console.log(`[agent] prompt end: ${entry.chatGuid}`);
 		} finally {
 			unsub();
 		}
 	}
 
-	return { processMessage, effectiveModel };
+	return { processMessage };
 }
 
 export type AgentManager = Pick<ReturnType<typeof createAgentManager>, "processMessage">;

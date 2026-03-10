@@ -36,11 +36,11 @@ async function main() {
 
 	const blueBubblesClient = createBBClient({ url: blueBubblesUrl, password: blueBubblesPassword });
 	let settings = readSettings(workingDir);
-	const agent = createAgentManager({ workingDir, modelSettings: settings.model });
+	const getSettings = (): Settings => settings;
+	const agent = createAgentManager({ workingDir, getSettings });
 	const store = createChatStore({ workingDir });
 	const queue = createRawMessageQueue();
 	const monitor = createBBMonitor({ port, queue });
-	const getSettings = (): Settings => settings;
 	const setSettings = (updated: Settings): void => {
 		settings = updated;
 		writeSettings(workingDir, updated);
@@ -49,9 +49,7 @@ async function main() {
 	const bot = createIMessageBot({ queue, agent, blueBubblesClient, store, getSettings, digestLogger });
 	const web = createWebServer({ workingDir, port: webPort, getSettings, setSettings });
 
-	const { effectiveModel } = agent;
 	console.log(`[blue] workspace:  ${workingDir}`);
-	console.log(`[blue] model:      ${effectiveModel.provider}/${effectiveModel.model} (${effectiveModel.source})`);
 	monitor.start();
 	bot.start();
 	web.start();
