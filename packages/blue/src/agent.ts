@@ -296,8 +296,8 @@ export function createAgentManager(config: AgentManagerConfig) {
 	 * Lazily creates/resumes the session from disk if not already in memory.
 	 *
 	 * Format (two lines):
-	 *   ↑7.2k ↓505 1.1%/128k
-	 *   github-copilot/gpt-5-mini • thinking minimal
+	 *   ↑7.2k ↓505 1.1%/128k 💬 3 msgs
+	 *   🤖 github-copilot/gpt-5-mini • 💭 minimal
 	 */
 	async function getSessionStatus(chatGuid: string): Promise<string> {
 		const entry = await getOrCreateSession(chatGuid);
@@ -307,7 +307,7 @@ export function createAgentManager(config: AgentManagerConfig) {
 		const model = session.model;
 		const thinkingLevel = session.thinkingLevel;
 
-		// Line 1: token counts + context usage
+		// Line 1: token counts + context usage + message count
 		const line1Parts: string[] = [];
 		line1Parts.push(`↑${formatTokenCount(stats.tokens.input)}`);
 		line1Parts.push(`↓${formatTokenCount(stats.tokens.output)}`);
@@ -316,10 +316,11 @@ export function createAgentManager(config: AgentManagerConfig) {
 			const window = formatTokenCount(contextUsage.contextWindow);
 			line1Parts.push(`${percent}/${window}`);
 		}
+		line1Parts.push(`💬 ${stats.userMessages} msgs`);
 
 		// Line 2: provider/model • thinking level
 		const modelLabel = model ? `${model.provider}/${model.id}` : entry.modelLabel;
-		const line2 = `${modelLabel} • thinking ${thinkingLevel ?? "off"}`;
+		const line2 = `🤖 ${modelLabel} • 💭 ${thinkingLevel ?? "off"}`;
 
 		return `${line1Parts.join(" ")}\n${line2}`;
 	}
