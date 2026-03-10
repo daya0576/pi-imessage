@@ -9,6 +9,7 @@
  *   checkReplyEnabled — drops messages when reply is disabled by settings
  *
  * start:
+ *   commandHandler   — intercepts slash commands (/new, /status) before the agent
  *   downloadImages   — downloads image attachments and populates incoming.images
  *   callAgent        — sends the message to the agent and yields replies as they arrive
  *
@@ -103,6 +104,40 @@ export function createCheckReplyEnabledTask(getSettings: () => Settings): Before
 			return { ...outgoing, shouldContinue: false };
 		}
 		return outgoing;
+	};
+}
+
+// ── command tasks ─────────────────────────────────────────────────────────────
+
+/**
+ * Intercept slash commands (e.g. "/new", "/status") before they reach the agent.
+ * Sets shouldContinue=false on the outgoing message to skip subsequent start tasks.
+ *
+ * Supported commands:
+ *   /new    — reset the agent session for this chat (equivalent to /new in pi coding agent).
+ *   /status — show session stats: tokens, cost, context usage, model, thinking level.
+ */
+export function createCommandHandlerTask(agent: AgentManager): StartTask {
+	return async (incoming, outgoing, dispatch) => {
+		const text = incoming.text?.trim();
+
+		if (text === "/new") {
+			const wasReset = await agent.resetSession(incoming.chatGuid);
+			const replyText = wasReset ? "Session restarted." : "No active session to restart.";
+			console.log(`[blue] /new command: ${incoming.chatGuid} → ${replyText}`);
+			await dispatch({ ...outgoing, reply: { type: "message", text: replyText } });
+			outgoing.shouldContinue = false;
+			return;
+		}
+
+		if (text === "/status") {
+			const status = agent.getSessionStatus(incoming.chatGuid);
+			const replyText = status ?? "No active session.";
+			console.log(`[blue] /status command: ${incoming.chatGuid} → ${replyText}`);
+			await dispatch({ ...outgoing, reply: { type: "message", text: replyText } });
+			outgoing.shouldContinue = false;
+			return;
+		}
 	};
 }
 

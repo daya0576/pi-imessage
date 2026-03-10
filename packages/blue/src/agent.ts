@@ -278,7 +278,83 @@ export function createAgentManager(config: AgentManagerConfig) {
 		}
 	}
 
-	return { processMessage };
+	/**
+	 * Reset the agent session for a chat, starting a new session
+	 * (equivalent to /new in the coding agent).
+	 * Returns true if a session existed and was reset, false if no session existed.
+	 */
+	async function resetSession(chatGuid: string): Promise<boolean> {
+		const existing = sessionMap.get(chatGuid);
+		if (!existing) return false;
+		await existing.session.newSession();
+		console.log(`[agent] session reset: ${chatGuid}`);
+		return true;
+	}
+
+	/**
+	 * Get a formatted status string for a chat session.
+	 * Returns null if no session exists for the given chatGuid.
+	 *
+	 * Format:
+	 *   ↑5.9k ↓12k R1.8M W197k $0.000 50.0%/128k (auto)   (github-copilot) claude-opus-4.6 • thinking off
+	 */
+	function getSessionStatus(chatGuid: string): string | null {
+		const existing = sessionMap.get(chatGuid);
+		if (!existing) return null;
+
+		const { session } = existing;
+		const stats = session.getSessionStats();
+		const contextUsage = session.getContextUsage();
+		const model = session.model;
+		const thinkingLevel = session.thinkingLevel;
+		const autoCompaction = session.autoCompactionEnabled;
+
+		const parts: string[] = [];
+
+		// Token counts: ↑input ↓output Rcache_read Wcache_write
+		parts.push(`↑${formatTokenCount(stats.tokens.input)}`);
+		parts.push(`↓${formatTokenCount(stats.tokens.output)}`);
+		parts.push(`R${formatTokenCount(stats.tokens.cacheRead)}`);
+		parts.push(`W${formatTokenCount(stats.tokens.cacheWrite)}`);
+
+		// Cost
+		parts.push(`$${stats.cost.toFixed(3)}`);
+
+		// Context usage: percent/window
+		if (contextUsage) {
+			const percent = contextUsage.percent !== null ? `${contextUsage.percent.toFixed(1)}%` : "?%";
+			const window = formatTokenCount(contextUsage.contextWindow);
+			parts.push(`${percent}/${window}`);
+		}
+
+		// Auto compaction
+		if (autoCompaction) {
+			parts.push("(auto)");
+		}
+
+		// Provider and model
+		if (model) {
+			parts.push(`(${model.provider}) ${model.id}`);
+		} else {
+			parts.push(existing.modelLabel);
+		}
+
+		// Thinking level
+		parts.push(`• thinking ${thinkingLevel ?? "off"}`);
+
+		return parts.join(" ");
+	}
+
+	return { processMessage, resetSession, getSessionStatus };
 }
 
-export type AgentManager = Pick<ReturnType<typeof createAgentManager>, "processMessage">;
+/** Format a token count as a compact string: 0, 1.2k, 5.9k, 12k, 1.8M, etc. */
+function formatTokenCount(tokens: number): string {
+	if (tokens === 0) return "0";
+	if (tokens < 1_000) return String(tokens);
+	if (tokens < 10_000) return `${(tokens / 1_000).toFixed(1)}k`;
+	if (tokens < 1_000_000) return `${Math.round(tokens / 1_000)}k`;
+	return `${(tokens / 1_000_000).toFixed(1)}M`;
+}
+
+export type AgentManager = Pick<ReturnType<typeof createAgentManager>, "processMessage" | "resetSession" | "getSessionStatus">;

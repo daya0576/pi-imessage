@@ -24,6 +24,7 @@ import type { ChatStore } from "./store.js";
 import {
 	createCallAgentTask,
 	createCheckReplyEnabledTask,
+	createCommandHandlerTask,
 	createDownloadImagesTask,
 	createDropSelfEchoTask,
 	createLogIncomingTask,
@@ -107,6 +108,7 @@ export function createIMessageBot(config: IMessageBotConfig) {
 	pipeline.before(createDownloadImagesTask(blueBubblesClient));
 
 	// start
+	pipeline.start(createCommandHandlerTask(agent));
 	pipeline.start(createCallAgentTask(agent));
 
 	// end

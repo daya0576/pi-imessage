@@ -7,6 +7,7 @@
  *
  *   before : Filter & prepare. Runs once. Sets shouldContinue=false to drop.
  *   start  : Calls agent. Invokes dispatch() for each reply produced.
+ *            Sets shouldContinue=false on outgoing to skip remaining start tasks.
  *   end    : Runs once per dispatched reply (send, log, store).
  */
 
@@ -52,6 +53,7 @@ export function createMessagePipeline(): MessagePipeline {
 		const dispatch: DispatchFn = (out) => runEndTasks(incoming, out);
 		for (const task of startTasks) {
 			await task(incoming, outgoing, dispatch);
+			if (!outgoing.shouldContinue) break;
 		}
 
 		return outgoing;
