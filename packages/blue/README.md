@@ -45,3 +45,27 @@ To override, add a `model` section to `WORKING_DIR/settings.json`:
   }
 }
 ```
+
+## Commands
+
+Send these as iMessage text to interact with Blue:
+
+| Command | Description |
+|---|---|
+| `/new` | Reset the session, starting a fresh conversation (forgets previous context) |
+| `/status` | Show current session stats: message count, tokens, context usage, model, thinking level |
+
+### Examples
+
+**`/new`** replies:
+
+```
+✓ New session started
+```
+
+**`/status`** replies:
+
+```
+💬 3 msgs - ↑7.2k ↓505 1.1%/128k
+🤖 github-copilot/gpt-5-mini • 💭 minimal
+```
