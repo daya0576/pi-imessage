@@ -49,7 +49,9 @@ async function main() {
 	const bot = createIMessageBot({ queue, agent, blueBubblesClient, store, getSettings, digestLogger });
 	const web = createWebServer({ workingDir, port: webPort, getSettings, setSettings });
 
-	console.log(`[blue] Working directory: ${workingDir}`);
+	const { effectiveModel } = agent;
+	console.log(`[blue] workspace:  ${workingDir}`);
+	console.log(`[blue] model:      ${effectiveModel.provider}/${effectiveModel.model} (${effectiveModel.source})`);
 	monitor.start();
 	bot.start();
 	web.start();

@@ -75,9 +75,30 @@ function extractToolLabel(toolName: string, args: Record<string, unknown>): stri
 	return toolName;
 }
 
+export interface EffectiveModelInfo {
+	provider: string;
+	model: string;
+	source: "workspace settings" | "~/.pi/agent/settings.json";
+}
+
 export function createAgentManager(config: AgentManagerConfig) {
 	const { workingDir, modelSettings } = config;
 	const sessionMap = new Map<string, ChatSession>();
+
+	// Build SettingsManager once: global as base, workspace overrides on top if set.
+	const settingsManager = SettingsManager.create();
+	if (modelSettings?.defaultProvider && modelSettings?.defaultModel) {
+		settingsManager.applyOverrides({
+			defaultProvider: modelSettings.defaultProvider,
+			defaultModel: modelSettings.defaultModel,
+		});
+	}
+
+	const effectiveModel: EffectiveModelInfo = {
+		provider: settingsManager.getDefaultProvider() ?? "(default)",
+		model: settingsManager.getDefaultModel() ?? "(default)",
+		source: modelSettings?.defaultModel ? "workspace settings" : "~/.pi/agent/settings.json",
+	};
 
 	async function getOrCreateSession(chatGuid: string): Promise<ChatSession> {
 		const existing = sessionMap.get(chatGuid);
@@ -91,16 +112,6 @@ export function createAgentManager(config: AgentManagerConfig) {
 			systemPrompt: buildSystemPrompt(),
 		});
 		await resourceLoader.reload();
-
-		// Build a SettingsManager: global (~/.pi/agent/settings.json) as base,
-		// with workspace model settings applied on top if configured.
-		const settingsManager = SettingsManager.create();
-		if (modelSettings?.defaultProvider && modelSettings?.defaultModel) {
-			settingsManager.applyOverrides({
-				defaultProvider: modelSettings.defaultProvider,
-				defaultModel: modelSettings.defaultModel,
-			});
-		}
 
 		const { session } = await createAgentSession({
 			sessionManager,
@@ -178,7 +189,7 @@ export function createAgentManager(config: AgentManagerConfig) {
 		}
 	}
 
-	return { processMessage };
+	return { processMessage, effectiveModel };
 }
 
-export type AgentManager = ReturnType<typeof createAgentManager>;
+export type AgentManager = Pick<ReturnType<typeof createAgentManager>, "processMessage">;
