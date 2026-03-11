@@ -100,8 +100,18 @@ export function createBBMonitor(config: MonitorConfig) {
 				console.log(`[blue] Listening on ${host}:${port}`);
 			});
 		},
-		stop() {
-			server.close();
+		stop(): Promise<void> {
+			return new Promise<void>((resolve, reject) => {
+				server.close((error) => {
+					if (error) {
+						console.error("[blue] monitor server close error:", error);
+						reject(error);
+					} else {
+						console.log("[blue] monitor server closed");
+						resolve();
+					}
+				});
+			});
 		},
 		/** Exposed for testing — bypasses HTTP, pushes directly into the queue. */
 		handleWebhook,

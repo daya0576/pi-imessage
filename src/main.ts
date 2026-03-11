@@ -56,18 +56,21 @@ async function main() {
 	bot.start();
 	web.start();
 
-	function shutdown() {
+	let shuttingDown = false;
+	async function shutdown() {
+		if (shuttingDown) return;
+		shuttingDown = true;
 		console.log("[blue] Shutting down…");
 		bot.stop();
-		web.stop();
-		monitor.stop();
+		await Promise.all([web.stop(), monitor.stop()]);
 		digestLogger.close();
 		appLogger.close();
+		console.log("[blue] Shutdown complete");
 		process.exit(0);
 	}
 
-	process.on("SIGINT", shutdown);
-	process.on("SIGTERM", shutdown);
+	process.on("SIGINT", () => shutdown());
+	process.on("SIGTERM", () => shutdown());
 }
 
 main().catch((error) => {

@@ -16,7 +16,7 @@ export interface WebServerConfig {
 
 export interface WebServer {
 	start(): void;
-	stop(): void;
+	stop(): Promise<void>;
 }
 
 export function createWebServer(config: WebServerConfig): WebServer {
@@ -110,12 +110,22 @@ export function createWebServer(config: WebServerConfig): WebServer {
 				console.log(`[web] UI available at http://${host}:${port}`);
 			});
 		},
-		stop(): void {
+		stop(): Promise<void> {
 			if (debounceTimer) clearTimeout(debounceTimer);
 			watcher?.close();
-			server.close();
 			for (const client of sseClients) client.end();
 			sseClients.clear();
+			return new Promise<void>((resolve, reject) => {
+				server.close((error) => {
+					if (error) {
+						console.error("[web] server close error:", error);
+						reject(error);
+					} else {
+						console.log("[web] server closed");
+						resolve();
+					}
+				});
+			});
 		},
 	};
 }
