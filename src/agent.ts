@@ -96,7 +96,7 @@ ${workingDir}/
     └── skills/                  # Chat-specific tools
 
 ## settings.json
-Hot-reloaded on every message — edits take effect without restart.
+Hot-reloaded on every new session — edits take effect without restart.
 
 \`\`\`jsonc
 {
@@ -104,14 +104,6 @@ Hot-reloaded on every message — edits take effect without restart.
   "defaultProvider": "anthropic",        // Provider name
   "defaultModel": "claude-sonnet-4",     // Model ID
   "defaultThinkingLevel": "medium",      // off | minimal | low | medium | high | xhigh
-
-  // Chat allowlist — controls which chats the bot replies to.
-  // Messages are always logged regardless of this setting.
-  // Priority: blacklist[id] > whitelist[id] > blacklist["*"] > whitelist["*"]
-  "chatAllowlist": {
-    "whitelist": ["*"],                  // ["*"] = reply to everyone
-    "blacklist": []                      // ["chatGuid"] = block specific chats
-  }
 }
 \`\`\`
 

@@ -1,8 +1,14 @@
-# sid
+# Sid (Cookie Monster)
 
-Your best iMessage friend — self-managing, powered by [pi](https://github.com/badlogic/pi-mono). Sid installs her own tools, programs CLI tools ("skills") to help with your workflows, configures credentials, and maintains her workspace autonomously.
+Your best iMessage friend (Self-host & Self-manage) — powered by [pi](https://github.com/badlogic/pi-mono).
 
-Built on pi's agent SDK - uses `pi-agent-core`, `pi-ai`, and `pi-coding-agent` as libraries, not as a CLI wrapper.
+
+## Features 
+
+- Self managing: Installs tools, writes scripts, configures credentials. Zero setup from you
+- Transparent: Tools calls and reasining are forwarded to your iMessage chat, so you can see exactly what Sid is doing and why
+- Web UI: browse chat history, toggle replies on/off, live updates
+
 
 ## Quick Start
 
