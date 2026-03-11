@@ -2,14 +2,18 @@
 
 ## Never
 
+- Never over-engineer — no abstractions until needed. Functions > classes. No DI frameworks.
+
 ## Always
 
 - When updating code logic, always update the corresponding log statements to reflect the new behavior.
+- Always keep modules minimal
+- Always keep the web UI minimal: single font (`13px/1.6 monospace`), no per-element font overrides, minimal CSS, ASCII aesthetic — no rounded corners, no shadows, no gradients, no colors beyond opacity
 
 ## Knowledge Base
 
 - When working on tasks involving pi-mono internals, message handling, or architecture decisions,
-read `docs/research.md` before proceeding.
+  read `docs/research.md` before proceeding.
 
 ## Code Quality
 
@@ -29,19 +33,4 @@ read `docs/research.md` before proceeding.
 - Run tests from the package root, not the repo root.
 - When writing tests, run them, identify issues in either the test or implementation, and iterate until fixed.
 - NEVER commit unless user asks
-
-## Contribution
-
-```
-research -> design -> feature_list.jsonc -> <coding/testing/review...>
-                                ^                     |
-                                └─────────────────────┘
-                                    (update process)
-```
-
-1. research: Read `docs/research.md` to understand the problem space and design decisions.
-2. design: Create or update `docs/design.md` to outline the proposed solution and architecture
-3. feature list: Create or update `feature_list.jsonc` to specify the features, **test cases** to constrain the implementation, and the acceptance criteria for completion.
-4. coding/testing/review: Implement the features, write tests, and submit for review.
-5. update status: After review, update the status in `feature_list.jsonc` to reflect progress and completion.
 

@@ -22,7 +22,9 @@ describe("before phase", () => {
 		const pipeline = createMessagePipeline();
 		const startFn = vi.fn();
 		pipeline.before((_incoming, outgoing) => outgoing);
-		pipeline.start(async (_incoming, _outgoing, _dispatch) => { startFn(); });
+		pipeline.start(async (_incoming, _outgoing, _dispatch) => {
+			startFn();
+		});
 
 		await pipeline.process(makeMessage());
 		expect(startFn).toHaveBeenCalledTimes(1);
@@ -32,7 +34,9 @@ describe("before phase", () => {
 		const pipeline = createMessagePipeline();
 		const startFn = vi.fn();
 		pipeline.before((_incoming, outgoing) => ({ ...outgoing, shouldContinue: false }));
-		pipeline.start(async (_incoming, _outgoing, _dispatch) => { startFn(); });
+		pipeline.start(async (_incoming, _outgoing, _dispatch) => {
+			startFn();
+		});
 
 		const result = await pipeline.process(makeMessage());
 		expect(result.shouldContinue).toBe(false);
@@ -54,8 +58,16 @@ describe("start + end phase", () => {
 
 		await pipeline.process(makeMessage());
 		expect(endTask).toHaveBeenCalledTimes(2);
-		expect(endTask).toHaveBeenNthCalledWith(1, expect.anything(), expect.objectContaining({ reply: { type: "message", text: "first" } }));
-		expect(endTask).toHaveBeenNthCalledWith(2, expect.anything(), expect.objectContaining({ reply: { type: "message", text: "second" } }));
+		expect(endTask).toHaveBeenNthCalledWith(
+			1,
+			expect.anything(),
+			expect.objectContaining({ reply: { type: "message", text: "first" } })
+		);
+		expect(endTask).toHaveBeenNthCalledWith(
+			2,
+			expect.anything(),
+			expect.objectContaining({ reply: { type: "message", text: "second" } })
+		);
 	});
 
 	it("end tasks are skipped when before-task drops the message", async () => {

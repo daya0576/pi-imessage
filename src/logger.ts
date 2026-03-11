@@ -27,7 +27,7 @@ class RotatingFileWriter {
 	constructor(
 		private readonly filePath: string,
 		private readonly maxBytes: number,
-		private readonly maxFiles: number,
+		private readonly maxFiles: number
 	) {
 		this.currentSize = existsSync(filePath) ? statSync(filePath).size : 0;
 		this.stream = createWriteStream(filePath, { flags: "a" });
@@ -81,14 +81,11 @@ export interface AppLogger {
 	close(): void;
 }
 
-export function createAppLogger(
-	workingDir: string,
-	options: { maxBytes?: number; maxFiles?: number } = {},
-): AppLogger {
+export function createAppLogger(workingDir: string, options: { maxBytes?: number; maxFiles?: number } = {}): AppLogger {
 	const writer = new RotatingFileWriter(
 		join(workingDir, "app.log"),
 		options.maxBytes ?? DEFAULT_MAX_BYTES,
-		options.maxFiles ?? DEFAULT_MAX_FILES,
+		options.maxFiles ?? DEFAULT_MAX_FILES
 	);
 
 	const originalLog = console.log.bind(console);
@@ -130,12 +127,12 @@ export interface DigestLogger {
 
 export function createDigestLogger(
 	workingDir: string,
-	options: { maxBytes?: number; maxFiles?: number } = {},
+	options: { maxBytes?: number; maxFiles?: number } = {}
 ): DigestLogger {
 	const writer = new RotatingFileWriter(
 		join(workingDir, "diget.log"),
 		options.maxBytes ?? DEFAULT_MAX_BYTES,
-		options.maxFiles ?? DEFAULT_MAX_FILES,
+		options.maxFiles ?? DEFAULT_MAX_FILES
 	);
 
 	return {

@@ -1,33 +1,29 @@
 # Features
 
-## [WIP] Messaging
-
-### Bluebubbles
+## Messaging
 - [x] DM/Group/SMS messages
 - [x] Handle attachments (images)
 - [ ] Typing indicators
 - [ ] Reactions
 - ...
 
-### Sqlite
+## Web Page
+- [x] Display message History 
 
-
-## [PLAN] Message History
+##  Message History
 
 - [x] Store message history persistently
 - [x] Review messages in web page with realtime preveiew
 - [ ] Send messages in web page
 
 
-## [PLAN] Events (Scheduled Wake-ups)
+## Events (Scheduled Wake-ups)
 
+## Memory
 
-## [PLAN] Sandbox
+## Sandbox
 
-## [PLAN] Memory
-
-## [PLAN] Skills
-
+## Skills
 
 
 # References:

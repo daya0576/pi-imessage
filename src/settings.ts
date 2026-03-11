@@ -95,8 +95,12 @@ export function readSettings(workingDir: string): Settings {
 
 		return {
 			chatAllowlist: {
-				whitelist: Array.isArray(chatAllowlistRaw.whitelist) ? chatAllowlistRaw.whitelist : DEFAULT_CHAT_ALLOWLIST.whitelist,
-				blacklist: Array.isArray(chatAllowlistRaw.blacklist) ? chatAllowlistRaw.blacklist : DEFAULT_CHAT_ALLOWLIST.blacklist,
+				whitelist: Array.isArray(chatAllowlistRaw.whitelist)
+					? chatAllowlistRaw.whitelist
+					: DEFAULT_CHAT_ALLOWLIST.whitelist,
+				blacklist: Array.isArray(chatAllowlistRaw.blacklist)
+					? chatAllowlistRaw.blacklist
+					: DEFAULT_CHAT_ALLOWLIST.blacklist,
 			},
 			modelOverride,
 		};

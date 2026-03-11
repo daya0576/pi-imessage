@@ -32,7 +32,7 @@ describe("createSelfEchoFilter", () => {
 	it("consumes the entry — identical human follow-up is not suppressed", () => {
 		const filter = createSelfEchoFilter();
 		filter.remember(CHAT_A, "bot reply");
-		expect(filter.isEcho(CHAT_A, "bot reply")).toBe(true);  // echo: consumed
+		expect(filter.isEcho(CHAT_A, "bot reply")).toBe(true); // echo: consumed
 		expect(filter.isEcho(CHAT_A, "bot reply")).toBe(false); // human follow-up: allowed
 	});
 

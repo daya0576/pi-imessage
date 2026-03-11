@@ -38,7 +38,11 @@ export function createBBClient(config: BBConfig) {
 			}
 			const text = await res.text();
 			let parsed: unknown;
-			try { parsed = JSON.parse(text); } catch { parsed = text; }
+			try {
+				parsed = JSON.parse(text);
+			} catch {
+				parsed = text;
+			}
 			return parsed;
 		} catch (err) {
 			if ((err as Error).name === "AbortError") {
@@ -68,7 +72,7 @@ export function createBBClient(config: BBConfig) {
 		try {
 			const res = await fetch(
 				`${url}/api/v1/attachment/${encodeURIComponent(guid)}/download?password=${encodeURIComponent(password)}`,
-				{ method: "GET", signal: controller.signal },
+				{ method: "GET", signal: controller.signal }
 			);
 			status = String(res.status);
 			if (!res.ok) {

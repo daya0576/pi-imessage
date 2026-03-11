@@ -72,7 +72,7 @@ describe("bb client", () => {
 							err.name = "AbortError";
 							reject(err);
 						});
-					}),
+					})
 			);
 			vi.stubGlobal("fetch", fetchMock);
 

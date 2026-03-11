@@ -51,13 +51,13 @@ interface SharedResources {
 }
 
 /** Create and initialize shared resources (auth, model registry, resource loader). */
-async function initSharedResources(): Promise<SharedResources> {
+async function initSharedResources(workingDir: string): Promise<SharedResources> {
 	const authStorage = AuthStorage.create();
 	const modelRegistry = new ModelRegistry(authStorage);
 
 	// Resource loader with iMessage-specific system prompt; no extensions/skills needed.
 	const resourceLoader = new DefaultResourceLoader({
-		systemPrompt: buildSystemPrompt(),
+		systemPrompt: buildSystemPrompt(workingDir),
 		noExtensions: true,
 		noSkills: true,
 		noPromptTemplates: true,
@@ -75,10 +75,37 @@ function sanitizeChatGuid(chatGuid: string): string {
 	return chatGuid.replace(/[^a-zA-Z0-9_\-;+.@]/g, "_");
 }
 
-function buildSystemPrompt(): string {
+function buildSystemPrompt(workingDir: string): string {
 	return `You are a helpful personal assistant communicating via iMessage.
 - Plain text only. Do not use Markdown formatting, double asterisks (**like this**), or [markdown](links).
-- Reply in the same language the user is writing in.`;
+- Reply in the same language the user is writing in.
+
+## Workspace Layout
+${workingDir}/
+├── MEMORY.md                    # Global memory (all chats)
+├── skills/                      # Global CLI tools you create
+└── <chatId>/                    # Each iMessage chat gets a directory
+    ├── MEMORY.md                # Chat-specific memory
+    ├── context.jsonl            # LLM context (session persistence)
+    ├── log.jsonl                # Message history
+    ├── attachments/             # User-shared files
+    ├── scratch/                 # Your working directory
+    └── skills/                  # Chat-specific tools
+
+## Skills (Custom CLI Tools)
+You can create reusable CLI tools for recurring tasks (email, APIs, data processing, etc.).
+
+### Creating Skills
+Store in \`${workingDir}/skills/<name>/\` (global) or \`<chatDir>/skills/<name>/\` (chat-specific).
+Each skill directory needs a \`SKILL.md\` with YAML frontmatter:
+
+\`\`\`markdown
+---
+name: skill-name
+description: What this skill does
+---
+Usage instructions and details here.
+\`\`\``;
 }
 
 /** Extract concatenated text from a Message, ignoring non-text content parts. */
@@ -160,7 +187,7 @@ export function createAgentManager(config: AgentManagerConfig) {
 	/** Get or lazily create shared resources (exactly once). */
 	function getSharedResources(): Promise<SharedResources> {
 		if (!sharedResourcesPromise) {
-			sharedResourcesPromise = initSharedResources();
+			sharedResourcesPromise = initSharedResources(workingDir);
 		}
 		return sharedResourcesPromise;
 	}
@@ -338,4 +365,7 @@ function formatTokenCount(tokens: number): string {
 	return `${(tokens / 1_000_000).toFixed(1)}M`;
 }
 
-export type AgentManager = Pick<ReturnType<typeof createAgentManager>, "processMessage" | "resetSession" | "getSessionStatus">;
+export type AgentManager = Pick<
+	ReturnType<typeof createAgentManager>,
+	"processMessage" | "resetSession" | "getSessionStatus"
+>;

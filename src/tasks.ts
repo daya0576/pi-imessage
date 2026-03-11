@@ -56,7 +56,7 @@ export function createLogIncomingTask(digestLogger: DigestLogger): BeforeTask {
 		const target = formatTarget(incoming);
 		const attachmentNote = incoming.attachments.length > 0 ? ` [${incoming.attachments.length} attachment(s)]` : "";
 		digestLogger.log(
-			`[blue] <- [${label}] ${target}: ${(incoming.text ?? "(attachment)").substring(0, 80)}${attachmentNote}`,
+			`[blue] <- [${label}] ${target}: ${(incoming.text ?? "(attachment)").substring(0, 80)}${attachmentNote}`
 		);
 		return outgoing;
 	};

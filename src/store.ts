@@ -45,7 +45,7 @@ export function senderLabel(message: LoggedMessage): string {
 export function firstLinePreview(text: string | null): string {
 	const full = text && text.trim() !== "" ? text : "[image]";
 	const firstLine = full.split("\n")[0] ?? "";
-	return full.includes("\n") ? firstLine + "..." : full;
+	return full.includes("\n") ? `${firstLine}...` : full;
 }
 
 // ── ChatStore ─────────────────────────────────────────────────────────────────
@@ -56,7 +56,13 @@ export interface ChatStoreConfig {
 
 export interface ChatStore {
 	logIncoming(message: IncomingMessage): Promise<void>;
-	logOutgoing(chatGuid: string, text: string, messageType: MessageType, groupName?: string, isError?: boolean): Promise<void>;
+	logOutgoing(
+		chatGuid: string,
+		text: string,
+		messageType: MessageType,
+		groupName?: string,
+		isError?: boolean
+	): Promise<void>;
 }
 
 export function createChatStore(config: ChatStoreConfig): ChatStore {
@@ -84,9 +90,7 @@ export function createChatStore(config: ChatStoreConfig): ChatStore {
 
 	return {
 		async logIncoming(message: IncomingMessage): Promise<void> {
-			const attachmentPaths = message.attachments.map(
-				(a) => join(message.chatGuid, "attachments", a.guid),
-			);
+			const attachmentPaths = message.attachments.map((a) => join(message.chatGuid, "attachments", a.guid));
 			await append(message.chatGuid, {
 				date: new Date().toISOString(),
 				sender: message.sender,
@@ -98,7 +102,13 @@ export function createChatStore(config: ChatStoreConfig): ChatStore {
 			});
 		},
 
-		async logOutgoing(chatGuid: string, text: string, messageType: MessageType, groupName?: string, isError?: boolean): Promise<void> {
+		async logOutgoing(
+			chatGuid: string,
+			text: string,
+			messageType: MessageType,
+			groupName?: string,
+			isError?: boolean
+		): Promise<void> {
 			await append(chatGuid, {
 				date: new Date().toISOString(),
 				sender: "bot",

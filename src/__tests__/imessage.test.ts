@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { BBWebhookPayload } from "../bluebubble/index.js";
 import { createBBMonitor, createRawMessageQueue, createSelfEchoFilter } from "../bluebubble/index.js";
 import { assembleMessage } from "../imessage.js";
-import { makeMockBBClient, makePayload, makeGroupPayload } from "./helpers.js";
+import { makeGroupPayload, makeMockBBClient, makePayload } from "./helpers.js";
 
 // ── fixtures ──────────────────────────────────────────────────────────────────
 
@@ -15,7 +15,7 @@ describe("createIMessageBot", () => {
 		const queue = createRawMessageQueue();
 		const monitor = createBBMonitor({ port: 0, queue });
 		monitor.handleWebhook(
-			makePayload({ chats: [{ guid: CHAT_DM } as BBWebhookPayload["data"]["chats"][0]], text: "ping" }),
+			makePayload({ chats: [{ guid: CHAT_DM } as BBWebhookPayload["data"]["chats"][0]], text: "ping" })
 		);
 		const raw = await queue.pull();
 		const msg = assembleMessage(raw);
@@ -43,7 +43,11 @@ describe("createIMessageBot", () => {
 
 		// User sends "hello"
 		monitor.handleWebhook(
-			makePayload({ chats: [{ guid: CHAT_DM } as BBWebhookPayload["data"]["chats"][0]], text: "hello", isFromMe: false }),
+			makePayload({
+				chats: [{ guid: CHAT_DM } as BBWebhookPayload["data"]["chats"][0]],
+				text: "hello",
+				isFromMe: false,
+			})
 		);
 		const raw = await queue.pull();
 		const msg = assembleMessage(raw);
@@ -55,13 +59,13 @@ describe("createIMessageBot", () => {
 
 		// BB echoes bot reply back with isFromMe=false (self-chat)
 		monitor.handleWebhook(
-			makePayload({ chats: [{ guid: CHAT_DM } as BBWebhookPayload["data"]["chats"][0]], text: "pong", isFromMe: false }),
+			makePayload({ chats: [{ guid: CHAT_DM } as BBWebhookPayload["data"]["chats"][0]], text: "pong", isFromMe: false })
 		);
 		const echoRaw = await queue.pull();
 		const echoMsg = assembleMessage(echoRaw);
 
 		// Echo filter detects the echo
-		expect(echoFilter.isEcho(echoMsg.chatGuid, echoMsg.text!)).toBe(true);
+		expect(echoFilter.isEcho(echoMsg.chatGuid, echoMsg.text ?? "")).toBe(true);
 		expect(processMessage).toHaveBeenCalledTimes(1);
 	});
 });

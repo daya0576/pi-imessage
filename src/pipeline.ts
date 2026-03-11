@@ -14,13 +14,19 @@
 import type { IncomingMessage, OutgoingMessage } from "./types.js";
 import { createOutgoingMessage } from "./types.js";
 
-export type BeforeTask = (incoming: IncomingMessage, outgoing: OutgoingMessage) => Promise<OutgoingMessage> | OutgoingMessage;
+export type BeforeTask = (
+	incoming: IncomingMessage,
+	outgoing: OutgoingMessage
+) => Promise<OutgoingMessage> | OutgoingMessage;
 
 /** dispatch() runs the full end phase for one reply. */
 export type DispatchFn = (outgoing: OutgoingMessage) => Promise<void>;
 export type StartTask = (incoming: IncomingMessage, outgoing: OutgoingMessage, dispatch: DispatchFn) => Promise<void>;
 
-export type EndTask = (incoming: IncomingMessage, outgoing: OutgoingMessage) => Promise<OutgoingMessage> | OutgoingMessage;
+export type EndTask = (
+	incoming: IncomingMessage,
+	outgoing: OutgoingMessage
+) => Promise<OutgoingMessage> | OutgoingMessage;
 
 export interface MessagePipeline {
 	before(task: BeforeTask): void;

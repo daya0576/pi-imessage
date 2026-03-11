@@ -3,11 +3,11 @@
  */
 
 import { vi } from "vitest";
+import type { BBClient } from "../bluebubble/client.js";
 import type { BBRawMessage, BBWebhookPayload } from "../bluebubble/index.js";
 import { createBBMonitor, createRawMessageQueue } from "../bluebubble/index.js";
-import type { BBClient } from "../bluebubble/client.js";
-import newMessageFixture from "./fixtures/new-message.json" with { type: "json" };
 import newMessageGroupFixture from "./fixtures/new-message-group.json" with { type: "json" };
+import newMessageFixture from "./fixtures/new-message.json" with { type: "json" };
 
 // ── Mock BBClient ─────────────────────────────────────────────────────────────
 
@@ -53,11 +53,8 @@ export function makeMonitor() {
 export async function pullRawAfterWebhook(
 	{ monitor, queue }: ReturnType<typeof makeMonitor>,
 	payload: BBWebhookPayload,
-	timeoutMs = 200,
+	timeoutMs = 200
 ): Promise<BBRawMessage | null> {
 	monitor.handleWebhook(payload);
-	return Promise.race([
-		queue.pull(),
-		new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
-	]);
+	return Promise.race([queue.pull(), new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs))]);
 }

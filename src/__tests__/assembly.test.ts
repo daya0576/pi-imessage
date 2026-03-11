@@ -53,7 +53,12 @@ describe("assembleMessage", () => {
 	});
 
 	it("carries raw attachments through in attachments[]", () => {
-		const imageAttachment = { guid: "attach-001", transferName: "photo.jpg", mimeType: "image/jpeg", totalBytes: 12345 };
+		const imageAttachment = {
+			guid: "attach-001",
+			transferName: "photo.jpg",
+			mimeType: "image/jpeg",
+			totalBytes: 12345,
+		};
 		const raw = makePayload({ text: null, attachments: [imageAttachment] }).data;
 		const msg = assembleMessage(raw);
 		expect(msg.attachments).toEqual([imageAttachment]);

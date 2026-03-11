@@ -71,7 +71,10 @@ function createSerialQueue() {
 	let tail = Promise.resolve();
 	return function enqueue<T>(fn: () => Promise<T>): Promise<T> {
 		const result = tail.then(fn);
-		tail = result.then(() => {}, () => {}); // swallow errors so the queue always advances
+		tail = result.then(
+			() => {},
+			() => {}
+		); // swallow errors so the queue always advances
 		return result;
 	};
 }
@@ -96,7 +99,7 @@ export function createIMessageBot(config: IMessageBotConfig) {
 
 	// ── Pipeline tasks ─────────────────────────────────────────────────────────
 	//
-	//   before -> start ──┬── yield reply -> end 
+	//   before -> start ──┬── yield reply -> end
 	//                     ├── yield reply -> end
 	//                     └── ...done
 
