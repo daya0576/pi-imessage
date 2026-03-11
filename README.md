@@ -1,13 +1,13 @@
-# sid (iMessage Agent)
+# pi-imessage
 
-Your best iMessage friend — powered by [pi](https://github.com/badlogic/pi-mono).
+An iMessage bot — powered by [pi](https://github.com/badlogic/pi-mono).
 
 
-## Features 
+## Features
 
-- Self managing: Installs tools, writes scripts, configures credentials. Zero setup from you
-- Transparent: Tools calls and reasining are forwarded to your iMessage chat, so you can see exactly what Sid is doing and why
-- Web UI: browse chat history, toggle replies on/off, live updates
+- **Self-managing** — installs tools, writes scripts, configures credentials.
+- **Transparent** — tool calls and reasoning are forwarded to your iMessage chat, so you can see exactly what it's doing and why
+- **Web UI** — browse chat history, toggle replies on/off, live updates
 
 
 ## Quick Start
@@ -25,8 +25,6 @@ cp .env.example .env
 # 3. Start
 ./scripts/start.sh
 ```
-
-## How it works
 
 ## Usage
 
