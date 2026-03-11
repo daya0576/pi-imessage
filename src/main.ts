@@ -26,7 +26,9 @@ function requireEnv(name: string): string {
 async function main() {
 	const blueBubblesUrl = requireEnv("BLUEBUBBLES_URL");
 	const blueBubblesPassword = requireEnv("BLUEBUBBLES_PASSWORD");
+	const blueHost = process.env.BLUE_HOST || "localhost";
 	const port = Number.parseInt(process.env.BLUE_PORT || "7749", 10);
+	const webHost = process.env.WEB_HOST || "localhost";
 	const webPort = Number.parseInt(process.env.WEB_PORT || "7750", 10);
 	const workingDir = process.env.WORKING_DIR || join(homedir(), ".pi", "imessage");
 
@@ -40,14 +42,14 @@ async function main() {
 	const agent = createAgentManager({ workingDir, getSettings });
 	const store = createChatStore({ workingDir });
 	const queue = createRawMessageQueue();
-	const monitor = createBBMonitor({ port, queue });
+	const monitor = createBBMonitor({ host: blueHost, port, queue });
 	const setSettings = (updated: Settings): void => {
 		settings = updated;
 		writeSettings(workingDir, updated);
 	};
 
 	const bot = createIMessageBot({ queue, agent, blueBubblesClient, store, getSettings, digestLogger });
-	const web = createWebServer({ workingDir, port: webPort, getSettings, setSettings });
+	const web = createWebServer({ workingDir, host: webHost, port: webPort, getSettings, setSettings });
 
 	console.log(`[blue] workspace:  ${workingDir}`);
 	monitor.start();

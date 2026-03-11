@@ -42,7 +42,7 @@ export function makeGroupPayload(overrides: Partial<BBWebhookPayload["data"]> = 
 
 export function makeMonitor() {
 	const queue = createRawMessageQueue();
-	const monitor = createBBMonitor({ port: 0, queue });
+	const monitor = createBBMonitor({ host: "localhost", port: 0, queue });
 	return { monitor, queue };
 }
 

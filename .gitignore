@@ -31,3 +31,5 @@ npm-debug.log*
 .idea/
 *.swp
 *.swo
+
+nohup.out

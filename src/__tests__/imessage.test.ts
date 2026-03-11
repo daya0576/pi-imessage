@@ -13,7 +13,7 @@ const CHAT_DM = "iMessage;-;+1111111111";
 describe("createIMessageBot", () => {
 	it("DM: raw message assembles into IncomingMessage with messageType 'imessage'", async () => {
 		const queue = createRawMessageQueue();
-		const monitor = createBBMonitor({ port: 0, queue });
+		const monitor = createBBMonitor({ host: "localhost", port: 0, queue });
 		monitor.handleWebhook(
 			makePayload({ chats: [{ guid: CHAT_DM } as BBWebhookPayload["data"]["chats"][0]], text: "ping" })
 		);
@@ -25,7 +25,7 @@ describe("createIMessageBot", () => {
 
 	it("group chat: raw message assembles into IncomingMessage with messageType 'group'", async () => {
 		const queue = createRawMessageQueue();
-		const monitor = createBBMonitor({ port: 0, queue });
+		const monitor = createBBMonitor({ host: "localhost", port: 0, queue });
 		monitor.handleWebhook(makeGroupPayload());
 		const raw = await queue.pull();
 		const msg = assembleMessage(raw);
@@ -37,7 +37,7 @@ describe("createIMessageBot", () => {
 	it("self-chat: bot reply echo is suppressed via echoFilter", async () => {
 		const bbClient = makeMockBBClient();
 		const queue = createRawMessageQueue();
-		const monitor = createBBMonitor({ port: 0, queue });
+		const monitor = createBBMonitor({ host: "localhost", port: 0, queue });
 		const processMessage = vi.fn().mockResolvedValue("pong");
 		const echoFilter = createSelfEchoFilter();
 

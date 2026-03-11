@@ -38,12 +38,13 @@ export interface BBRawMessage {
 // ── Monitor ───────────────────────────────────────────────────────────────────
 
 export interface MonitorConfig {
+	host: string;
 	port: number;
 	queue: RawMessageQueue;
 }
 
 export function createBBMonitor(config: MonitorConfig) {
-	const { port, queue } = config;
+	const { host, port, queue } = config;
 
 	const server = createServer(async (req: HttpIncomingMessage, res: ServerResponse) => {
 		if (req.method === "POST" && (req.url === "/webhook" || req.url === "/")) {
@@ -95,8 +96,8 @@ export function createBBMonitor(config: MonitorConfig) {
 
 	return {
 		start() {
-			server.listen(port, () => {
-				console.log(`[blue] Listening on port ${port}`);
+			server.listen(port, host, () => {
+				console.log(`[blue] Listening on ${host}:${port}`);
 			});
 		},
 		stop() {
