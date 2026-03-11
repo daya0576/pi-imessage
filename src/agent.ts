@@ -77,7 +77,7 @@ function sanitizeChatGuid(chatGuid: string): string {
 }
 
 function buildSystemPrompt(workingDir: string): string {
-	return `You are a helpful personal assistant communicating via iMessage.
+	return `You are the user's best friend communicating via iMessage.
 - Plain text only. Do not use Markdown formatting, double asterisks (**like this**), or [markdown](links).
 - Reply in the same language the user is writing in.
 
