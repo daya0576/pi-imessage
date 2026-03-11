@@ -27,6 +27,7 @@ import type { BeforeTask, DispatchFn, EndTask, StartTask } from "./pipeline.js";
 import type { Settings } from "./settings.js";
 import { isReplyEnabled } from "./settings.js";
 import type { ChatStore } from "./store.js";
+import { formatAgentReply } from "./types.js";
 import type { IncomingMessage, OutgoingMessage } from "./types.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -176,8 +177,9 @@ export function createDownloadImagesTask(bbClient: BBClient): BeforeTask {
 /** Send the message to the agent and dispatch a reply for each agent turn. */
 export function createCallAgentTask(agent: AgentManager): StartTask {
 	return async (incoming, outgoing, dispatch) => {
-		await agent.processMessage(incoming, async (reply) => {
-			await dispatch({ ...outgoing, reply: { type: "message" as const, text: reply } });
+		await agent.processMessage(incoming, async (agentReply) => {
+			const text = formatAgentReply(agentReply);
+			await dispatch({ ...outgoing, reply: { type: "message" as const, text } });
 		});
 	};
 }

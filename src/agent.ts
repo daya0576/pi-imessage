@@ -26,7 +26,7 @@ import {
 	createAgentSession,
 } from "@mariozechner/pi-coding-agent";
 import type { Settings } from "./settings.js";
-import type { IncomingMessage } from "./types.js";
+import type { AgentReply, IncomingMessage } from "./types.js";
 
 // ── Config & Types ────────────────────────────────────────────────────────────
 
@@ -246,7 +246,7 @@ export function createAgentManager(config: AgentManagerConfig) {
 	 * message_end enqueues an onReply call through replyChain so iMessages
 	 * arrive in order.
 	 */
-	async function processMessage(msg: IncomingMessage, onReply: (reply: string) => Promise<void>): Promise<void> {
+	async function processMessage(msg: IncomingMessage, onReply: (reply: AgentReply) => Promise<void>): Promise<void> {
 		const entry = await getOrCreateSession(msg.chatGuid);
 
 		// Track pending tool calls for duration logging
@@ -266,7 +266,7 @@ export function createAgentManager(config: AgentManagerConfig) {
 						` text="${(text ?? "(empty)").substring(0, 60)}"`
 				);
 				if (text) {
-					replyChain = replyChain.then(() => onReply(text));
+					replyChain = replyChain.then(() => onReply({ kind: "assistant", text }));
 				}
 			} else if (event.type === "tool_execution_start") {
 				const toolArgs = event.args as Record<string, unknown>;
@@ -279,7 +279,7 @@ export function createAgentManager(config: AgentManagerConfig) {
 				});
 
 				console.log(`[agent] tool start: ${entry.chatGuid} → ${label}`);
-				replyChain = replyChain.then(() => onReply(`→ ${label}`));
+				replyChain = replyChain.then(() => onReply({ kind: "tool_start", label }));
 			} else if (event.type === "tool_execution_end") {
 				const resultText = extractToolResultText(event.result);
 				const pending = pendingTools.get(event.toolCallId);
@@ -288,14 +288,14 @@ export function createAgentManager(config: AgentManagerConfig) {
 				const durationMs = pending ? Date.now() - pending.startTime : 0;
 				const duration = (durationMs / 1000).toFixed(1);
 				const symbol = event.isError ? "✗" : "✓";
-				const truncatedResult = resultText.length > 500 ? `${resultText.substring(0, 500)}…` : resultText;
-				const message = `${symbol} ${event.toolName} (${duration}s)\n${truncatedResult}`;
 
 				console.log(
 					`[agent] tool end: ${entry.chatGuid} ${symbol} ${event.toolName} (${duration}s)` +
 						` result="${resultText.substring(0, 60)}"`
 				);
-				replyChain = replyChain.then(() => onReply(message));
+				replyChain = replyChain.then(() =>
+					onReply({ kind: "tool_end", toolName: event.toolName, symbol, duration, result: resultText })
+				);
 			}
 		});
 

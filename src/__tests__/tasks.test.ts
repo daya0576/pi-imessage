@@ -9,7 +9,7 @@ import {
 	createLogOutgoingTask,
 	createSendReplyTask,
 } from "../tasks.js";
-import type { IncomingMessage, OutgoingMessage } from "../types.js";
+import type { AgentReply, IncomingMessage, OutgoingMessage } from "../types.js";
 import { createOutgoingMessage } from "../types.js";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -130,9 +130,9 @@ describe("createDownloadImagesTask", () => {
 describe("createCallAgentTask", () => {
 	it("dispatches a reply for each agent turn", async () => {
 		const agent = {
-			processMessage: vi.fn(async (_msg: IncomingMessage, onReply: (r: string) => Promise<void>) => {
-				await onReply("first reply");
-				await onReply("second reply");
+			processMessage: vi.fn(async (_msg: IncomingMessage, onReply: (r: AgentReply) => Promise<void>) => {
+				await onReply({ kind: "assistant", text: "first reply" });
+				await onReply({ kind: "assistant", text: "second reply" });
 			}),
 			resetSession: vi.fn(async () => {}),
 			getSessionStatus: vi.fn(async () => "↑0 ↓0"),

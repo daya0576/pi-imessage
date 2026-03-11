@@ -34,6 +34,31 @@ export interface IncomingMessage {
 	images: ImageContent[];
 }
 
+// ── Agent reply (structured output from the agent) ───────────────────────────
+
+/** Structured reply from the agent — preserves semantic type for formatting. */
+export type AgentReply =
+	| { kind: "assistant"; text: string }
+	| { kind: "tool_start"; label: string }
+	| { kind: "tool_end"; toolName: string; symbol: string; duration: string; result: string };
+
+const MAX_TOOL_RESULT_LINES = 8;
+
+/** Format an AgentReply into a plain-text iMessage string. */
+export function formatAgentReply(reply: AgentReply): string {
+	if (reply.kind === "assistant") return reply.text;
+	if (reply.kind === "tool_start") return `→ ${reply.label}`;
+
+	// tool_end: header + result truncated to MAX_TOOL_RESULT_LINES
+	const header = `${reply.symbol} ${reply.toolName} (${reply.duration}s)`;
+	const lines = reply.result.split("\n");
+	if (lines.length > MAX_TOOL_RESULT_LINES) {
+		const truncated = lines.slice(0, MAX_TOOL_RESULT_LINES).join("\n");
+		return `${header}\n${truncated}\n…`;
+	}
+	return `${header}\n${reply.result}`;
+}
+
 // ── Outgoing message (pipeline response model) ───────────────────────────────
 
 /** What kind of reply the bot should send back. */
