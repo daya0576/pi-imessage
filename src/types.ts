@@ -42,7 +42,7 @@ export type AgentReply =
 	| { kind: "tool_start"; label: string }
 	| { kind: "tool_end"; toolName: string; symbol: string; duration: string; result: string };
 
-const MAX_TOOL_RESULT_LINES = 8;
+const MAX_TOOL_RESULT_LINES = 5;
 
 /** Format an AgentReply into a plain-text iMessage string. */
 export function formatAgentReply(reply: AgentReply): string {
