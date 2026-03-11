@@ -285,12 +285,14 @@ export function createAgentManager(config: AgentManagerConfig) {
 		});
 
 		const promptText = msg.text ?? "";
-		console.log(`[agent] prompt start: ${entry.chatGuid} model=${entry.modelLabel} "${promptText.substring(0, 60)}"`);
+		console.log(
+			`[agent] prompt start (steer): ${entry.chatGuid} model=${entry.modelLabel} "${promptText.substring(0, 60)}"`
+		);
 
 		const promptPromise =
 			msg.images.length > 0
-				? entry.session.prompt(promptText, { images: msg.images })
-				: entry.session.prompt(promptText);
+				? entry.session.prompt(promptText, { images: msg.images, streamingBehavior: "steer" })
+				: entry.session.prompt(promptText, { streamingBehavior: "steer" });
 
 		const timeoutPromise = new Promise<never>((_, reject) =>
 			setTimeout(() => reject(new Error("agent prompt timed out after 120s")), 120_000)
