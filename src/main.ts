@@ -42,7 +42,7 @@ async function main() {
 		settings = readSettings(workingDir);
 		return settings;
 	};
-	const agent = createAgentManager({ workingDir, getSettings });
+	const agent = await createAgentManager({ workingDir });
 	const store = createChatStore({ workingDir });
 	const queue = createRawMessageQueue();
 	const monitor = createBBMonitor({ host: blueHost, port, queue });

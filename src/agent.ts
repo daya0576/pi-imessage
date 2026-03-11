@@ -7,16 +7,12 @@
  * Reply delivery: each tool or assistant event enqueues an onReply call
  * through replyChain, so iMessages arrive in order.
  *
- * Model resolution priority:
- *   1. settings.json modelOverride (defaultProvider / defaultModel / defaultThinkingLevel)
- *   2. ~/.pi/agent/ defaults (via createAgentSession)
+ * Model: uses ~/.pi/agent/ defaults (via createAgentSession).
  */
 
-import { mkdirSync, renameSync } from "node:fs";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
-import type { Api, AssistantMessage, Message, Model, TextContent } from "@mariozechner/pi-ai";
+import type { AssistantMessage, Message, TextContent } from "@mariozechner/pi-ai";
 import {
 	type AgentSession,
 	AuthStorage,
@@ -25,21 +21,17 @@ import {
 	SessionManager,
 	createAgentSession,
 } from "@mariozechner/pi-coding-agent";
-import type { Settings } from "./settings.js";
 import type { AgentReply, IncomingMessage } from "./types.js";
 
 // ── Config & Types ────────────────────────────────────────────────────────────
 
 export interface AgentManagerConfig {
 	workingDir: string;
-	getSettings: () => Settings;
 }
 
 interface ChatSession {
 	session: AgentSession;
 	chatGuid: string;
-	/** Human-readable model label, e.g. "anthropic/claude-sonnet-4" or "default". */
-	modelLabel: string;
 }
 
 // ── Shared Resources (initialized once) ───────────────────────────────────────
@@ -96,23 +88,10 @@ ${workingDir}/
 └── <chatId>/                    # Each iMessage chat gets a directory
     ├── MEMORY.md                # Chat-specific memory
     ├── context.jsonl            # LLM context (session persistence)
-    ├── context.<timestamp>.jsonl # Archived sessions (created by /new)
     ├── log.jsonl                # Message history
     ├── attachments/             # User-shared files
     ├── scratch/                 # Your working directory
     └── skills/                  # Chat-specific tools
-
-## settings.json
-Hot-reloaded on every new session — edits take effect without restart.
-
-\`\`\`jsonc
-{
-  // Model override (optional). Omit to use ~/.pi/agent/ defaults.
-  "defaultProvider": "anthropic",        // Provider name
-  "defaultModel": "claude-sonnet-4",     // Model ID
-  "defaultThinkingLevel": "medium",      // off | minimal | low | medium | high | xhigh
-}
-\`\`\`
 
 ## Skills (Custom CLI Tools)
 You can create reusable CLI tools for recurring tasks (email, APIs, data processing, etc.).
@@ -169,79 +148,34 @@ function extractToolLabel(toolName: string, args: Record<string, unknown>): stri
 	return toolName;
 }
 
-// ── Model Resolution ──────────────────────────────────────────────────────────
-
-interface ResolvedModel {
-	model: Model<Api> | undefined;
-	thinkingLevel: ThinkingLevel | undefined;
-}
-
-/**
- * Resolve the model from settings.json modelOverride, falling back to
- * createAgentSession defaults (undefined = let the SDK pick).
- */
-function resolveModel(modelRegistry: ModelRegistry, settings: Settings): ResolvedModel {
-	const override = settings.modelOverride;
-	if (!override) return { model: undefined, thinkingLevel: undefined };
-
-	const model = modelRegistry.find(override.defaultProvider, override.defaultModel);
-	if (model) {
-		console.log(
-			`[agent] model override: ${override.defaultProvider}/${override.defaultModel}${override.defaultThinkingLevel ? ` thinking=${override.defaultThinkingLevel}` : ""}`
-		);
-		return { model, thinkingLevel: override.defaultThinkingLevel };
-	}
-
-	// Override specified but model not found — fall back to SDK defaults
-	console.log(`[agent] model override not found: ${override.defaultProvider}/${override.defaultModel}, using default`);
-	return { model: undefined, thinkingLevel: undefined };
-}
-
 // ── Agent Manager ─────────────────────────────────────────────────────────────
 
-export function createAgentManager(config: AgentManagerConfig) {
-	const { workingDir, getSettings } = config;
+export async function createAgentManager(config: AgentManagerConfig) {
+	const { workingDir } = config;
 	const sessionMap = new Map<string, ChatSession>();
-
-	// Lazily initialized shared resources (created once on first session request).
-	let sharedResourcesPromise: Promise<SharedResources> | null = null;
-
-	/** Get or lazily create shared resources (exactly once). */
-	function getSharedResources(): Promise<SharedResources> {
-		if (!sharedResourcesPromise) {
-			sharedResourcesPromise = initSharedResources(workingDir);
-		}
-		return sharedResourcesPromise;
-	}
+	const { modelRegistry, resourceLoader } = await initSharedResources(workingDir);
 
 	/** Lazily create one AgentSession per chat, persisted to context.jsonl. */
 	async function getOrCreateSession(chatGuid: string): Promise<ChatSession> {
 		const existing = sessionMap.get(chatGuid);
 		if (existing) return existing;
 
-		// Shared resources are created once and reused across all sessions.
-		const { modelRegistry, resourceLoader } = await getSharedResources();
-
 		// Per-chat session manager — each chat gets its own context.jsonl.
 		const chatDir = join(workingDir, sanitizeChatGuid(chatGuid));
 		mkdirSync(chatDir, { recursive: true });
 		const sessionManager = SessionManager.open(join(chatDir, "context.jsonl"), chatDir);
 
-		// Resolve model from settings (may be undefined → SDK picks default).
-		const { model, thinkingLevel } = resolveModel(modelRegistry, getSettings());
-
 		const { session } = await createAgentSession({
-			model,
-			thinkingLevel,
 			modelRegistry,
 			sessionManager,
 			resourceLoader,
 		});
 
+		const model = session.model;
 		const modelLabel = model ? `${model.provider}/${model.id}` : "default";
 		console.log(`[agent] session created: ${chatGuid} model=${modelLabel}`);
 
-		const entry: ChatSession = { session, chatGuid, modelLabel };
+		const entry: ChatSession = { session, chatGuid };
 		sessionMap.set(chatGuid, entry);
 		return entry;
 	}
@@ -307,8 +241,10 @@ export function createAgentManager(config: AgentManagerConfig) {
 		});
 
 		const promptText = msg.text ?? "";
+		const currentModel = entry.session.model;
+		const currentModelLabel = currentModel ? `${currentModel.provider}/${currentModel.id}` : "default";
 		console.log(
-			`[agent] prompt start (steer): ${entry.chatGuid} model=${entry.modelLabel} "${promptText.substring(0, 60)}"`
+			`[agent] prompt start (steer): ${entry.chatGuid} model=${currentModelLabel} "${promptText.substring(0, 60)}"`
 		);
 
 		const promptPromise =
@@ -329,24 +265,15 @@ export function createAgentManager(config: AgentManagerConfig) {
 		}
 	}
 
-	/**
-	 * Reset the agent session for a chat by archiving context.jsonl
-	 * (renamed to context.<timestamp>.jsonl) and evicting the in-memory
-	 * session. The next message (or getSessionStatus) will create a
-	 * completely fresh session from an empty file.
-	 */
-	async function resetSession(chatGuid: string): Promise<void> {
+	/** Start a new session for a chat by deleting context and evicting the in-memory session. */
+	async function newSession(chatGuid: string): Promise<void> {
 		sessionMap.delete(chatGuid);
 		const chatDir = join(workingDir, sanitizeChatGuid(chatGuid));
 		const contextFile = join(chatDir, "context.jsonl");
 		if (existsSync(contextFile)) {
-			const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-			const archiveFile = join(chatDir, `context.${timestamp}.jsonl`);
-			renameSync(contextFile, archiveFile);
-			console.log(`[agent] session reset (archived → ${archiveFile}): ${chatGuid}`);
-		} else {
-			console.log(`[agent] session reset (no context file): ${chatGuid}`);
+			unlinkSync(contextFile);
 		}
+		console.log(`[agent] new session: ${chatGuid}`);
 	}
 
 	/**
@@ -378,13 +305,13 @@ export function createAgentManager(config: AgentManagerConfig) {
 		const line1 = `${line1Parts[0]} - ${line1Parts.slice(1).join(" ")}`;
 
 		// Line 2: provider/model • thinking level
-		const modelLabel = model ? `${model.provider}/${model.id}` : entry.modelLabel;
+		const modelLabel = model ? `${model.provider}/${model.id}` : "default";
 		const line2 = `🤖 ${modelLabel} • 💭 ${thinkingLevel ?? "off"}`;
 
 		return `${line1}\n${line2}`;
 	}
 
-	return { processMessage, resetSession, getSessionStatus };
+	return { processMessage, newSession, getSessionStatus };
 }
 
 /** Format a token count as a compact string: 0, 1.2k, 5.9k, 12k, 1.8M, etc. */
@@ -397,6 +324,6 @@ function formatTokenCount(tokens: number): string {
 }
 
 export type AgentManager = Pick<
-	ReturnType<typeof createAgentManager>,
-	"processMessage" | "resetSession" | "getSessionStatus"
+	Awaited<ReturnType<typeof createAgentManager>>,
+	"processMessage" | "newSession" | "getSessionStatus"
 >;

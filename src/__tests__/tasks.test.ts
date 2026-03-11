@@ -134,7 +134,7 @@ describe("createCallAgentTask", () => {
 				await onReply({ kind: "assistant", text: "first reply" });
 				await onReply({ kind: "assistant", text: "second reply" });
 			}),
-			resetSession: vi.fn(async () => {}),
+			newSession: vi.fn(async () => {}),
 			getSessionStatus: vi.fn(async () => "↑0 ↓0"),
 		};
 		const task = createCallAgentTask(agent);
@@ -153,7 +153,7 @@ describe("createCallAgentTask", () => {
 	it("dispatches nothing when agent produces no turns", async () => {
 		const agent = {
 			processMessage: vi.fn(async () => {}),
-			resetSession: vi.fn(async () => {}),
+			newSession: vi.fn(async () => {}),
 			getSessionStatus: vi.fn(async () => "↑0 ↓0"),
 		};
 		const task = createCallAgentTask(agent);

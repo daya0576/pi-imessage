@@ -38,7 +38,7 @@ Available at `http://localhost:7750` (configurable via `WEB_PORT`).
 
 ### Commands
 
-Send these as iMessage to interact with Sid:
+Send these as iMessage to interact with the bot:
 
 | Command | Description | Example Reply |
 |---|---|---|
@@ -54,18 +54,11 @@ All fields are optional.
   "chatAllowlist": {
     "whitelist": ["*"],
     "blacklist": ["iMessage;-;+11234567890"]
-  },
-  "modelOverride": {
-    "defaultProvider": "anthropic",
-    "defaultModel": "claude-sonnet-4",
-    "defaultThinkingLevel": "minimal"
   }
 }
 ```
 
 **Chat allowlist** controls which chats receive replies (messages are always logged). Resolution priority: `blacklist[guid]` > `whitelist[guid]` > `blacklist["*"]` > `whitelist["*"]`.
-
-**Model override** overrides the default model from `~/.pi/agent/`. Omit to use pi defaults.
 
 ### Environment Variables
 
