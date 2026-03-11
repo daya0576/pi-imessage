@@ -12,7 +12,8 @@
  *   2. ~/.pi/agent/ defaults (via createAgentSession)
  */
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, renameSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { Api, AssistantMessage, Message, Model, TextContent } from "@mariozechner/pi-ai";
@@ -308,16 +309,23 @@ export function createAgentManager(config: AgentManagerConfig) {
 	}
 
 	/**
-	 * Reset the agent session for a chat, starting a new session
-	 * (equivalent to /new in the coding agent).
-	 * Returns true if a session existed and was reset, false if no session existed.
+	 * Reset the agent session for a chat by archiving context.jsonl
+	 * (renamed to context.<timestamp>.jsonl) and evicting the in-memory
+	 * session. The next message (or getSessionStatus) will create a
+	 * completely fresh session from an empty file.
 	 */
-	async function resetSession(chatGuid: string): Promise<boolean> {
-		const existing = sessionMap.get(chatGuid);
-		if (!existing) return false;
-		await existing.session.newSession();
-		console.log(`[agent] session reset: ${chatGuid}`);
-		return true;
+	async function resetSession(chatGuid: string): Promise<void> {
+		sessionMap.delete(chatGuid);
+		const chatDir = join(workingDir, sanitizeChatGuid(chatGuid));
+		const contextFile = join(chatDir, "context.jsonl");
+		if (existsSync(contextFile)) {
+			const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+			const archiveFile = join(chatDir, `context.${timestamp}.jsonl`);
+			renameSync(contextFile, archiveFile);
+			console.log(`[agent] session reset (archived → ${archiveFile}): ${chatGuid}`);
+		} else {
+			console.log(`[agent] session reset (no context file): ${chatGuid}`);
+		}
 	}
 
 	/**

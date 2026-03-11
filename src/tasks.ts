@@ -123,9 +123,14 @@ export function createCommandHandlerTask(agent: AgentManager): StartTask {
 
 		if (text === "/new") {
 			await agent.resetSession(incoming.chatGuid);
-			const replyText = "✓ New session started";
-			console.log(`[sid] /new command: ${incoming.chatGuid} → ${replyText}`);
-			await dispatch({ ...outgoing, reply: { type: "message", text: replyText } });
+			const resetReply = "✓ New session started";
+			console.log(`[sid] /new command: ${incoming.chatGuid} → ${resetReply}`);
+			await dispatch({ ...outgoing, reply: { type: "message", text: resetReply } });
+
+			const statusReply = await agent.getSessionStatus(incoming.chatGuid);
+			console.log(`[sid] /new status: ${incoming.chatGuid} → ${statusReply}`);
+			await dispatch({ ...outgoing, reply: { type: "message", text: statusReply } });
+
 			outgoing.shouldContinue = false;
 			return;
 		}

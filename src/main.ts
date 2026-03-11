@@ -38,7 +38,10 @@ async function main() {
 
 	const blueBubblesClient = createBBClient({ url: blueBubblesUrl, password: blueBubblesPassword });
 	let settings = readSettings(workingDir);
-	const getSettings = (): Settings => settings;
+	const getSettings = (): Settings => {
+		settings = readSettings(workingDir);
+		return settings;
+	};
 	const agent = createAgentManager({ workingDir, getSettings });
 	const store = createChatStore({ workingDir });
 	const queue = createRawMessageQueue();
