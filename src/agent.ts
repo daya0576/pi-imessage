@@ -83,15 +83,37 @@ function buildSystemPrompt(workingDir: string): string {
 
 ## Workspace Layout
 ${workingDir}/
+├── settings.json                # Bot configuration (see below)
 ├── MEMORY.md                    # Global memory (all chats)
 ├── skills/                      # Global CLI tools you create
 └── <chatId>/                    # Each iMessage chat gets a directory
     ├── MEMORY.md                # Chat-specific memory
     ├── context.jsonl            # LLM context (session persistence)
+    ├── context.<timestamp>.jsonl # Archived sessions (created by /new)
     ├── log.jsonl                # Message history
     ├── attachments/             # User-shared files
     ├── scratch/                 # Your working directory
     └── skills/                  # Chat-specific tools
+
+## settings.json
+Hot-reloaded on every message — edits take effect without restart.
+
+\`\`\`jsonc
+{
+  // Model override (optional). Omit to use ~/.pi/agent/ defaults.
+  "defaultProvider": "anthropic",        // Provider name
+  "defaultModel": "claude-sonnet-4",     // Model ID
+  "defaultThinkingLevel": "medium",      // off | minimal | low | medium | high | xhigh
+
+  // Chat allowlist — controls which chats the bot replies to.
+  // Messages are always logged regardless of this setting.
+  // Priority: blacklist[id] > whitelist[id] > blacklist["*"] > whitelist["*"]
+  "chatAllowlist": {
+    "whitelist": ["*"],                  // ["*"] = reply to everyone
+    "blacklist": []                      // ["chatGuid"] = block specific chats
+  }
+}
+\`\`\`
 
 ## Skills (Custom CLI Tools)
 You can create reusable CLI tools for recurring tasks (email, APIs, data processing, etc.).
