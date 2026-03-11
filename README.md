@@ -1,6 +1,6 @@
-# Sid (Cookie Monster)
+# sid (iMessage Agent)
 
-Your best iMessage friend (Self-host & Self-manage) — powered by [pi](https://github.com/badlogic/pi-mono).
+Your best iMessage friend — powered by [pi](https://github.com/badlogic/pi-mono).
 
 
 ## Features 
