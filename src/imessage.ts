@@ -146,16 +146,16 @@ export function createIMessageBot(config: IMessageBotConfig) {
 					//
 					guidQueue(() => pipeline.process(msg)).catch((error: unknown) => {
 						const sender = raw.handle?.address ?? "unknown";
-						console.error(`[blue] failed to process message from ${sender}:`, error);
+						console.error(`[sid] failed to process message from ${sender}:`, error);
 					});
 				}
 			}
 
 			loop().catch((error: unknown) => {
 				if (error instanceof QueueClosedError) {
-					console.log("[blue] Message queue closed, consumer stopped");
+					console.log("[sid] Message queue closed, consumer stopped");
 				} else {
-					console.error("[blue] Message consumer crashed:", error);
+					console.error("[sid] Message consumer crashed:", error);
 				}
 			});
 		},

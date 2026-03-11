@@ -1,5 +1,5 @@
 /**
- * Blue — iMessage bot entry point.
+ * Sid — iMessage friend entry point.
  */
 
 import "dotenv/config";
@@ -17,7 +17,7 @@ import { createWebServer } from "./web/index.js";
 function requireEnv(name: string): string {
 	const value = process.env[name];
 	if (!value) {
-		console.error(`[blue] Missing required env var: ${name}`);
+		console.error(`[sid] Missing required env var: ${name}`);
 		process.exit(1);
 	}
 	return value;
@@ -51,7 +51,7 @@ async function main() {
 	const bot = createIMessageBot({ queue, agent, blueBubblesClient, store, getSettings, digestLogger });
 	const web = createWebServer({ workingDir, host: webHost, port: webPort, getSettings, setSettings });
 
-	console.log(`[blue] workspace:  ${workingDir}`);
+	console.log(`[sid] workspace:  ${workingDir}`);
 	monitor.start();
 	bot.start();
 	web.start();
@@ -60,12 +60,12 @@ async function main() {
 	async function shutdown() {
 		if (shuttingDown) return;
 		shuttingDown = true;
-		console.log("[blue] Shutting down…");
+		console.log("[sid] Shutting down…");
 		bot.stop();
 		await Promise.all([web.stop(), monitor.stop()]);
 		digestLogger.close();
 		appLogger.close();
-		console.log("[blue] Shutdown complete");
+		console.log("[sid] Shutdown complete");
 		process.exit(0);
 	}
 
@@ -74,6 +74,6 @@ async function main() {
 }
 
 main().catch((error) => {
-	console.error("[blue] Fatal:", error);
+	console.error("[sid] Fatal:", error);
 	process.exit(1);
 });

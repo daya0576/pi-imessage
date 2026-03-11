@@ -1,62 +1,83 @@
-# blue (iMessage bot)
+# sid
 
-> Pi also is a collection of little components that you can build your own agent on top. That's how OpenClaw is built, and that's also how I built my own little Telegram bot and how Mario built his mom. If you want to build your own agent, connected to something, Pi when pointed to itself and mom, will conjure one up for you. - Pi: The Minimal Agent Within OpenClaw
+Your best iMessage friend — self-managing, powered by [pi](https://github.com/badlogic/pi-mono). Sid installs her own tools, programs CLI tools ("skills") to help with your workflows, configures credentials, and maintains her workspace autonomously.
 
-An minimal iMessage bot powered by an LLM that can execute bash commands, read/write files, and interact with your development environment. Blue is self-managing. She installs her own tools, programs CLI tools (aka "skills") she can use to help with your workflows and tasks, configures credentials, and maintains her workspace autonomously.
+Built on pi's agent SDK - uses `pi-agent-core`, `pi-ai`, and `pi-coding-agent` as libraries, not as a CLI wrapper.
 
+## Quick Start
 
-
-# Quick Start
-
-## Development
-
-Prerequisites: [BlueBubbles](https://bluebubbles.app/) running on macOS, pi authenticated (`~/.pi/agent/auth.json` exists).
+Prerequisites: [BlueBubbles](https://bluebubbles.app/) running on macOS, [Pi Coding Agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start) authenticated
 
 ```bash
-# 1. Set BlueBubbles webhook → http://localhost:7749/webhook (New Messages only)
+# 1. Set BlueBubbles webhook → http://localhost:7749/webhook
 
 # 2. Install & configure
 npm install
 cp .env.example .env
-# Edit .env: set BLUEBUBBLES_PASSWORD
+# Edit .env: set BLUEBUBBLES_URL and BLUEBUBBLES_PASSWORD
 
 # 3. Start
-npm run dev
+./scripts/start.sh
 ```
 
-# Usage
+## How it works
 
-## Web UI
+## Usage
+
+### Web UI
 
 Available at `http://localhost:7750` (configurable via `WEB_PORT`).
 
 - Displays chat logs from the last 7 days, sorted by most recent activity
-- Toggle reply on/off per chat 
+- Toggle reply on/off per chat
+- Live updates via SSE when new messages arrive
 
-## Commands
+### Commands
 
-Send these as iMessage text to interact with Blue:
+Send these as iMessage to interact with Sid:
 
 | Command | Description | Example Reply |
 |---|---|---|
 | `/new` | Reset the session, starting a fresh conversation | `✓ New session started` |
-| `/status` | Show session stats: tokens, context, model | `💬 3 msgs - ↑7.2k ↓505 1.1%/128k`<br>`🤖 github-copilot/gpt-5-mini • 💭 minimal` |
+| `/status` | Show session stats: tokens, context, model | `💬 3 msgs - ↑7.2k ↓505 1.1%/128k`<br>`🤖 anthropic/claude-sonnet-4 • 💭 minimal` |
 
-## Settings (`WORKING_DIR/settings.json`)
+### Settings (`WORKING_DIR/settings.json`)
 
 All fields are optional.
 
 ```json
 {
-  "defaultProvider": "anthropic",
-  "defaultModel": "claude-sonnet-4.6",
-  "defaultThinkingLevel": "minimal",
   "chatAllowlist": {
     "whitelist": ["*"],
     "blacklist": ["iMessage;-;+11234567890"]
+  },
+  "modelOverride": {
+    "defaultProvider": "anthropic",
+    "defaultModel": "claude-sonnet-4",
+    "defaultThinkingLevel": "minimal"
   }
 }
 ```
 
-`chatAllowlist` controls which chats receive replies (messages are always logged). Resolution priority: `blacklist[guid]` > `whitelist[guid]` > `blacklist["*"]` > `whitelist["*"]`. The example above replies to everyone except one number.
+**Chat allowlist** controls which chats receive replies (messages are always logged). Resolution priority: `blacklist[guid]` > `whitelist[guid]` > `blacklist["*"]` > `whitelist["*"]`.
 
+**Model override** overrides the default model from `~/.pi/agent/`. Omit to use pi defaults.
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `BLUEBUBBLES_URL` | yes | - | BlueBubbles server URL |
+| `BLUEBUBBLES_PASSWORD` | yes | - | BlueBubbles server password |
+| `BLUE_HOST` | no | `localhost` | Webhook listener host |
+| `BLUE_PORT` | no | `7749` | Webhook listener port |
+| `WEB_HOST` | no | `localhost` | Web UI host |
+| `WEB_PORT` | no | `7750` | Web UI port |
+| `WORKING_DIR` | no | `~/.pi/imessage` | Workspace directory |
+
+## Development
+
+```bash
+npm run check        # typecheck + lint (run after code changes)
+npm test             # run tests
+```

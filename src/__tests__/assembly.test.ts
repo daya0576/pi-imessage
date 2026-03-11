@@ -10,7 +10,7 @@ describe("assembleMessage", () => {
 		const msg = assembleMessage(raw);
 		expect(msg).toEqual({
 			chatGuid: "any;-;+1234567890",
-			text: "hello blue",
+			text: "hello sid",
 			sender: "+1234567890",
 			messageType: "imessage",
 			groupName: "",

@@ -27,7 +27,7 @@ describe("webhook filtering", () => {
 	it("queues valid inbound message as BBRawMessage", async () => {
 		const raw = await pullRawAfterWebhook(makeMonitor(), makePayload());
 		expect(raw).not.toBeNull();
-		expect(raw?.text).toBe("hello blue");
+		expect(raw?.text).toBe("hello sid");
 		expect(raw?.handle?.address).toBe("+1234567890");
 		expect(raw?.chats[0].guid).toBe("any;-;+1234567890");
 	});

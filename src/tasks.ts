@@ -46,9 +46,9 @@ function formatTarget(msg: IncomingMessage): string {
  * Log the incoming message to console. Always passes through.
  *
  * Examples:
- *   [blue] <- [DM]    +16501234567: hey what's up
- *   [blue] <- [SMS]   +16501234567: can you call me
- *   [blue] <- [GROUP] Family|+16501234567: dinner at 6? [2 attachment(s)]
+ *   [sid] <- [DM]    +16501234567: hey what's up
+ *   [sid] <- [SMS]   +16501234567: can you call me
+ *   [sid] <- [GROUP] Family|+16501234567: dinner at 6? [2 attachment(s)]
  */
 export function createLogIncomingTask(digestLogger: DigestLogger): BeforeTask {
 	return (incoming, outgoing) => {
@@ -56,7 +56,7 @@ export function createLogIncomingTask(digestLogger: DigestLogger): BeforeTask {
 		const target = formatTarget(incoming);
 		const attachmentNote = incoming.attachments.length > 0 ? ` [${incoming.attachments.length} attachment(s)]` : "";
 		digestLogger.log(
-			`[blue] <- [${label}] ${target}: ${(incoming.text ?? "(attachment)").substring(0, 80)}${attachmentNote}`
+			`[sid] <- [${label}] ${target}: ${(incoming.text ?? "(attachment)").substring(0, 80)}${attachmentNote}`
 		);
 		return outgoing;
 	};
@@ -66,7 +66,7 @@ export function createLogIncomingTask(digestLogger: DigestLogger): BeforeTask {
 export function createStoreIncomingTask(store: ChatStore): BeforeTask {
 	return (incoming, outgoing) => {
 		store.logIncoming(incoming).catch((error) => {
-			console.error(`[blue] failed to store incoming message for ${incoming.chatGuid}:`, error);
+			console.error(`[sid] failed to store incoming message for ${incoming.chatGuid}:`, error);
 		});
 		return outgoing;
 	};
@@ -76,7 +76,7 @@ export function createStoreIncomingTask(store: ChatStore): BeforeTask {
 export function createDropSelfEchoTask(echoFilter: SelfEchoFilter): BeforeTask {
 	return (incoming, outgoing) => {
 		if (incoming.text && echoFilter.isEcho(incoming.chatGuid, incoming.text)) {
-			console.warn(`[blue] drop self-echo ${incoming.chatGuid}: ${incoming.text.substring(0, 40)}`);
+			console.warn(`[sid] drop self-echo ${incoming.chatGuid}: ${incoming.text.substring(0, 40)}`);
 			return { ...outgoing, shouldContinue: false };
 		}
 		return outgoing;
@@ -100,7 +100,7 @@ export function createDropSelfEchoTask(echoFilter: SelfEchoFilter): BeforeTask {
 export function createCheckReplyEnabledTask(getSettings: () => Settings): BeforeTask {
 	return (incoming, outgoing) => {
 		if (!isReplyEnabled(getSettings(), incoming.chatGuid)) {
-			console.log(`[blue] reply disabled for ${incoming.chatGuid}, log-only`);
+			console.log(`[sid] reply disabled for ${incoming.chatGuid}, log-only`);
 			return { ...outgoing, shouldContinue: false };
 		}
 		return outgoing;
@@ -124,7 +124,7 @@ export function createCommandHandlerTask(agent: AgentManager): StartTask {
 		if (text === "/new") {
 			await agent.resetSession(incoming.chatGuid);
 			const replyText = "✓ New session started";
-			console.log(`[blue] /new command: ${incoming.chatGuid} → ${replyText}`);
+			console.log(`[sid] /new command: ${incoming.chatGuid} → ${replyText}`);
 			await dispatch({ ...outgoing, reply: { type: "message", text: replyText } });
 			outgoing.shouldContinue = false;
 			return;
@@ -132,7 +132,7 @@ export function createCommandHandlerTask(agent: AgentManager): StartTask {
 
 		if (text === "/status") {
 			const replyText = await agent.getSessionStatus(incoming.chatGuid);
-			console.log(`[blue] /status command: ${incoming.chatGuid} → ${replyText}`);
+			console.log(`[sid] /status command: ${incoming.chatGuid} → ${replyText}`);
 			await dispatch({ ...outgoing, reply: { type: "message", text: replyText } });
 			outgoing.shouldContinue = false;
 			return;
@@ -153,14 +153,14 @@ export function createDownloadImagesTask(bbClient: BBClient): BeforeTask {
 		for (const attachment of incoming.attachments) {
 			const mimeType = attachment.mimeType;
 			if (!mimeType?.startsWith("image/")) {
-				console.warn(`[blue] skipping non-image attachment ${attachment.guid} (mimeType: ${mimeType ?? "null"})`);
+				console.warn(`[sid] skipping non-image attachment ${attachment.guid} (mimeType: ${mimeType ?? "null"})`);
 				continue;
 			}
 			try {
 				const bytes = await bbClient.downloadAttachmentBytes(attachment.guid);
 				images.push({ type: "image", mimeType, data: bytes.toString("base64") });
 			} catch (error) {
-				console.error(`[blue] failed to download image attachment ${attachment.guid}:`, error);
+				console.error(`[sid] failed to download image attachment ${attachment.guid}:`, error);
 			}
 		}
 		incoming.images = images;
@@ -198,10 +198,10 @@ export function createSendReplyTask(echoFilter: SelfEchoFilter, blueBubblesClien
  * Log the outgoing reply to console.
  *
  * Examples:
- *   [blue] -> [DM]    +16501234567: sure, I'll check
- *   [blue] -> [SMS]   +16501234567: got it
- *   [blue] -> [GROUP] Family: sounds good!
- *   [blue] -> [DM]    +16501234567: (reaction: love)
+ *   [sid] -> [DM]    +16501234567: sure, I'll check
+ *   [sid] -> [SMS]   +16501234567: got it
+ *   [sid] -> [GROUP] Family: sounds good!
+ *   [sid] -> [DM]    +16501234567: (reaction: love)
  */
 export function createLogOutgoingTask(digestLogger: DigestLogger): EndTask {
 	return (incoming, outgoing) => {
@@ -209,11 +209,11 @@ export function createLogOutgoingTask(digestLogger: DigestLogger): EndTask {
 		if (reply.type === "message") {
 			const label = messageTypeLabel(incoming);
 			const target = incoming.messageType === "group" ? incoming.groupName : incoming.sender;
-			digestLogger.log(`[blue] -> [${label}] ${target}: ${reply.text.substring(0, 80)}`);
+			digestLogger.log(`[sid] -> [${label}] ${target}: ${reply.text.substring(0, 80)}`);
 		} else if (reply.type === "reaction") {
 			const label = messageTypeLabel(incoming);
 			const target = incoming.messageType === "group" ? incoming.groupName : incoming.sender;
-			digestLogger.log(`[blue] -> [${label}] ${target}: (reaction: ${reply.reaction})`);
+			digestLogger.log(`[sid] -> [${label}] ${target}: (reaction: ${reply.reaction})`);
 		}
 		return outgoing;
 	};
@@ -227,7 +227,7 @@ export function createStoreOutgoingTask(store: ChatStore): EndTask {
 			store
 				.logOutgoing(incoming.chatGuid, reply.text, incoming.messageType, incoming.groupName, !sendReply)
 				.catch((error) => {
-					console.error(`[blue] failed to store outgoing message for ${incoming.chatGuid}:`, error);
+					console.error(`[sid] failed to store outgoing message for ${incoming.chatGuid}:`, error);
 				});
 		}
 		return outgoing;

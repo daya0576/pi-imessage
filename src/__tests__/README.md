@@ -1,6 +1,6 @@
 # Tests
 
-Unit tests for the Blue package.
+Unit tests for the Sid package.
 
 ## Test Cases
 

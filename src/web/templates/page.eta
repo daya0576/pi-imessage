@@ -51,7 +51,7 @@ td { vertical-align: top; padding: 1px 0 }
 <% } else { %>
         <tr>
           <td class="c-fix c-time"><%= row.time %></td>
-          <td class="c-fix c-source">[blue]</td>
+          <td class="c-fix c-source">[sid]</td>
           <td class="c-fix c-arrow"><%= row.arrow %></td>
           <td class="c-fix c-channel"><%= row.channel %></td>
           <td class="c-fix c-sender"><%= row.sender %>:</td>

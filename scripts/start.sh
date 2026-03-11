@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-# Start blue in the background via pm2.
+# Start sid in the background via pm2.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-pm2 start npm --name blue -- run start
+if ! command -v pm2 &>/dev/null; then
+  echo "pm2 not found, installing globally…"
+  npm install -g pm2
+fi
+
+pm2 start npm --name sid -- run start
 pm2 save
-echo "✓ blue started. Use 'pm2 logs blue' to tail logs."
+echo "✓ sid started. Use 'pm2 logs sid' to tail logs."

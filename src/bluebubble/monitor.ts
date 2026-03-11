@@ -54,7 +54,7 @@ export function createBBMonitor(config: MonitorConfig) {
 				res.writeHead(200);
 				res.end("ok");
 			} catch (error) {
-				console.error("[blue] Webhook parse error:", error);
+				console.error("[sid] Webhook parse error:", error);
 				res.writeHead(400);
 				res.end("bad request");
 			}
@@ -88,7 +88,7 @@ export function createBBMonitor(config: MonitorConfig) {
 		if (!chatGuid) return;
 
 		console.info(
-			`[blue] webhook received: chatGuid=${chatGuid}, hasText=${hasText}, attachments=${attachments.length}, body=${JSON.stringify(raw)}`
+			`[sid] webhook received: chatGuid=${chatGuid}, hasText=${hasText}, attachments=${attachments.length}, body=${JSON.stringify(raw)}`
 		);
 
 		queue.push(raw);
@@ -97,17 +97,17 @@ export function createBBMonitor(config: MonitorConfig) {
 	return {
 		start() {
 			server.listen(port, host, () => {
-				console.log(`[blue] Listening on ${host}:${port}`);
+				console.log(`[sid] Listening on ${host}:${port}`);
 			});
 		},
 		stop(): Promise<void> {
 			return new Promise<void>((resolve, reject) => {
 				server.close((error) => {
 					if (error) {
-						console.error("[blue] monitor server close error:", error);
+						console.error("[sid] monitor server close error:", error);
 						reject(error);
 					} else {
-						console.log("[blue] monitor server closed");
+						console.log("[sid] monitor server closed");
 						resolve();
 					}
 				});
