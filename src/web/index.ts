@@ -106,6 +106,14 @@ export function createWebServer(config: WebServerConfig): WebServer {
 	return {
 		start(): void {
 			startWatcher();
+			server.on("error", (error: NodeJS.ErrnoException) => {
+				if (error.code === "EADDRINUSE") {
+					console.error(`[web] Port ${port} in use, retrying in 2s…`);
+					setTimeout(() => server.listen(port, host), 2000);
+				} else {
+					throw error;
+				}
+			});
 			server.listen(port, host, () => {
 				console.log(`[web] UI available at http://${host}:${port}`);
 			});
