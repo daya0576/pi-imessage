@@ -10,7 +10,7 @@
  * Model: uses ~/.pi/agent/ defaults (via createAgentSession).
  */
 
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { AssistantMessage, Message, TextContent } from "@mariozechner/pi-ai";
 import {
@@ -68,7 +68,42 @@ function sanitizeChatGuid(chatGuid: string): string {
 	return chatGuid.replace(/[^a-zA-Z0-9_\-;+.@]/g, "_");
 }
 
-function buildSystemPrompt(workingDir: string): string {
+/** Read global and chat-specific MEMORY.md files, returning combined content. */
+function getMemory(workingDir: string, chatDir?: string): string {
+	const parts: string[] = [];
+
+	const globalMemoryPath = join(workingDir, "MEMORY.md");
+	if (existsSync(globalMemoryPath)) {
+		try {
+			const content = readFileSync(globalMemoryPath, "utf-8").trim();
+			if (content) {
+				parts.push(`### Global Memory\n${content}`);
+			}
+		} catch (error) {
+			console.warn(`[agent] failed to read global memory: ${error}`);
+		}
+	}
+
+	if (chatDir) {
+		const chatMemoryPath = join(chatDir, "MEMORY.md");
+		if (existsSync(chatMemoryPath)) {
+			try {
+				const content = readFileSync(chatMemoryPath, "utf-8").trim();
+				if (content) {
+					parts.push(`### Chat Memory\n${content}`);
+				}
+			} catch (error) {
+				console.warn(`[agent] failed to read chat memory: ${error}`);
+			}
+		}
+	}
+
+	return parts.length > 0 ? parts.join("\n\n") : "(no memory yet)";
+}
+
+function buildSystemPrompt(workingDir: string, chatDir?: string): string {
+	const memory = getMemory(workingDir, chatDir);
+
 	return `You are the user's best friend communicating via iMessage. Be concise. No emojis.
 
 ## Context
@@ -84,6 +119,7 @@ You are running directly on the host machine.
 ${workingDir}/
 ├── settings.json                # Bot configuration (see below)
 ├── MEMORY.md                    # Global memory (all chats)
+├── SYSTEM.md                    # System configuration log
 ├── skills/                      # Global CLI tools you create
 └── <chatId>/                    # Each iMessage chat gets a directory
     ├── MEMORY.md                # Chat-specific memory
@@ -92,6 +128,24 @@ ${workingDir}/
     ├── attachments/             # User-shared files
     ├── scratch/                 # Your working directory
     └── skills/                  # Chat-specific tools
+
+## Memory
+Write to MEMORY.md files to persist context across conversations.
+- Global (${workingDir}/MEMORY.md): preferences, project info, shared knowledge
+- Chat-specific (<chatDir>/MEMORY.md): user details, ongoing topics, decisions
+Update when you learn something important or when asked to remember something.
+
+### Current Memory
+${memory}
+
+## System Configuration Log
+Maintain ${workingDir}/SYSTEM.md to log all environment modifications:
+- Installed packages (npm install, pip install, brew install, etc.)
+- Environment variables set
+- Config files modified (~/.gitconfig, cron jobs, etc.)
+- Skill dependencies installed
+
+Update this file whenever you modify the environment.
 
 ## Skills (Custom CLI Tools)
 You can create reusable CLI tools for recurring tasks (email, APIs, data processing, etc.).
@@ -241,6 +295,11 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		});
 
 		const promptText = msg.text ?? "";
+
+		// Refresh system prompt with current memory before each prompt
+		const chatDir = join(workingDir, sanitizeChatGuid(msg.chatGuid));
+		entry.session.agent.setSystemPrompt(buildSystemPrompt(workingDir, chatDir));
+
 		const currentModel = entry.session.model;
 		const currentModelLabel = currentModel ? `${currentModel.provider}/${currentModel.id}` : "default";
 		console.log(
