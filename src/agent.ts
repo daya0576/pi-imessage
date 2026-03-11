@@ -63,6 +63,28 @@ async function initSharedResources(workingDir: string): Promise<SharedResources>
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/**
+ * Format a prompt with sender/chat context prefix.
+ *
+ * Examples:
+ *   [DM from +1234567890] hey
+ *   [SMS from +1234567890] hey
+ *   [Group 'Family' from alice@example.com] hey
+ */
+function formatPromptText(msg: IncomingMessage): string {
+	const text = msg.text ?? "";
+	let prefix: string;
+	if (msg.messageType === "group") {
+		const name = msg.groupName || "unnamed";
+		prefix = `[Group '${name}' from ${msg.sender}]`;
+	} else if (msg.messageType === "sms") {
+		prefix = `[SMS from ${msg.sender}]`;
+	} else {
+		prefix = `[DM from ${msg.sender}]`;
+	}
+	return `${prefix} ${text}`;
+}
+
 /** Replace characters that are invalid in directory names. */
 function sanitizeChatGuid(chatGuid: string): string {
 	return chatGuid.replace(/[^a-zA-Z0-9_\-;+.@]/g, "_");
@@ -294,7 +316,9 @@ export async function createAgentManager(config: AgentManagerConfig) {
 			}
 		});
 
-		const promptText = msg.text ?? "";
+		// Build prompt with sender/chat context prefix
+		// Format: "[DM from +1234567890] hey" or "[Group 'Family' from alice@example.com] hey"
+		const promptText = formatPromptText(msg);
 
 		// Refresh system prompt with current memory before each prompt
 		const chatDir = join(workingDir, sanitizeChatGuid(msg.chatGuid));
