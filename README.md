@@ -1,14 +1,56 @@
 # pi-imessage
 
 An iMessage bot — powered by [pi](https://github.com/badlogic/pi-mono).
-![](https://github.com/user-attachments/assets/0dbfd0ae-1e22-4c0f-8421-7b2c93cfe174)
-
-## Features
-
 - **Transparent** — tool calls and reasoning are forwarded to your iMessage chat, so you can see exactly what it's doing and why
 - **Web UI** — browse chat history, toggle replies on/off, live updates
 - **Working memory & custom tools** — remembers context across sessions and creates workflow-specific CLI tools (aka "skills") for your tasks
 - **Group chat aware** — distinguishes DMs, SMS, and group chats; identifies who sent each message
+
+![](https://github.com/user-attachments/assets/0dbfd0ae-1e22-4c0f-8421-7b2c93cfe174)
+
+## How It Works
+
+```
+  BlueBubbles Server
+        │
+  (webhook POST: new-message)
+        │
+        ▼
+┌──────────────────────────────────────────────────┐
+│          pi-imessage Server (HTTP)               │
+│                                                  │
+│  POST /webhook                                   │
+│    │                                             │
+│    ├─ Ignore isFromMe messages                   │
+│    │  (skip self-sent to avoid loop)             │
+│    │                                             │
+│    ▼                                             │
+│  SessionManager (pi-coding-agent)                │
+│    │  per chatGuid, persistent on disk           │
+│    │  └─ data/<chatGuid>/                        │
+│    │       ├─ log.jsonl      (full history)      │
+│    │       └─ context.jsonl  (LLM context)       │
+│    │                                             │
+│    ▼                                             │
+│  Agent loop (pi-agent-core)                      │
+│    │                                             │
+│    │  ┌─ outer: follow-up messages ────┐         │
+│    │  │  ┌─ inner: tool calls +      ┐ │         │
+│    │  │  │  steering messages        │ │         │
+│    │  │  └───────────────────────────┘ │         │
+│    │  └────────────────────────────────┘         │
+│    │                                             │
+│    ▼                                             │
+│  Collect assistant reply text                    │
+│    │                                             │
+│    ├─ sendMessage (BB REST API)                  │
+│    └─ save logs (messages, digests)              │
+│                                                  │
+└──────────────────────────────────────────────────┘
+        │
+        ▼
+  iMessage (user receives reply)
+```
 
 
 ## Quick Start
