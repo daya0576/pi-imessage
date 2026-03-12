@@ -6,11 +6,13 @@
  * before:
  *   logIncoming      — logs the received message
  *   dropSelfEcho     — drops messages that are echoes of the bot's own replies
+ *   storeIncoming    — persists the incoming message to log.jsonl
  *   checkReplyEnabled — drops messages when reply is disabled by settings
+ *   downloadImages   — downloads image attachments and populates incoming.images
+ *   resizeImages     — resizes oversized images via macOS sips
  *
  * start:
  *   commandHandler   — intercepts slash commands (/new, /status) before the agent
- *   downloadImages   — downloads image attachments and populates incoming.images
  *   callAgent        — sends the message to the agent and yields replies as they arrive
  *
  * end:
@@ -19,6 +21,7 @@
  */
 
 import type { ImageContent } from "@mariozechner/pi-ai";
+import sharp from "sharp";
 import type { AgentManager } from "./agent.js";
 import type { BBClient } from "./bluebubble/index.js";
 import type { SelfEchoFilter } from "./bluebubble/index.js";
@@ -172,6 +175,63 @@ export function createDownloadImagesTask(bbClient: BBClient): BeforeTask {
 		incoming.images = images;
 		return outgoing;
 	};
+}
+
+/**
+ * Resize images whose longest edge exceeds MAX_EDGE_PX using sharp.
+ * Converts to JPEG at 80% quality to keep size well under Anthropic's 5MB limit.
+ *
+ *   before: raw downloaded image (any size, any format)
+ *   after:  JPEG ≤ MAX_EDGE_PX on longest edge, 80% quality
+ *
+ * Images that are already within the limit are left untouched.
+ * Resize failures are logged and the original image is kept as-is.
+ */
+const MAX_EDGE_PX = 1024;
+
+export function createResizeImagesTask(): BeforeTask {
+	return async (incoming, outgoing) => {
+		const resized: ImageContent[] = [];
+		for (const image of incoming.images) {
+			try {
+				resized.push(await resizeImageIfNeeded(image));
+			} catch (error) {
+				console.error("[sid] failed to resize image, keeping original:", error);
+				resized.push(image);
+			}
+		}
+		incoming.images = resized;
+		return outgoing;
+	};
+}
+
+/**
+ * Resize a single image if its longest edge exceeds MAX_EDGE_PX.
+ * Uses sharp to resample and convert to JPEG at 80% quality.
+ * Returns the original image unchanged if already within limits.
+ */
+async function resizeImageIfNeeded(image: ImageContent): Promise<ImageContent> {
+	const originalBytes = Buffer.from(image.data, "base64");
+	const originalSizeKB = (originalBytes.length / 1024).toFixed(0);
+
+	const metadata = await sharp(originalBytes).metadata();
+	const width = metadata.width ?? 0;
+	const height = metadata.height ?? 0;
+	const longestEdge = Math.max(width, height);
+
+	if (longestEdge <= MAX_EDGE_PX) {
+		return image;
+	}
+
+	const resizedBytes = await sharp(originalBytes)
+		.resize({ width: MAX_EDGE_PX, height: MAX_EDGE_PX, fit: "inside" })
+		.jpeg({ quality: 80 })
+		.toBuffer();
+
+	const resizedSizeKB = (resizedBytes.length / 1024).toFixed(0);
+	console.log(`[sid] resized image: ${width}x${height} ${originalSizeKB}KB → ${MAX_EDGE_PX}px ${resizedSizeKB}KB`);
+
+	return { type: "image", mimeType: "image/jpeg", data: resizedBytes.toString("base64") };
 }
 
 /** Send the message to the agent and dispatch a reply for each agent turn. */

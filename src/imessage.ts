@@ -32,6 +32,7 @@ import {
 	createDropSelfEchoTask,
 	createLogIncomingTask,
 	createLogOutgoingTask,
+	createResizeImagesTask,
 	createSendReplyTask,
 	createStoreIncomingTask,
 	createStoreOutgoingTask,
@@ -95,6 +96,7 @@ export function createIMessageBot(config: IMessageBotConfig) {
 	pipeline.before(createStoreIncomingTask(store));
 	pipeline.before(createCheckReplyEnabledTask(getSettings));
 	pipeline.before(createDownloadImagesTask(blueBubblesClient));
+	pipeline.before(createResizeImagesTask());
 
 	// start
 	pipeline.start(createCommandHandlerTask(agent));

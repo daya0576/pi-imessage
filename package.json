@@ -21,11 +21,13 @@
 		"@mariozechner/pi-ai": "latest",
 		"@mariozechner/pi-coding-agent": "latest",
 		"dotenv": "^17.3.1",
-		"eta": "^4.5.1"
+		"eta": "^4.5.1",
+		"sharp": "^0.34.5"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.4",
 		"@types/node": "^22.0.0",
+		"@types/sharp": "^0.31.1",
 		"@vitest/coverage-v8": "^3.2.4",
 		"tsx": "^4.0.0",
 		"typescript": "^5.7.3",
