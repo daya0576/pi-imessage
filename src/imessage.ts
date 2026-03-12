@@ -9,8 +9,11 @@
  * the monitor that pushes into it. This keeps imessage.ts fully decoupled
  * from monitor.ts — neither imports the other.
  *
- * Message ordering: assembly + pipeline execution is serialised through a
- * promise chain so messages reach the agent in webhook-arrival order.
+ * Message ordering: every pulled message is immediately dispatched to the
+ * pipeline (fire-and-forget). Different chats run concurrently. For the
+ * same chat, the agent's steering mode (streamingBehavior: "steer") handles
+ * rapid messages: if the agent is mid-run, a new message interrupts it as
+ * a steering prompt rather than queuing behind the previous run.
  */
 
 import type { AgentManager } from "./agent.js";
@@ -64,23 +67,6 @@ export function assembleMessage(raw: BBRawMessage): IncomingMessage {
 	return { chatGuid, text, sender, messageType, groupName, attachments, images: [] };
 }
 
-// ── Per-guid serial queue ─────────────────────────────────────────────────────
-
-/** Queues async tasks and runs them one at a time in submission order. */
-function createSerialQueue() {
-	let tail = Promise.resolve();
-	return function enqueue<T>(fn: () => Promise<T>): Promise<T> {
-		const result = tail.then(fn);
-		tail = result.then(
-			() => {},
-			() => {}
-		); // swallow errors so the queue always advances
-		return result;
-	};
-}
-
-type SerialQueue = ReturnType<typeof createSerialQueue>;
-
 // ── iMessage bot ──────────────────────────────────────────────────────────────
 
 export interface IMessageBotConfig {
@@ -121,30 +107,17 @@ export function createIMessageBot(config: IMessageBotConfig) {
 
 	return {
 		start() {
-			const guidQueues = new Map<string, SerialQueue>();
-
-			function getOrCreateGuidQueue(chatGuid: string): SerialQueue {
-				let guidQueue = guidQueues.get(chatGuid);
-				if (!guidQueue) {
-					guidQueue = createSerialQueue();
-					guidQueues.set(chatGuid, guidQueue);
-				}
-				return guidQueue;
-			}
-
 			async function loop(): Promise<void> {
 				while (true) {
 					const raw = await queue.pull();
 					const msg = assembleMessage(raw);
-					const guidQueue = getOrCreateGuidQueue(msg.chatGuid);
 
-					// Enqueue: same guid runs serially, different guids run concurrently.
+					// Fire-and-forget — steering handles same-guid concurrency:
 					//
-					//   pull msg(guid=A) → enqueue to A's queue  (A starts immediately)
-					//   pull msg(guid=B) → enqueue to B's queue  (B starts immediately, A still running)
-					//   pull msg(guid=A) → enqueue to A's queue  (waits for previous A to finish)
-					//
-					guidQueue(() => pipeline.process(msg)).catch((error: unknown) => {
+					//   pull msg(guid=A) → pipeline  (A starts)
+					//   pull msg(guid=B) → pipeline  (B starts, A still running)
+					//   pull msg(guid=A) → pipeline  (steers into A's running agent)
+					pipeline.process(msg).catch((error: unknown) => {
 						const sender = raw.handle?.address ?? "unknown";
 						console.error(`[sid] failed to process message from ${sender}:`, error);
 					});
