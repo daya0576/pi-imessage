@@ -27,6 +27,7 @@ import type { BBClient } from "./bluebubble/index.js";
 import type { SelfEchoFilter } from "./bluebubble/index.js";
 import type { DigestLogger } from "./logger.js";
 import type { BeforeTask, DispatchFn, EndTask, StartTask } from "./pipeline.js";
+import type { MessageSender } from "./send.js";
 import type { Settings } from "./settings.js";
 import { isReplyEnabled } from "./settings.js";
 import type { ChatStore } from "./store.js";
@@ -246,16 +247,14 @@ export function createCallAgentTask(agent: AgentManager): StartTask {
 
 // ── end tasks ─────────────────────────────────────────────────────────────────
 
-/** Remember echo and send reply via BlueBubbles based on the reply action. */
-export function createSendReplyTask(echoFilter: SelfEchoFilter, blueBubblesClient: BBClient): EndTask {
+/** Remember echo and send reply via Messages.app AppleScript. */
+export function createSendReplyTask(echoFilter: SelfEchoFilter, sender: MessageSender): EndTask {
 	return async (incoming, outgoing) => {
 		const { reply, sendReply } = outgoing;
 		if (!sendReply) return outgoing;
 		if (reply.type === "message") {
 			echoFilter.remember(incoming.chatGuid, reply.text);
-			await blueBubblesClient.sendMessage(incoming.chatGuid, reply.text);
-		} else if (reply.type === "reaction") {
-			await blueBubblesClient.sendReaction(incoming.chatGuid, reply.messageGuid, reply.reaction);
+			await sender.sendMessage(incoming.chatGuid, reply.text);
 		}
 		return outgoing;
 	};
@@ -277,10 +276,6 @@ export function createLogOutgoingTask(digestLogger: DigestLogger): EndTask {
 			const label = messageTypeLabel(incoming);
 			const target = incoming.messageType === "group" ? incoming.groupName : incoming.sender;
 			digestLogger.log(`[sid] -> [${label}] ${target}: ${reply.text.substring(0, 80)}`);
-		} else if (reply.type === "reaction") {
-			const label = messageTypeLabel(incoming);
-			const target = incoming.messageType === "group" ? incoming.groupName : incoming.sender;
-			digestLogger.log(`[sid] -> [${label}] ${target}: (reaction: ${reply.reaction})`);
 		}
 		return outgoing;
 	};

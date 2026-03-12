@@ -9,6 +9,7 @@ import { createAgentManager } from "./agent.js";
 import { createBBClient, createBBMonitor, createRawMessageQueue } from "./bluebubble/index.js";
 import { createIMessageBot } from "./imessage.js";
 import { createAppLogger, createDigestLogger } from "./logger.js";
+import { createMessageSender } from "./send.js";
 import { readSettings, writeSettings } from "./settings.js";
 import type { Settings } from "./settings.js";
 import { createChatStore } from "./store.js";
@@ -51,7 +52,9 @@ async function main() {
 		writeSettings(workingDir, updated);
 	};
 
-	const bot = createIMessageBot({ queue, agent, blueBubblesClient, store, getSettings, digestLogger });
+	const sender = createMessageSender();
+
+	const bot = createIMessageBot({ queue, agent, sender, blueBubblesClient, store, getSettings, digestLogger });
 	const web = createWebServer({ workingDir, host: webHost, port: webPort, getSettings, setSettings });
 
 	console.log(`[sid] workspace:  ${workingDir}`);

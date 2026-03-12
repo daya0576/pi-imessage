@@ -22,6 +22,7 @@ import { QueueClosedError } from "./bluebubble/index.js";
 import type { BBClient, BBRawMessage, RawMessageQueue } from "./bluebubble/index.js";
 import type { DigestLogger } from "./logger.js";
 import { createMessagePipeline } from "./pipeline.js";
+import type { MessageSender } from "./send.js";
 import type { Settings } from "./settings.js";
 import type { ChatStore } from "./store.js";
 import {
@@ -73,6 +74,8 @@ export function assembleMessage(raw: BBRawMessage): IncomingMessage {
 export interface IMessageBotConfig {
 	queue: RawMessageQueue;
 	agent: AgentManager;
+	sender: MessageSender;
+	/** Still needed for downloading attachments until watch module replaces BB monitor. */
 	blueBubblesClient: BBClient;
 	store: ChatStore;
 	getSettings: () => Settings;
@@ -80,7 +83,7 @@ export interface IMessageBotConfig {
 }
 
 export function createIMessageBot(config: IMessageBotConfig) {
-	const { queue, agent, blueBubblesClient, store, getSettings, digestLogger } = config;
+	const { queue, agent, sender, blueBubblesClient, store, getSettings, digestLogger } = config;
 	const echoFilter = createSelfEchoFilter();
 	const pipeline = createMessagePipeline();
 
@@ -103,7 +106,7 @@ export function createIMessageBot(config: IMessageBotConfig) {
 	pipeline.start(createCallAgentTask(agent));
 
 	// end
-	pipeline.end(createSendReplyTask(echoFilter, blueBubblesClient));
+	pipeline.end(createSendReplyTask(echoFilter, sender));
 	pipeline.end(createLogOutgoingTask(digestLogger));
 	pipeline.end(createStoreOutgoingTask(store));
 

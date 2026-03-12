@@ -62,10 +62,7 @@ export function formatAgentReply(reply: AgentReply): string {
 // ── Outgoing message (pipeline response model) ───────────────────────────────
 
 /** What kind of reply the bot should send back. */
-export type ReplyAction =
-	| { type: "message"; text: string }
-	| { type: "reaction"; messageGuid: string; reaction: string }
-	| { type: "none" };
+export type ReplyAction = { type: "message"; text: string } | { type: "none" };
 
 /**
  * Structured pipeline response, carried as context through all phases.

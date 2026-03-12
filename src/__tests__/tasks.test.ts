@@ -35,11 +35,14 @@ function makeDigestLogger(): DigestLogger {
 	return { log: (msg: string) => console.log(msg), close: () => {} };
 }
 
-function makeMockBBClient() {
+function makeMockSender() {
 	return {
 		sendMessage: vi.fn().mockResolvedValue(undefined),
-		sendTypingIndicator: vi.fn().mockResolvedValue(undefined),
-		sendReaction: vi.fn().mockResolvedValue(undefined),
+	};
+}
+
+function makeMockBBClient() {
+	return {
 		downloadAttachmentBytes: vi.fn().mockResolvedValue(Buffer.from("fake")),
 	};
 }
@@ -169,30 +172,15 @@ describe("createCallAgentTask", () => {
 describe("createSendReplyTask", () => {
 	it("sends text reply and remembers echo", async () => {
 		const echoFilter = createSelfEchoFilter();
-		const bbClient = makeMockBBClient();
-		const task = createSendReplyTask(echoFilter, bbClient);
+		const sender = makeMockSender();
+		const task = createSendReplyTask(echoFilter, sender);
 		const msg = makeMessage();
 		const outgoing = makeOutgoing({ reply: { type: "message", text: "pong" } });
 
 		await task(msg, outgoing);
 
-		expect(bbClient.sendMessage).toHaveBeenCalledWith(msg.chatGuid, "pong");
+		expect(sender.sendMessage).toHaveBeenCalledWith(msg.chatGuid, "pong");
 		expect(echoFilter.isEcho(msg.chatGuid, "pong")).toBe(true);
-	});
-
-	it("sends reaction via BlueBubbles", async () => {
-		const echoFilter = createSelfEchoFilter();
-		const bbClient = makeMockBBClient();
-		const task = createSendReplyTask(echoFilter, bbClient);
-		const msg = makeMessage();
-		const outgoing = makeOutgoing({
-			reply: { type: "reaction", messageGuid: "msg-001", reaction: "love" },
-		});
-
-		await task(msg, outgoing);
-
-		expect(bbClient.sendReaction).toHaveBeenCalledWith(msg.chatGuid, "msg-001", "love");
-		expect(bbClient.sendMessage).not.toHaveBeenCalled();
 	});
 });
 

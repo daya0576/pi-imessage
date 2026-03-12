@@ -15,9 +15,6 @@ const FAKE_IMAGE_BYTES = Buffer.from("fakeimagebytes");
 
 export function makeMockBBClient(): BBClient {
 	return {
-		sendMessage: vi.fn().mockResolvedValue(undefined),
-		sendTypingIndicator: vi.fn().mockResolvedValue(undefined),
-		sendReaction: vi.fn().mockResolvedValue(undefined),
 		downloadAttachmentBytes: vi.fn().mockResolvedValue(FAKE_IMAGE_BYTES),
 	};
 }

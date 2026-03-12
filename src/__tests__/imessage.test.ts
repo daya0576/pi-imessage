@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { BBWebhookPayload } from "../bluebubble/index.js";
 import { createBBMonitor, createRawMessageQueue, createSelfEchoFilter } from "../bluebubble/index.js";
 import { assembleMessage } from "../imessage.js";
-import { makeGroupPayload, makeMockBBClient, makePayload } from "./helpers.js";
+import { makeGroupPayload, makePayload } from "./helpers.js";
 
 // ── fixtures ──────────────────────────────────────────────────────────────────
 
@@ -35,7 +35,6 @@ describe("createIMessageBot", () => {
 	});
 
 	it("self-chat: bot reply echo is suppressed via echoFilter", async () => {
-		const bbClient = makeMockBBClient();
 		const queue = createRawMessageQueue();
 		const monitor = createBBMonitor({ host: "localhost", port: 0, queue });
 		const processMessage = vi.fn().mockResolvedValue("pong");
@@ -52,10 +51,9 @@ describe("createIMessageBot", () => {
 		const raw = await queue.pull();
 		const msg = assembleMessage(raw);
 
-		// Simulate the bot's processing
+		// Simulate the bot's processing — remember echo before "sending"
 		const reply = await processMessage(msg);
 		echoFilter.remember(msg.chatGuid, reply);
-		await bbClient.sendMessage(msg.chatGuid, reply);
 
 		// BB echoes bot reply back with isFromMe=false (self-chat)
 		monitor.handleWebhook(
