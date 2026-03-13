@@ -2,14 +2,14 @@
 
 An self-managing iMessage bot — powered by [pi](https://github.com/badlogic/pi-mono).
 
-![](https://github.com/user-attachments/assets/0dbfd0ae-1e22-4c0f-8421-7b2c93cfe174)
+![screenshot](https://raw.githubusercontent.com/daya0576/pi-imessage/main/docs/screenshot.png)
 
 ## Features
 
 - **Transparent**: tool calls and reasoning are sent to your iMessage chat, so you can see exactly what it's doing and why
-- **Web UI**: browse chat history, toggle replies on/off, live updates
 - **Working memory & custom tools**: remembers context across sessions and creates workflow-specific CLI tools (aka "skills") for your tasks
 - **Group chat aware**: distinguishes DMs, SMS, and group chats; identifies who sent each message
+- **Web UI**: browse chat history, toggle replies on/off, live updates
 
 ## Quick Start
 
