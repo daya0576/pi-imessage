@@ -20,9 +20,12 @@
  *   logOutgoing      — logs the outgoing reply
  */
 
-import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import type { ImageContent } from "@mariozechner/pi-ai";
-import sharp from "sharp";
 import type { AgentManager } from "./agent.js";
 import type { DigestLogger } from "./logger.js";
 import type { BeforeTask, DispatchFn, EndTask, StartTask } from "./pipeline.js";
@@ -207,31 +210,57 @@ export function createResizeImagesTask(): BeforeTask {
 
 /**
  * Resize a single image if its longest edge exceeds MAX_EDGE_PX.
- * Uses sharp to resample and convert to JPEG at 80% quality.
+ * Uses macOS sips to resample and convert to JPEG at 80% quality.
  * Returns the original image unchanged if already within limits.
  */
+const execFileAsync = promisify(execFile);
+
 async function resizeImageIfNeeded(image: ImageContent): Promise<ImageContent> {
 	const originalBytes = Buffer.from(image.data, "base64");
 	const originalSizeKB = (originalBytes.length / 1024).toFixed(0);
 
-	const metadata = await sharp(originalBytes).metadata();
-	const width = metadata.width ?? 0;
-	const height = metadata.height ?? 0;
-	const longestEdge = Math.max(width, height);
+	const tempDir = await mkdtemp(join(tmpdir(), "pi-imessage-resize-"));
+	const inputPath = join(tempDir, "input");
+	const outputPath = join(tempDir, "output.jpg");
 
-	if (longestEdge <= MAX_EDGE_PX) {
-		return image;
+	try {
+		await writeFile(inputPath, originalBytes);
+
+		// Get dimensions via sips
+		const { stdout } = await execFileAsync("sips", ["-g", "pixelWidth", "-g", "pixelHeight", inputPath]);
+		const widthMatch = stdout.match(/pixelWidth:\s*(\d+)/);
+		const heightMatch = stdout.match(/pixelHeight:\s*(\d+)/);
+		const width = widthMatch ? Number.parseInt(widthMatch[1], 10) : 0;
+		const height = heightMatch ? Number.parseInt(heightMatch[1], 10) : 0;
+		const longestEdge = Math.max(width, height);
+
+		if (longestEdge <= MAX_EDGE_PX) {
+			return image;
+		}
+
+		// Resize with sips — resampleHeightWidthMax scales the longest edge
+		await execFileAsync("sips", [
+			"--resampleHeightWidthMax",
+			String(MAX_EDGE_PX),
+			"-s",
+			"format",
+			"jpeg",
+			"-s",
+			"formatOptions",
+			"80",
+			inputPath,
+			"--out",
+			outputPath,
+		]);
+
+		const resizedBytes = await readFile(outputPath);
+		const resizedSizeKB = (resizedBytes.length / 1024).toFixed(0);
+		console.log(`[sid] resized image: ${width}x${height} ${originalSizeKB}KB → ${MAX_EDGE_PX}px ${resizedSizeKB}KB`);
+
+		return { type: "image", mimeType: "image/jpeg", data: resizedBytes.toString("base64") };
+	} finally {
+		await rm(tempDir, { recursive: true, force: true });
 	}
-
-	const resizedBytes = await sharp(originalBytes)
-		.resize({ width: MAX_EDGE_PX, height: MAX_EDGE_PX, fit: "inside" })
-		.jpeg({ quality: 80 })
-		.toBuffer();
-
-	const resizedSizeKB = (resizedBytes.length / 1024).toFixed(0);
-	console.log(`[sid] resized image: ${width}x${height} ${originalSizeKB}KB → ${MAX_EDGE_PX}px ${resizedSizeKB}KB`);
-
-	return { type: "image", mimeType: "image/jpeg", data: resizedBytes.toString("base64") };
 }
 
 /** Send the message to the agent and dispatch a reply for each agent turn. */

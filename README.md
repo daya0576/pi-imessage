@@ -1,4 +1,4 @@
-# pi-imessage
+# @kingcrab/pi-imessage
 
 A minimal and self-managing iMessage bot — powered by [pi](https://github.com/badlogic/pi-mono).
 
