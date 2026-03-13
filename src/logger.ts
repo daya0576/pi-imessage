@@ -94,8 +94,9 @@ export function createAppLogger(workingDir: string, options: { maxBytes?: number
 	const originalInfo = console.info.bind(console);
 
 	function writeAndForward(original: (...args: unknown[]) => void, args: unknown[]): void {
-		writer.write(formatLine(args));
-		original(...args);
+		const line = formatLine(args);
+		writer.write(line);
+		original(line.trimEnd());
 	}
 
 	console.log = (...args: unknown[]) => writeAndForward(originalLog, args);

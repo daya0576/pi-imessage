@@ -1,17 +1,17 @@
 # @kingcrab/pi-imessage
 
-A minimal and self-managing iMessage bot — powered by [pi](https://github.com/badlogic/pi-mono).
+A minimal and self-managing iMessage bot that turns into whatever you need — powered by [pi](https://github.com/badlogic/pi-mono).
 
-![screenshot](https://raw.githubusercontent.com/daya0576/pi-imessage/main/docs/screenshot.png)
+![](https://raw.githubusercontent.com/daya0576/pi-imessage/main/docs/screenshot.png)
 
-## Features
-
+# Features
+- **Minimal**: No BlueBubble, no webhooks, no extra dependencies
+- **Self-managing**: Turn the agent into whatever you need. He builds his own tools without pre-built assumptions
 - **Transparent**: tool calls and reasoning are sent to your iMessage chat, so you can see exactly what it's doing and why
-- **Working memory & custom tools**: remembers context across sessions and creates workflow-specific CLI tools (aka "skills") for your tasks
-- **Group chat aware**: distinguishes DMs, SMS, and group chats; identifies who sent each message
-- **Web UI**: browse chat history, toggle replies on/off per chat, live updates — disable with `WEB_ENABLED=false` and let the agent build your own web UI
+- **iMessage Integration**: Responds to DMs, SMS, and group chats; identifies who sent each message
+- **Web UI**: browse chat history, toggle replies on/off per chat, live updates — disable with WEB_ENABLED=false and let the agent build your own web UI
 
-## Quick Start
+# Getting Started
 
 Prerequisites: macOS with Messages.app, Full Disk Access for the terminal, [Pi Coding Agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start) authenticated
 
@@ -22,9 +22,9 @@ pi-imessage             # run in foreground
 pi-imessage install     # install as launchd service (auto-start on boot, restart on crash)
 ```
 
-## Usage
+# Usage
 
-### Web UI
+## Web UI
 
 Available at `http://localhost:7750` (configurable via `WEB_PORT`).
 
@@ -32,7 +32,9 @@ Available at `http://localhost:7750` (configurable via `WEB_PORT`).
 - Toggle reply on/off per chat
 - Live updates via SSE when new messages arrive
 
-### Commands
+P.S. Disable with `WEB_ENABLED=false` and let the agent build your own web UI
+
+## Commands
 
 Send these as iMessage to interact with the bot:
 
@@ -41,7 +43,7 @@ Send these as iMessage to interact with the bot:
 | `/new` | Reset the session, starting a fresh conversation | `✓ New session started` |
 | `/status` | Show session stats: tokens, context, model | `💬 3 msgs - ↑7.2k ↓505 1.1%/128k`<br>`🤖 anthropic/claude-sonnet-4 • 💭 minimal` |
 
-### Settings (`WORKING_DIR/settings.json`)
+## Settings (`WORKING_DIR/settings.json`)
 
 All fields are optional.
 
@@ -56,7 +58,7 @@ All fields are optional.
 
 **Chat allowlist** controls which chats receive replies (messages are always logged). Resolution priority: `blacklist[guid]` > `whitelist[guid]` > `blacklist["*"]` > `whitelist["*"]`.
 
-### Environment Variables
+## Environment Variables
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
@@ -65,14 +67,14 @@ All fields are optional.
 | `WEB_PORT` | no | `7750` | Web UI port |
 | `WORKING_DIR` | no | `~/.pi/imessage` | Workspace directory |
 
-## Development
+# Development
 
 ```bash
 npm run check        # typecheck + lint (run after code changes)
 npm test             # run tests
 ```
 
-## How It Works
+# How It Works
 
 ```
   ~/Library/Messages/chat.db
