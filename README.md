@@ -16,9 +16,10 @@ An self-managing iMessage bot — powered by [pi](https://github.com/badlogic/pi
 Prerequisites: macOS with Messages.app, Full Disk Access for the terminal, [Pi Coding Agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start) authenticated
 
 ```bash
-npm install
-cp .env.example .env
-./scripts/start.sh
+npm install -g @kingcrab/pi-imessage
+
+pi-imessage             # run in foreground
+pi-imessage install     # install as launchd service (auto-start on boot, restart on crash)
 ```
 
 ## Usage

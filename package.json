@@ -1,13 +1,17 @@
 {
-	"name": "pi-imessage",
+	"name": "@kingcrab/pi-imessage",
 	"version": "0.0.1",
-	"private": true,
 	"type": "module",
+	"bin": {
+		"pi-imessage": "./dist/cli.js"
+	},
+	"files": ["dist", "README.md"],
 	"engines": {
 		"node": ">=20.0.0"
 	},
 	"scripts": {
 		"build": "tsc",
+		"prepublishOnly": "tsc",
 		"dev": "tsx watch src/main.ts",
 		"start": "tsx src/main.ts",
 		"test": "vitest run",
