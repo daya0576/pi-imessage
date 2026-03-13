@@ -18,6 +18,7 @@ import { createWatcher } from "./watch.js";
 import { createWebServer } from "./web/index.js";
 
 async function main() {
+	const webEnabled = process.env.WEB_ENABLED !== "false";
 	const webHost = process.env.WEB_HOST || "localhost";
 	const webPort = Number.parseInt(process.env.WEB_PORT || "7750", 10);
 	const workingDir = process.env.WORKING_DIR || join(homedir(), ".pi", "imessage");
@@ -45,12 +46,14 @@ async function main() {
 	};
 
 	const bot = createIMessageBot({ queue, agent, sender, store, getSettings, digestLogger });
-	const web = createWebServer({ workingDir, host: webHost, port: webPort, getSettings, setSettings });
+	const web = webEnabled
+		? createWebServer({ workingDir, host: webHost, port: webPort, getSettings, setSettings })
+		: null;
 
 	console.log(`[sid] workspace:  ${workingDir}`);
 	watcher.start();
 	bot.start();
-	web.start();
+	if (web) web.start();
 
 	let shuttingDown = false;
 	async function shutdown() {
@@ -59,7 +62,7 @@ async function main() {
 		console.log("[sid] Shutting down…");
 		watcher.stop();
 		bot.stop();
-		await web.stop();
+		await web?.stop();
 		digestLogger.close();
 		appLogger.close();
 		console.log("[sid] Shutdown complete");

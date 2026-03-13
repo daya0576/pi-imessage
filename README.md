@@ -1,6 +1,6 @@
 # pi-imessage
 
-An self-managing iMessage bot — powered by [pi](https://github.com/badlogic/pi-mono).
+A minimal and self-managing iMessage bot — powered by [pi](https://github.com/badlogic/pi-mono).
 
 ![screenshot](https://raw.githubusercontent.com/daya0576/pi-imessage/main/docs/screenshot.png)
 
@@ -9,7 +9,7 @@ An self-managing iMessage bot — powered by [pi](https://github.com/badlogic/pi
 - **Transparent**: tool calls and reasoning are sent to your iMessage chat, so you can see exactly what it's doing and why
 - **Working memory & custom tools**: remembers context across sessions and creates workflow-specific CLI tools (aka "skills") for your tasks
 - **Group chat aware**: distinguishes DMs, SMS, and group chats; identifies who sent each message
-- **Web UI**: browse chat history, toggle replies on/off, live updates
+- **Web UI**: browse chat history, toggle replies on/off per chat, live updates — disable with `WEB_ENABLED=false` and let the agent build your own web UI
 
 ## Quick Start
 
@@ -60,6 +60,7 @@ All fields are optional.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
+| `WEB_ENABLED` | no | `true` | Set to `false` to disable the built-in web UI |
 | `WEB_HOST` | no | `localhost` | Web UI host |
 | `WEB_PORT` | no | `7750` | Web UI port |
 | `WORKING_DIR` | no | `~/.pi/imessage` | Workspace directory |
