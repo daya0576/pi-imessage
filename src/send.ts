@@ -10,6 +10,9 @@
  */
 
 import { execFile } from "node:child_process";
+import { constants, accessSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -67,7 +70,17 @@ export async function checkEnvironment(): Promise<void> {
 		throw new Error("Messages.app is not running");
 	}
 
-	// 2. Check iMessage has active accounts
+	// 2. Check Full Disk Access (required to read chat.db)
+	const chatDbPath = join(homedir(), "Library", "Messages", "chat.db");
+	try {
+		accessSync(chatDbPath, constants.R_OK);
+	} catch {
+		throw new Error(
+			`Cannot read ${chatDbPath} — grant Full Disk Access to your terminal in System Settings > Privacy & Security > Full Disk Access`
+		);
+	}
+
+	// 3. Check iMessage has active accounts
 	const script = `tell application "Messages"
 	try
 		set accountList to every account
