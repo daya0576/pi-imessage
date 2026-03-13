@@ -10,8 +10,8 @@
 		"node": ">=20.0.0"
 	},
 	"scripts": {
-		"build": "tsc",
-		"prepublishOnly": "tsc",
+		"build": "tsc && cp -r src/web/templates dist/web/templates",
+		"prepublishOnly": "npm run build",
 		"dev": "tsx watch src/main.ts",
 		"start": "tsx src/main.ts",
 		"test": "vitest run",
