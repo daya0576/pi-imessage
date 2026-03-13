@@ -5,12 +5,12 @@
 	"bin": {
 		"pi-imessage": "./dist/cli.js"
 	},
-	"files": ["dist", "README.md"],
+	"files": ["dist", "!dist/__tests__", "README.md"],
 	"engines": {
 		"node": ">=20.0.0"
 	},
 	"scripts": {
-		"build": "tsc && cp -r src/web/templates dist/web/templates",
+		"build": "tsc && mkdir -p dist/web/templates && cp src/web/templates/* dist/web/templates/",
 		"prepublishOnly": "npm run build",
 		"dev": "tsx watch src/main.ts",
 		"start": "tsx src/main.ts",
