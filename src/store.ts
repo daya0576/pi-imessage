@@ -90,7 +90,7 @@ export function createChatStore(config: ChatStoreConfig): ChatStore {
 
 	return {
 		async logIncoming(message: IncomingMessage): Promise<void> {
-			const attachmentPaths = message.attachments.map((a) => join(message.chatGuid, "attachments", a.guid));
+			const attachmentPaths = message.attachments.map((a) => a.path);
 			await append(message.chatGuid, {
 				date: new Date().toISOString(),
 				sender: message.sender,

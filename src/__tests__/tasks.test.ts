@@ -1,9 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { createSelfEchoFilter } from "../bluebubble/index.js";
 import type { DigestLogger } from "../logger.js";
+import { createSelfEchoFilter } from "../self-echo.js";
 import {
 	createCallAgentTask,
-	createDownloadImagesTask,
 	createDropSelfEchoTask,
 	createLogIncomingTask,
 	createLogOutgoingTask,
@@ -38,12 +37,6 @@ function makeDigestLogger(): DigestLogger {
 function makeMockSender() {
 	return {
 		sendMessage: vi.fn().mockResolvedValue(undefined),
-	};
-}
-
-function makeMockBBClient() {
-	return {
-		downloadAttachmentBytes: vi.fn().mockResolvedValue(Buffer.from("fake")),
 	};
 }
 
@@ -94,37 +87,6 @@ describe("createDropSelfEchoTask", () => {
 
 		const result = await task(msg, makeOutgoing());
 		expect(result.shouldContinue).toBe(true);
-	});
-});
-
-// ── before: downloadImages ────────────────────────────────────────────────────
-
-describe("createDownloadImagesTask", () => {
-	const imageAttachment = { guid: "attach-001", transferName: "photo.jpg", mimeType: "image/jpeg", totalBytes: 12345 };
-	const pdfAttachment = { guid: "attach-002", transferName: "doc.pdf", mimeType: "application/pdf", totalBytes: 5000 };
-
-	it("downloads image attachments and populates incoming.images", async () => {
-		const bbClient = makeMockBBClient();
-		const task = createDownloadImagesTask(bbClient);
-		const msg = makeMessage({ attachments: [imageAttachment] });
-
-		await task(msg, makeOutgoing());
-
-		expect(bbClient.downloadAttachmentBytes).toHaveBeenCalledWith("attach-001");
-		expect(msg.images).toEqual([
-			{ type: "image", mimeType: "image/jpeg", data: Buffer.from("fake").toString("base64") },
-		]);
-	});
-
-	it("skips non-image attachments", async () => {
-		const bbClient = makeMockBBClient();
-		const task = createDownloadImagesTask(bbClient);
-		const msg = makeMessage({ attachments: [pdfAttachment] });
-
-		await task(msg, makeOutgoing());
-
-		expect(bbClient.downloadAttachmentBytes).not.toHaveBeenCalled();
-		expect(msg.images).toEqual([]);
 	});
 });
 

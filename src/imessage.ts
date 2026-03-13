@@ -1,13 +1,8 @@
 /**
- * iMessage bot — pulls raw BlueBubbles messages from an externally managed
- * queue, assembles them into unified IncomingMessage objects, and runs them
- * through the message pipeline (before → start → end).
+ * iMessage bot — pulls IncomingMessage objects from a queue (fed by the
+ * watcher) and runs them through the pipeline (before → start → end).
  *
- *   queue.subscribe() → assembleMessage() → pipeline.process()
- *
- * The queue is created and owned by the caller (main.ts), which also creates
- * the monitor that pushes into it. This keeps imessage.ts fully decoupled
- * from monitor.ts — neither imports the other.
+ *   watcher → queue → pipeline.process()
  *
  * Message ordering: every pulled message is immediately dispatched to the
  * pipeline (fire-and-forget). Different chats run concurrently. For the
@@ -17,11 +12,11 @@
  */
 
 import type { AgentManager } from "./agent.js";
-import { createSelfEchoFilter } from "./bluebubble/index.js";
-import { QueueClosedError } from "./bluebubble/index.js";
-import type { BBClient, BBRawMessage, RawMessageQueue } from "./bluebubble/index.js";
 import type { DigestLogger } from "./logger.js";
 import { createMessagePipeline } from "./pipeline.js";
+import type { AsyncQueue } from "./queue.js";
+import { QueueClosedError } from "./queue.js";
+import { createSelfEchoFilter } from "./self-echo.js";
 import type { MessageSender } from "./send.js";
 import type { Settings } from "./settings.js";
 import type { ChatStore } from "./store.js";
@@ -38,52 +33,21 @@ import {
 	createStoreIncomingTask,
 	createStoreOutgoingTask,
 } from "./tasks.js";
-import type { IncomingMessage, MessageType } from "./types.js";
-
-// ── Raw → unified assembly ────────────────────────────────────────────────────
-
-/**
- * Derive the MessageType from the handle service and chatGuid structure:
- *   SMS service        → "sms"
- *   iMessage + ";-;"   → "imessage" (direct message)
- *   iMessage + ";+;"   → "group"    (group chat)
- */
-function deriveMessageType(raw: BBRawMessage, chatGuid: string): MessageType {
-	const service = raw.handle?.service ?? "iMessage";
-	if (service === "SMS") return "sms";
-	return chatGuid.split(";")[1] === "+" ? "group" : "imessage";
-}
-
-/**
- * Assemble a raw BlueBubbles message into a unified IncomingMessage.
- * Raw attachments are carried through for the downloadImages pipeline task;
- * images[] starts empty and is populated during the start phase.
- */
-export function assembleMessage(raw: BBRawMessage): IncomingMessage {
-	const chatGuid = raw.chats[0].guid;
-	const messageType = deriveMessageType(raw, chatGuid);
-	const text = raw.text?.trim() ?? null;
-	const sender = raw.handle?.address ?? "unknown";
-	const groupName = raw.chats[0].displayName ?? "";
-	const attachments = raw.attachments ?? [];
-	return { chatGuid, text, sender, messageType, groupName, attachments, images: [] };
-}
+import type { IncomingMessage } from "./types.js";
 
 // ── iMessage bot ──────────────────────────────────────────────────────────────
 
 export interface IMessageBotConfig {
-	queue: RawMessageQueue;
+	queue: AsyncQueue<IncomingMessage>;
 	agent: AgentManager;
 	sender: MessageSender;
-	/** Still needed for downloading attachments until watch module replaces BB monitor. */
-	blueBubblesClient: BBClient;
 	store: ChatStore;
 	getSettings: () => Settings;
 	digestLogger: DigestLogger;
 }
 
 export function createIMessageBot(config: IMessageBotConfig) {
-	const { queue, agent, sender, blueBubblesClient, store, getSettings, digestLogger } = config;
+	const { queue, agent, sender, store, getSettings, digestLogger } = config;
 	const echoFilter = createSelfEchoFilter();
 	const pipeline = createMessagePipeline();
 
@@ -98,7 +62,7 @@ export function createIMessageBot(config: IMessageBotConfig) {
 	pipeline.before(createDropSelfEchoTask(echoFilter));
 	pipeline.before(createStoreIncomingTask(store));
 	pipeline.before(createCheckReplyEnabledTask(getSettings));
-	pipeline.before(createDownloadImagesTask(blueBubblesClient));
+	pipeline.before(createDownloadImagesTask());
 	pipeline.before(createResizeImagesTask());
 
 	// start
@@ -114,26 +78,20 @@ export function createIMessageBot(config: IMessageBotConfig) {
 		start() {
 			async function loop(): Promise<void> {
 				while (true) {
-					const raw = await queue.pull();
-					const msg = assembleMessage(raw);
+					const msg = await queue.pull();
 
-					// Fire-and-forget — steering handles same-guid concurrency:
-					//
-					//   pull msg(guid=A) → pipeline  (A starts)
-					//   pull msg(guid=B) → pipeline  (B starts, A still running)
-					//   pull msg(guid=A) → pipeline  (steers into A's running agent)
+					// Fire-and-forget — steering handles same-guid concurrency
 					pipeline.process(msg).catch((error: unknown) => {
-						const sender = raw.handle?.address ?? "unknown";
-						console.error(`[sid] failed to process message from ${sender}:`, error);
+						console.error(`[sid] failed to process message from ${msg.sender}:`, error);
 					});
 				}
 			}
 
 			loop().catch((error: unknown) => {
 				if (error instanceof QueueClosedError) {
-					console.log("[sid] Message queue closed, consumer stopped");
+					console.log("[sid] Queue closed, consumer stopped");
 				} else {
-					console.error("[sid] Message consumer crashed:", error);
+					console.error("[sid] Consumer crashed:", error);
 				}
 			});
 		},

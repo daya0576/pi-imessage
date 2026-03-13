@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createSelfEchoFilter } from "../bluebubble/index.js";
+import { createSelfEchoFilter } from "../self-echo.js";
 
 // ── fixtures ──────────────────────────────────────────────────────────────────
 

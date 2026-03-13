@@ -20,13 +20,13 @@
  *   logOutgoing      — logs the outgoing reply
  */
 
+import { readFile } from "node:fs/promises";
 import type { ImageContent } from "@mariozechner/pi-ai";
 import sharp from "sharp";
 import type { AgentManager } from "./agent.js";
-import type { BBClient } from "./bluebubble/index.js";
-import type { SelfEchoFilter } from "./bluebubble/index.js";
 import type { DigestLogger } from "./logger.js";
 import type { BeforeTask, DispatchFn, EndTask, StartTask } from "./pipeline.js";
+import type { SelfEchoFilter } from "./self-echo.js";
 import type { MessageSender } from "./send.js";
 import type { Settings } from "./settings.js";
 import { isReplyEnabled } from "./settings.js";
@@ -153,24 +153,23 @@ export function createCommandHandlerTask(agent: AgentManager): StartTask {
 // ── start tasks ───────────────────────────────────────────────────────────────
 
 /**
- * Download image attachments from incoming.attachments and populate
- * incoming.images in-place. Non-image attachments are skipped with a warning;
- * failed downloads are logged and silently skipped.
+ * Read image attachments from local disk and populate incoming.images in-place.
+ * Non-image attachments are skipped; failed reads are logged and silently skipped.
  */
-export function createDownloadImagesTask(bbClient: BBClient): BeforeTask {
+export function createDownloadImagesTask(): BeforeTask {
 	return async (incoming, outgoing) => {
 		const images: ImageContent[] = [];
 		for (const attachment of incoming.attachments) {
 			const mimeType = attachment.mimeType;
 			if (!mimeType?.startsWith("image/")) {
-				console.warn(`[sid] skipping non-image attachment ${attachment.guid} (mimeType: ${mimeType ?? "null"})`);
+				console.warn(`[sid] skipping non-image attachment ${attachment.path} (mimeType: ${mimeType ?? "null"})`);
 				continue;
 			}
 			try {
-				const bytes = await bbClient.downloadAttachmentBytes(attachment.guid);
+				const bytes = await readFile(attachment.path);
 				images.push({ type: "image", mimeType, data: bytes.toString("base64") });
 			} catch (error) {
-				console.error(`[sid] failed to download image attachment ${attachment.guid}:`, error);
+				console.error(`[sid] failed to read image attachment ${attachment.path}:`, error);
 			}
 		}
 		incoming.images = images;

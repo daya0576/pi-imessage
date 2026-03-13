@@ -3,24 +3,30 @@
  */
 
 import type { ImageContent } from "@mariozechner/pi-ai";
-import type { BBAttachment } from "./bluebubble/index.js";
 
 /**
- * Message type, derived from the BlueBubbles handle service and chatGuid:
+ * Message type, derived from service and chatGuid structure:
  *
- *   handle.service    chatGuid segment    MessageType
- *   ──────────────    ───────────────     ───────────
- *   "SMS"             (any)               "sms"
- *   "iMessage"        ";-;" (DM)          "imessage"
- *   "iMessage"        ";+;" (group)       "group"
+ *   service      chatGuid segment    MessageType
+ *   ──────────   ───────────────     ───────────
+ *   "SMS"        (any)               "sms"
+ *   "iMessage"   ";-;" (DM)          "imessage"
+ *   "iMessage"   ";+;" (group)       "group"
  */
 export type MessageType = "sms" | "imessage" | "group";
+
+/** Attachment metadata — local path on disk. */
+export interface Attachment {
+	/** Local file path (e.g. ~/Library/Messages/Attachments/...). */
+	path: string;
+	mimeType: string | null;
+}
 
 /**
  * Unified incoming message flowing through the entire pipeline.
  *
- * Fully assembled by the iMessage layer — `images` are already downloaded
- * and base64-encoded by the time the message reaches the agent.
+ * Fully assembled by the watcher — images starts empty and is populated
+ * by the downloadImages pipeline task.
  */
 export interface IncomingMessage {
 	chatGuid: string;
@@ -28,9 +34,9 @@ export interface IncomingMessage {
 	sender: string;
 	messageType: MessageType;
 	groupName: string;
-	/** Raw attachments from BlueBubbles — populated during assembly. */
-	attachments: BBAttachment[];
-	/** Image attachments, downloaded and base64-encoded by the downloadImages pipeline task. */
+	/** Attachment file paths — populated by the watcher from chat.db. */
+	attachments: Attachment[];
+	/** Image attachments, read and base64-encoded by the downloadImages pipeline task. */
 	images: ImageContent[];
 }
 
@@ -67,7 +73,7 @@ export type ReplyAction = { type: "message"; text: string } | { type: "none" };
 /**
  * Structured pipeline response, carried as context through all phases.
  *
- *   reply          — the reply action to perform (text, reaction, or nothing).
+ *   reply          — the reply action to perform (text or nothing).
  *   shouldContinue — if false, remaining tasks in the current phase and all
  *                    later phases are skipped.
  *   sendReply      — if false, the reply is logged but not sent to the user

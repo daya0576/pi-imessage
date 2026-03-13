@@ -1,16 +1,10 @@
 /**
- * Message processing helpers for the BlueBubbles monitor.
+ * Self-echo filter — prevents the bot from replying to its own messages.
  *
- * Self-echo filter:
- *   In a self-chat (iMessage sent to your own number), BlueBubbles fires two
- *   webhooks per message — one outgoing copy (isFromMe=true, filtered by the
- *   monitor) and one incoming copy (isFromMe=false). Without extra handling the
- *   bot would reply to its own outgoing messages, creating an infinite loop.
- *
- *   Register each outgoing reply with `remember()` before sending. When the
- *   incoming-copy webhook arrives, `isEcho()` detects the match and the caller
- *   should drop the message. Each entry is consumed on first match so an
- *   identical human follow-up is never silently dropped.
+ * In a self-chat, the Messages app echoes outgoing messages back as incoming.
+ * Register each outgoing reply with remember() before sending. When the echo
+ * arrives, isEcho() detects the match and the caller drops the message.
+ * Each entry is consumed on first match so identical human follow-ups pass through.
  */
 
 // ── ExpiringSet ───────────────────────────────────────────────────────────────

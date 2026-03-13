@@ -13,17 +13,11 @@ An self-managing iMessage bot — powered by [pi](https://github.com/badlogic/pi
 
 ## Quick Start
 
-Prerequisites: [BlueBubbles](https://bluebubbles.app/) running on macOS, [Pi Coding Agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start) authenticated
+Prerequisites: macOS with Messages.app, Full Disk Access for the terminal, [Pi Coding Agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start) authenticated
 
 ```bash
-# 1. Set BlueBubbles webhook → http://localhost:7749/webhook
-
-# 2. Install & configure
 npm install
 cp .env.example .env
-# Edit .env: set BLUEBUBBLES_URL and BLUEBUBBLES_PASSWORD
-
-# 3. Start
 ./scripts/start.sh
 ```
 
@@ -65,10 +59,6 @@ All fields are optional.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `BLUEBUBBLES_URL` | yes | - | BlueBubbles server URL |
-| `BLUEBUBBLES_PASSWORD` | yes | - | BlueBubbles server password |
-| `BLUE_HOST` | no | `localhost` | Webhook listener host |
-| `BLUE_PORT` | no | `7749` | Webhook listener port |
 | `WEB_HOST` | no | `localhost` | Web UI host |
 | `WEB_PORT` | no | `7750` | Web UI port |
 | `WORKING_DIR` | no | `~/.pi/imessage` | Workspace directory |
@@ -83,18 +73,22 @@ npm test             # run tests
 ## How It Works
 
 ```
-  BlueBubbles Server
+  ~/Library/Messages/chat.db
         │
-  (webhook POST: new-message)
+  (poll every 2s for new rows)
         │
         ▼
 ┌──────────────────────────────────────────────────┐
-│          pi-imessage Server (HTTP)               │
+│              pi-imessage                         │
 │                                                  │
-│  POST /webhook                                   │
+│  Watcher (chat.db polling)                       │
 │    │                                             │
-│    ├─ Ignore isFromMe messages                   │
-│    │  (skip self-sent to avoid loop)             │
+│    ├─ Filter: is_from_me=0, no reactions         │
+│    ├─ Deduplicate via seenRowIds                 │
+│    ├─ Read attachments from local disk           │
+│    │                                             │
+│    ▼                                             │
+│  AsyncQueue<IncomingMessage>                     │
 │    │                                             │
 │    ▼                                             │
 │  SessionManager (pi-coding-agent)                │
@@ -115,12 +109,11 @@ npm test             # run tests
 │    ▼                                             │
 │  Collect assistant reply text                    │
 │    │                                             │
-│    ├─ sendMessage (BB REST API)                  │
+│    ├─ sendMessage (AppleScript → Messages.app)   │
 │    └─ save logs (messages, digests)              │
 │                                                  │
 └──────────────────────────────────────────────────┘
         │
         ▼
-  iMessage (user receives reply)
+  iMessage (user receives reply via Messages.app)
 ```
-

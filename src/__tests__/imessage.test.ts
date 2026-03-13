@@ -1,69 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
-import type { BBWebhookPayload } from "../bluebubble/index.js";
-import { createBBMonitor, createRawMessageQueue, createSelfEchoFilter } from "../bluebubble/index.js";
-import { assembleMessage } from "../imessage.js";
-import { makeGroupPayload, makePayload } from "./helpers.js";
+import { createSelfEchoFilter } from "../self-echo.js";
 
 // ── fixtures ──────────────────────────────────────────────────────────────────
 
 const CHAT_DM = "iMessage;-;+1111111111";
 
-// ── bot integration ───────────────────────────────────────────────────────────
+// ── self-echo integration ─────────────────────────────────────────────────────
 
-describe("createIMessageBot", () => {
-	it("DM: raw message assembles into IncomingMessage with messageType 'imessage'", async () => {
-		const queue = createRawMessageQueue();
-		const monitor = createBBMonitor({ host: "localhost", port: 0, queue });
-		monitor.handleWebhook(
-			makePayload({ chats: [{ guid: CHAT_DM } as BBWebhookPayload["data"]["chats"][0]], text: "ping" })
-		);
-		const raw = await queue.pull();
-		const msg = assembleMessage(raw);
-		expect(msg.messageType).toBe("imessage");
-		expect(msg.text).toBe("ping");
-	});
-
-	it("group chat: raw message assembles into IncomingMessage with messageType 'group'", async () => {
-		const queue = createRawMessageQueue();
-		const monitor = createBBMonitor({ host: "localhost", port: 0, queue });
-		monitor.handleWebhook(makeGroupPayload());
-		const raw = await queue.pull();
-		const msg = assembleMessage(raw);
-		expect(msg.messageType).toBe("group");
-		expect(msg.sender).toBe("alice@example.com");
-		expect(msg.text).toBe("Test message");
-	});
-
+describe("iMessage bot integration", () => {
 	it("self-chat: bot reply echo is suppressed via echoFilter", async () => {
-		const queue = createRawMessageQueue();
-		const monitor = createBBMonitor({ host: "localhost", port: 0, queue });
-		const processMessage = vi.fn().mockResolvedValue("pong");
 		const echoFilter = createSelfEchoFilter();
+		const processMessage = vi.fn().mockResolvedValue("pong");
 
-		// User sends "hello"
-		monitor.handleWebhook(
-			makePayload({
-				chats: [{ guid: CHAT_DM } as BBWebhookPayload["data"]["chats"][0]],
-				text: "hello",
-				isFromMe: false,
-			})
-		);
-		const raw = await queue.pull();
-		const msg = assembleMessage(raw);
+		// Simulate: user sends "hello", bot replies "pong"
+		const reply = await processMessage({ chatGuid: CHAT_DM, text: "hello" });
+		echoFilter.remember(CHAT_DM, reply);
 
-		// Simulate the bot's processing — remember echo before "sending"
-		const reply = await processMessage(msg);
-		echoFilter.remember(msg.chatGuid, reply);
-
-		// BB echoes bot reply back with isFromMe=false (self-chat)
-		monitor.handleWebhook(
-			makePayload({ chats: [{ guid: CHAT_DM } as BBWebhookPayload["data"]["chats"][0]], text: "pong", isFromMe: false })
-		);
-		const echoRaw = await queue.pull();
-		const echoMsg = assembleMessage(echoRaw);
-
-		// Echo filter detects the echo
-		expect(echoFilter.isEcho(echoMsg.chatGuid, echoMsg.text ?? "")).toBe(true);
+		// Echo of bot's reply arrives as incoming
+		expect(echoFilter.isEcho(CHAT_DM, "pong")).toBe(true);
 		expect(processMessage).toHaveBeenCalledTimes(1);
 	});
 });
