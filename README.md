@@ -1,8 +1,8 @@
 # @kingcrab/pi-imessage
 
-A minimal and self-managing iMessage bot that turns into whatever you need — powered by [pi](https://github.com/badlogic/pi-mono).
+A minimal and self-managing iMessage bot — powered by [pi](https://github.com/badlogic/pi-mono).
 
-![](https://raw.githubusercontent.com/daya0576/pi-imessage/main/docs/screenshot.png)
+<img height="420" src="https://raw.githubusercontent.com/daya0576/pi-imessage/main/docs/screenshot.png" />
 
 # Features
 - **Minimal**: No BlueBubble, no webhooks, no extra dependencies
