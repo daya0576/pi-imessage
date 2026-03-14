@@ -20,6 +20,9 @@ import { join } from "node:path";
 const LABEL = "com.kingcrab.pi-imessage";
 const PLIST_PATH = join(homedir(), "Library", "LaunchAgents", `${LABEL}.plist`);
 const WORKING_DIR = process.env.WORKING_DIR || join(homedir(), ".pi", "imessage");
+const WEB_HOST = process.env.WEB_HOST || "localhost";
+const WEB_PORT = process.env.WEB_PORT || "7750";
+const WEB_ENABLED = process.env.WEB_ENABLED || "true";
 const LOG_DIR = join(WORKING_DIR, "logs");
 const MAIN_JS = join(import.meta.dirname, "main.js");
 
@@ -61,6 +64,12 @@ function buildPlist(): string {
 		<string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
 		<key>WORKING_DIR</key>
 		<string>${WORKING_DIR}</string>
+		<key>WEB_HOST</key>
+		<string>${WEB_HOST}</string>
+		<key>WEB_PORT</key>
+		<string>${WEB_PORT}</string>
+		<key>WEB_ENABLED</key>
+		<string>${WEB_ENABLED}</string>
 	</dict>
 </dict>
 </plist>`;
@@ -121,8 +130,15 @@ function stop(): void {
 }
 
 function restart(): void {
-	stop();
-	start();
+	if (isLoaded()) {
+		execSync(`launchctl unload ${PLIST_PATH}`, { stdio: "inherit" });
+		console.log("[pi-imessage] Service stopped");
+	}
+	mkdirSync(LOG_DIR, { recursive: true });
+	writeFileSync(PLIST_PATH, buildPlist(), "utf-8");
+	console.log("[pi-imessage] Regenerated plist with current env vars");
+	execSync(`launchctl load ${PLIST_PATH}`, { stdio: "inherit" });
+	console.log("[pi-imessage] Service restarted");
 }
 
 function logs(): void {
