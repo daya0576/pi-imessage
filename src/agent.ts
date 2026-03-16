@@ -82,6 +82,12 @@ function formatPromptText(msg: IncomingMessage): string {
 	} else {
 		prefix = `[DM from ${msg.sender}]`;
 	}
+
+	if (msg.replyToText) {
+		const truncated = msg.replyToText.length > 200 ? `${msg.replyToText.substring(0, 200)}…` : msg.replyToText;
+		return `${prefix} [replying to: "${truncated}"] ${text}`;
+	}
+
 	return `${prefix} ${text}`;
 }
 

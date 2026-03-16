@@ -20,6 +20,7 @@ function makeMessage(overrides: Partial<IncomingMessage> = {}): IncomingMessage 
 		sender: "+1111111111",
 		messageType: "imessage",
 		groupName: "",
+		replyToText: null,
 		attachments: [],
 		images: [],
 		...overrides,

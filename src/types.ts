@@ -34,6 +34,8 @@ export interface IncomingMessage {
 	sender: string;
 	messageType: MessageType;
 	groupName: string;
+	/** Text of the message being replied to (inline reply / quote), if any. */
+	replyToText: string | null;
 	/** Attachment file paths — populated by the watcher from chat.db. */
 	attachments: Attachment[];
 	/** Image attachments, read and base64-encoded by the downloadImages pipeline task. */
