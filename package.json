@@ -6,6 +6,10 @@
 		"pi-imessage": "./dist/cli.js"
 	},
 	"files": ["dist", "!dist/__tests__", "README.md"],
+	"publishConfig": {
+		"access": "public",
+		"provenance": true
+	},
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/daya0576/pi-imessage.git"
