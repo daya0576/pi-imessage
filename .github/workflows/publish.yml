@@ -18,12 +18,6 @@ jobs:
         with:
           node-version: "24"
 
-      - run: npm install -g npm@latest
-
       - run: npm ci
 
-      - run: echo "registry=https://registry.npmjs.org/" >> ~/.npmrc
-
-      - run: npm publish
-        env:
-          NPM_CONFIG_PROVENANCE: true
+      - run: npm publish --access public
