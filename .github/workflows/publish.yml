@@ -20,7 +20,15 @@ jobs:
 
       - run: npm ci
 
+      - name: Get npm OIDC token
+        id: oidc
+        run: |
+          TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=npm" | jq -r '.value')
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
+
       - run: npm publish --access public --provenance
         env:
           NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
           NPM_CONFIG_USERCONFIG: /dev/null
+          NODE_AUTH_TOKEN: ${{ steps.oidc.outputs.token }}
