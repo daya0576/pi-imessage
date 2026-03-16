@@ -20,13 +20,9 @@ jobs:
 
       - run: npm install -g npm@latest
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          registry-url: "https://registry.npmjs.org"
-
       - run: npm ci
 
       - run: npm publish
         env:
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
           NPM_CONFIG_PROVENANCE: true
