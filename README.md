@@ -11,7 +11,7 @@ A minimal and self-managing iMessage bot — powered by [pi](https://github.com/
 - **iMessage Integration**: Responds to DMs, SMS, and group chats; identifies who sent each message; understands quoted/reply-to messages
 - **Web UI**: browse chat history, toggle replies on/off per chat, live updates — disable with WEB_ENABLED=false and let the agent build your own web UI
 
-# Getting Started
+# Get Started
 
 > ⚠️ **Security note**
 > - Replies are **off** for all chats by default (`blacklist: ["*"]`) — only explicitly whitelisted chats get a response
