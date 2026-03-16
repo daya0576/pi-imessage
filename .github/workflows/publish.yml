@@ -20,9 +20,7 @@ jobs:
 
       - run: npm ci
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          registry-url: "https://registry.npmjs.org"
-
       - run: npm publish --access public --provenance
+        env:
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
+          NPM_CONFIG_USERCONFIG: /dev/null
