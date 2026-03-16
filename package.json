@@ -1,6 +1,6 @@
 {
 	"name": "@kingcrab/pi-imessage",
-	"version": "0.0.7",
+	"version": "0.0.8",
 	"type": "module",
 	"bin": {
 		"pi-imessage": "./dist/cli.js"
