@@ -14,8 +14,11 @@
 
 import { execSync, fork } from "node:child_process";
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
+const { version } = createRequire(import.meta.url)("../package.json") as { version: string };
 
 const LABEL = "com.kingcrab.pi-imessage";
 const PLIST_PATH = join(homedir(), "Library", "LaunchAgents", `${LABEL}.plist`);
@@ -162,7 +165,9 @@ function runForeground(): void {
 }
 
 function help(): void {
-	console.log(`Usage: pi-imessage [command]
+	console.log(`pi-imessage v${version}
+
+Usage: pi-imessage [command]
 
 Commands:
   (none)       Run in foreground
