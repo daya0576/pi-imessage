@@ -1,11 +1,15 @@
 {
 	"name": "@kingcrab/pi-imessage",
-	"version": "0.0.4",
+	"version": "0.0.5",
 	"type": "module",
 	"bin": {
 		"pi-imessage": "./dist/cli.js"
 	},
-	"files": ["dist", "!dist/__tests__", "README.md"],
+	"files": [
+		"dist",
+		"!dist/__tests__",
+		"README.md"
+	],
 	"engines": {
 		"node": ">=20.0.0"
 	},
