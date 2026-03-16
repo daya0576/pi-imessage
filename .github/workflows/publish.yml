@@ -28,6 +28,16 @@ jobs:
 
       - run: npm ci
 
+      - name: Fetch npm OIDC token
+        id: oidc
+        run: |
+          OIDC_TOKEN=$(curl -fsSL \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm" \
+            | jq -r '.value')
+          echo "token=$OIDC_TOKEN" >> $GITHUB_OUTPUT
+
       - run: npm publish
         env:
           NPM_CONFIG_PROVENANCE: true
+          NODE_AUTH_TOKEN: ${{ steps.oidc.outputs.token }}
