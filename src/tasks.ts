@@ -264,29 +264,39 @@ async function resizeImageIfNeeded(image: ImageContent): Promise<ImageContent> {
 }
 
 /** Send the message to the agent and dispatch a reply for each agent turn. */
-export function createCallAgentTask(agent: AgentManager): StartTask {
-	const retryDelays = [1000, 5000, 10000];
+/** Decorator: wrap a StartTask with retry logic for transient errors. */
+function withRetry(task: StartTask, options: { delays: number[]; retryable: (message: string) => boolean }): StartTask {
 	return async (incoming, outgoing, dispatch) => {
-		for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
+		const { delays, retryable } = options;
+		for (let attempt = 0; ; attempt++) {
 			try {
-				await agent.processMessage(incoming, async (agentReply) => {
-					const text = formatAgentReply(agentReply);
-					await dispatch({ ...outgoing, reply: { type: "message" as const, text } });
-				});
+				await task(incoming, outgoing, dispatch);
 				return;
 			} catch (error: unknown) {
 				const message = error instanceof Error ? error.message : String(error);
-				const retryable = message.includes("timed out") || message.includes("network is unavailable");
-				if (!retryable || attempt >= retryDelays.length) throw error;
-				const delay = retryDelays[attempt];
+				if (attempt >= delays.length || !retryable(message)) throw error;
+				const delay = delays[attempt];
 				console.log(
-					`[agent] retrying ${incoming.chatGuid} (attempt ${attempt + 2}/${retryDelays.length + 1}) ` +
+					`[agent] retrying ${incoming.chatGuid} (attempt ${attempt + 2}/${delays.length + 1}) ` +
 						`in ${delay / 1000}s: ${message.substring(0, 80)}`
 				);
 				await new Promise((resolve) => setTimeout(resolve, delay));
 			}
 		}
 	};
+}
+
+export function createCallAgentTask(agent: AgentManager): StartTask {
+	const task: StartTask = async (incoming, outgoing, dispatch) => {
+		await agent.processMessage(incoming, async (agentReply) => {
+			const text = formatAgentReply(agentReply);
+			await dispatch({ ...outgoing, reply: { type: "message" as const, text } });
+		});
+	};
+	return withRetry(task, {
+		delays: [1000, 5000, 10000],
+		retryable: (msg) => msg.includes("timed out") || msg.includes("Authentication failed"),
+	});
 }
 
 // ── end tasks ─────────────────────────────────────────────────────────────────
