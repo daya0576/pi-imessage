@@ -8,10 +8,15 @@ A minimal and self-managing iMessage bot — powered by [pi](https://github.com/
 - **Minimal**: No BlueBubble, no webhooks, no extra dependencies
 - **Self-managing**: Turn the agent into whatever you need. He builds his own tools without pre-built assumptions
 - **Transparent**: tool calls and reasoning are sent to your iMessage chat, so you can see exactly what it's doing and why
-- **iMessage Integration**: Responds to DMs, SMS, and group chats; identifies who sent each message
+- **iMessage Integration**: Responds to DMs, SMS, and group chats; identifies who sent each message; understands quoted/reply-to messages
 - **Web UI**: browse chat history, toggle replies on/off per chat, live updates — disable with WEB_ENABLED=false and let the agent build your own web UI
 
 # Getting Started
+
+> ⚠️ **Security note**
+> - Replies are **off** for all chats by default (`blacklist: ["*"]`) — only explicitly whitelisted chats get a response
+> - The agent runs with Full Disk Access and can read/write your filesystem as part of its tool use
+> - The web UI has no authentication and is accessible to anyone on your local network; set `WEB_ENABLED=false` if that's a concern
 
 Prerequisites: macOS with Messages.app, Full Disk Access for the terminal, [Pi Coding Agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start) authenticated
 
@@ -21,8 +26,6 @@ npm install -g @kingcrab/pi-imessage
 pi-imessage             # run in foreground
 pi-imessage install     # install as launchd service (auto-start on boot, restart on crash)
 ```
-
-By default, replies are **off** for all chats. Enable specific chats via the web UI or `settings.json`.
 
 # Usage
 
