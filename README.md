@@ -22,6 +22,8 @@ pi-imessage             # run in foreground
 pi-imessage install     # install as launchd service (auto-start on boot, restart on crash)
 ```
 
+By default, replies are **off** for all chats. Enable specific chats via the web UI or `settings.json`.
+
 # Usage
 
 ## Web UI
@@ -50,13 +52,13 @@ All fields are optional.
 ```json
 {
   "chatAllowlist": {
-    "whitelist": ["*"],
-    "blacklist": ["iMessage;-;+11234567890"]
+    "whitelist": ["iMessage;-;+11234567890"],
+    "blacklist": ["*"]
   }
 }
 ```
 
-**Chat allowlist** controls which chats receive replies (messages are always logged). Resolution priority: `blacklist[guid]` > `whitelist[guid]` > `blacklist["*"]` > `whitelist["*"]`.
+**Chat allowlist** controls which chats receive replies (messages are always logged). By default, replies are **off** for all chats (`blacklist: ["*"]`) — opt in specific chats via the web UI or by adding their guid to `whitelist`. Resolution priority: `blacklist[guid]` > `whitelist[guid]` > `blacklist["*"]` > `whitelist["*"]`.
 
 ## Environment Variables
 

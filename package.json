@@ -5,11 +5,7 @@
 	"bin": {
 		"pi-imessage": "./dist/cli.js"
 	},
-	"files": [
-		"dist",
-		"!dist/__tests__",
-		"README.md"
-	],
+	"files": ["dist", "!dist/__tests__", "README.md"],
 	"engines": {
 		"node": ">=20.0.0"
 	},

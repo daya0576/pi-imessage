@@ -34,7 +34,7 @@ export interface Settings {
 	chatAllowlist: ChatAllowlist;
 }
 
-const DEFAULT_CHAT_ALLOWLIST: ChatAllowlist = { whitelist: ["*"], blacklist: [] };
+const DEFAULT_CHAT_ALLOWLIST: ChatAllowlist = { whitelist: [], blacklist: ["*"] };
 const DEFAULT_SETTINGS: Settings = { chatAllowlist: DEFAULT_CHAT_ALLOWLIST };
 
 /**
