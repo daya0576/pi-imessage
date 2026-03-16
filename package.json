@@ -5,11 +5,11 @@
 	"bin": {
 		"pi-imessage": "./dist/cli.js"
 	},
-	"files": [
-		"dist",
-		"!dist/__tests__",
-		"README.md"
-	],
+	"files": ["dist", "!dist/__tests__", "README.md"],
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/daya0576/pi-imessage.git"
+	},
 	"engines": {
 		"node": ">=20.0.0"
 	},
