@@ -20,10 +20,8 @@ jobs:
 
       - run: npm ci
 
-      - name: Debug OIDC env
-        run: |
-          echo "OIDC URL set: $([[ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ]] && echo YES || echo NO)"
-          echo "OIDC TOKEN set: $([[ -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" ]] && echo YES || echo NO)"
-          npm --version
+      - run: npm publish --access public --provenance || true
 
-      - run: npm publish --access public --provenance
+      - name: Show npm debug log
+        if: always()
+        run: cat ~/.npm/_logs/*.log 2>/dev/null | tail -100
