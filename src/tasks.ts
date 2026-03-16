@@ -265,11 +265,27 @@ async function resizeImageIfNeeded(image: ImageContent): Promise<ImageContent> {
 
 /** Send the message to the agent and dispatch a reply for each agent turn. */
 export function createCallAgentTask(agent: AgentManager): StartTask {
+	const retryDelays = [1000, 5000, 10000];
 	return async (incoming, outgoing, dispatch) => {
-		await agent.processMessage(incoming, async (agentReply) => {
-			const text = formatAgentReply(agentReply);
-			await dispatch({ ...outgoing, reply: { type: "message" as const, text } });
-		});
+		for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
+			try {
+				await agent.processMessage(incoming, async (agentReply) => {
+					const text = formatAgentReply(agentReply);
+					await dispatch({ ...outgoing, reply: { type: "message" as const, text } });
+				});
+				return;
+			} catch (error: unknown) {
+				const message = error instanceof Error ? error.message : String(error);
+				const retryable = message.includes("timed out") || message.includes("network is unavailable");
+				if (!retryable || attempt >= retryDelays.length) throw error;
+				const delay = retryDelays[attempt];
+				console.log(
+					`[agent] retrying ${incoming.chatGuid} (attempt ${attempt + 2}/${retryDelays.length + 1}) ` +
+						`in ${delay / 1000}s: ${message.substring(0, 80)}`
+				);
+				await new Promise((resolve) => setTimeout(resolve, delay));
+			}
+		}
 	};
 }
 
