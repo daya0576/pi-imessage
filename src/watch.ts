@@ -27,9 +27,11 @@ const MESSAGES_QUERY = `
 	SELECT
 		message.ROWID            AS rowid,
 		message.text             AS text,
+		message.attributedBody   AS attributedBody,
 		message.is_from_me       AS is_from_me,
 		message.service          AS service,
 		message.associated_message_type AS reaction_type,
+		message.thread_originator_guid AS thread_originator_guid,
 		handle.id                AS sender,
 		chat.guid                AS chat_guid,
 		chat.display_name        AS group_name,
@@ -42,6 +44,13 @@ const MESSAGES_QUERY = `
 	  AND message.is_from_me = 0
 	  AND (message.associated_message_type IS NULL OR message.associated_message_type = 0)
 	ORDER BY message.date ASC
+`;
+
+const REPLY_TO_QUERY = `
+	SELECT message.text AS text
+	FROM message
+	WHERE message.guid = ?
+	LIMIT 1
 `;
 
 const ATTACHMENTS_QUERY = `
@@ -58,9 +67,11 @@ const ATTACHMENTS_QUERY = `
 interface RawRow {
 	rowid: number;
 	text: string | null;
+	attributedBody: Buffer | null;
 	is_from_me: number;
 	service: string | null;
 	reaction_type: number | null;
+	thread_originator_guid: string | null;
 	sender: string | null;
 	chat_guid: string | null;
 	group_name: string | null;
@@ -93,6 +104,62 @@ export function createWatcher(config: WatcherConfig) {
 		return isGroup ? "group" : "imessage";
 	}
 
+	/**
+	 * Extract plain text from an attributedBody blob (NSKeyedArchiver typedstream).
+	 *
+	 * Binary layout after "NSString" class declaration:
+	 *   \x01\x94\x84\x01\x2b  — fixed header ('+' type marker)
+	 *   length                 — 1 byte if < 0x81, otherwise \x81 + 2-byte big-endian
+	 *   UTF-8 text bytes
+	 *   \x86                   — terminator
+	 *
+	 * Returns null if extraction fails — caller should treat as no text.
+	 */
+	function extractTextFromAttributedBody(blob: Buffer): string | null {
+		try {
+			const marker = Buffer.from("NSString");
+			const markerIdx = blob.indexOf(marker);
+			if (markerIdx === -1) return null;
+
+			// Skip marker + fixed header bytes, find the '+' (0x2b) type indicator
+			let pos = markerIdx + marker.length;
+			while (pos < blob.length && blob[pos] !== 0x2b) pos++;
+			if (pos >= blob.length) return null;
+			pos++; // skip 0x2b
+
+			// Read length
+			let textLength: number;
+			if (blob[pos] === 0x81) {
+				// 2-byte little-endian length follows
+				pos++;
+				if (pos + 2 > blob.length) return null;
+				textLength = blob[pos] | (blob[pos + 1] << 8);
+				pos += 2;
+			} else {
+				textLength = blob[pos];
+				pos++;
+			}
+
+			if (textLength <= 0 || pos + textLength > blob.length) return null;
+
+			const text = blob
+				.subarray(pos, pos + textLength)
+				.toString("utf-8")
+				.trim();
+			return text || null;
+		} catch {
+			return null;
+		}
+	}
+
+	/** Resolve message text: prefer message.text, fall back to attributedBody. */
+	function resolveText(row: RawRow): string | null {
+		const text = row.text?.trim();
+		if (text) return text;
+		if (row.attributedBody) return extractTextFromAttributedBody(row.attributedBody);
+		return null;
+	}
+
 	function expandPath(rawPath: string): string {
 		if (rawPath.startsWith("~")) return rawPath.replace(/^~/, homedir());
 		return rawPath;
@@ -108,6 +175,16 @@ export function createWatcher(config: WatcherConfig) {
 			}));
 	}
 
+	/** Look up the text of a replied-to message by its guid. Returns null on miss. */
+	function getReplyToText(guid: string): string | null {
+		try {
+			const row = db.prepare(REPLY_TO_QUERY).get(guid) as { text: string | null } | undefined;
+			return row?.text?.trim() || null;
+		} catch {
+			return null;
+		}
+	}
+
 	function poll(): void {
 		try {
 			const rows = db.prepare(MESSAGES_QUERY).all(lastTimestamp) as RawRow[];
@@ -116,18 +193,22 @@ export function createWatcher(config: WatcherConfig) {
 				if (seenRowIds.has(row.rowid)) continue;
 				if (!row.chat_guid) continue;
 
-				const hasText = Boolean(row.text?.trim());
+				const resolvedText = resolveText(row);
+				const hasText = Boolean(resolvedText);
 				const attachments = getAttachments(row.rowid);
 				if (!hasText && attachments.length === 0) continue;
 
 				seenRowIds.add(row.rowid);
 
+				const replyToText = row.thread_originator_guid ? getReplyToText(row.thread_originator_guid) : null;
+
 				const msg: IncomingMessage = {
 					chatGuid: row.chat_guid,
-					text: row.text?.trim() ?? null,
+					text: resolvedText,
 					sender: row.sender ?? "unknown",
 					messageType: deriveMessageType(row.service, row.is_group),
 					groupName: row.group_name ?? "",
+					replyToText,
 					attachments,
 					images: [],
 				};
