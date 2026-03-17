@@ -19,6 +19,7 @@ import {
 	DefaultResourceLoader,
 	ModelRegistry,
 	SessionManager,
+	SettingsManager,
 	createAgentSession,
 } from "@mariozechner/pi-coding-agent";
 import type { AgentReply, IncomingMessage } from "./types.js";
@@ -400,7 +401,27 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		return `${line1}\n${line2}`;
 	}
 
-	return { processMessage, newSession, getSessionStatus };
+	/** Reload models and resources, then switch the requesting session to the new default model. */
+	async function reload(chatGuid: string): Promise<void> {
+		await resourceLoader.reload();
+		modelRegistry.refresh();
+
+		// Resolve new default model from settings and apply to the requesting session only
+		const settings = SettingsManager.create();
+		const provider = settings.getDefaultProvider();
+		const modelId = settings.getDefaultModel();
+		const newModel = provider && modelId ? modelRegistry.find(provider, modelId) : undefined;
+
+		const entry = sessionMap.get(chatGuid);
+		if (newModel && entry) {
+			entry.session.agent.setModel(newModel);
+			console.log(`[agent] reloaded and switched ${chatGuid} to ${provider}/${modelId}`);
+		} else {
+			console.log(`[agent] reloaded (no model change for ${chatGuid})`);
+		}
+	}
+
+	return { processMessage, newSession, getSessionStatus, reload };
 }
 
 /** Format a token count as a compact string: 0, 1.2k, 5.9k, 12k, 1.8M, etc. */
@@ -414,5 +435,5 @@ function formatTokenCount(tokens: number): string {
 
 export type AgentManager = Pick<
 	Awaited<ReturnType<typeof createAgentManager>>,
-	"processMessage" | "newSession" | "getSessionStatus"
+	"processMessage" | "newSession" | "getSessionStatus" | "reload"
 >;
