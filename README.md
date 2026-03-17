@@ -47,6 +47,7 @@ Send these as iMessage to interact with the bot:
 |---|---|---|
 | `/new` | Reset the session, starting a fresh conversation | `✓ New session started` |
 | `/status` | Show session stats: tokens, context, model | `💬 3 msgs - ↑7.2k ↓505 1.1%/128k`<br>`🤖 anthropic/claude-sonnet-4 • 💭 minimal` |
+| `/reload` | Reload models and clear all sessions | `✓ Models reloaded` |
 
 ## Settings (`WORKING_DIR/settings.json`)
 

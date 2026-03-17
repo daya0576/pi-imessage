@@ -102,6 +102,7 @@ describe("createCallAgentTask", () => {
 			}),
 			newSession: vi.fn(async () => {}),
 			getSessionStatus: vi.fn(async () => "↑0 ↓0"),
+			reload: vi.fn(async () => {}),
 		};
 		const task = createCallAgentTask(agent);
 		const dispatched: OutgoingMessage[] = [];
@@ -121,6 +122,7 @@ describe("createCallAgentTask", () => {
 			processMessage: vi.fn(async () => {}),
 			newSession: vi.fn(async () => {}),
 			getSessionStatus: vi.fn(async () => "↑0 ↓0"),
+			reload: vi.fn(async () => {}),
 		};
 		const task = createCallAgentTask(agent);
 		const dispatch = vi.fn();

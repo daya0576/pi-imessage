@@ -124,6 +124,7 @@ export function createCheckReplyEnabledTask(getSettings: () => Settings): Before
  * Supported commands:
  *   /new    — reset the agent session for this chat (equivalent to /new in pi coding agent).
  *   /status — show session stats: tokens, cost, context usage, model, thinking level.
+ *   /reload — reload models and clear all sessions.
  */
 export function createCommandHandlerTask(agent: AgentManager): StartTask {
 	return async (incoming, outgoing, dispatch) => {
@@ -146,6 +147,16 @@ export function createCommandHandlerTask(agent: AgentManager): StartTask {
 		if (text === "/status") {
 			const replyText = await agent.getSessionStatus(incoming.chatGuid);
 			console.log(`[sid] /status command: ${incoming.chatGuid} → ${replyText}`);
+			await dispatch({ ...outgoing, reply: { type: "message", text: replyText } });
+			outgoing.shouldContinue = false;
+			return;
+		}
+
+		if (text === "/reload") {
+			await agent.reload(incoming.chatGuid);
+			const statusReply = await agent.getSessionStatus(incoming.chatGuid);
+			const replyText = `✓ Models reloaded\n${statusReply}`;
+			console.log(`[sid] /reload command: ${incoming.chatGuid} → ${replyText}`);
 			await dispatch({ ...outgoing, reply: { type: "message", text: replyText } });
 			outgoing.shouldContinue = false;
 			return;
