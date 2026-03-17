@@ -1,6 +1,6 @@
 {
 	"name": "@kingcrab/pi-imessage",
-	"version": "0.0.12",
+	"version": "0.0.13",
 	"description": "AI-powered iMessage bot using pi coding agent — understands images, quoted replies, and conversation context",
 	"type": "module",
 	"license": "MIT",

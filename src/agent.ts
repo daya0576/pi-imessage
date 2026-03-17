@@ -400,23 +400,25 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		return `${line1}\n${line2}`;
 	}
 
-	/** Reload models and resources, then switch the requesting session to the new default model. */
+	/** Reload models and resources, then evict and rebuild the requesting session with new default model. */
 	async function reload(chatGuid: string): Promise<void> {
 		await resourceLoader.reload();
 		modelRegistry.refresh();
 
-		// Resolve new default model from settings and apply to the requesting session only
+		// Evict then immediately rebuild from context.jsonl (preserves history)
+		sessionMap.delete(chatGuid);
+		const entry = await getOrCreateSession(chatGuid);
+
+		// Apply new default model to the idle session (safe — no prompt running)
 		const settings = SettingsManager.create();
 		const provider = settings.getDefaultProvider();
 		const modelId = settings.getDefaultModel();
 		const newModel = provider && modelId ? modelRegistry.find(provider, modelId) : undefined;
-
-		const entry = sessionMap.get(chatGuid);
-		if (newModel && entry) {
+		if (newModel) {
 			entry.session.agent.setModel(newModel);
-			console.log(`[agent] reloaded and switched ${chatGuid} to ${provider}/${modelId}`);
+			console.log(`[agent] reloaded: ${chatGuid} switched to ${provider}/${modelId}`);
 		} else {
-			console.log(`[agent] reloaded (no model change for ${chatGuid})`);
+			console.log(`[agent] reloaded: ${chatGuid} (no default model in settings)`);
 		}
 	}
 
