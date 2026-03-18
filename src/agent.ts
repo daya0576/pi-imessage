@@ -344,6 +344,10 @@ export async function createAgentManager(config: AgentManagerConfig) {
 			`[agent] prompt start (steer): ${entry.chatGuid} model=${currentModelLabel} "${promptText.substring(0, 60)}"`
 		);
 
+		// 1) Session idle   → prompt() blocks until the full agentic run completes.
+		// 2) Session active → new message is steered in; prompt() returns immediately,
+		//    events (tool_start/end, message_end) keep firing via the subscriber above.
+		// TODO: detect active run and fire-and-forget to avoid blocking on a hanging tool.
 		await (msg.images.length > 0
 			? entry.session.prompt(promptText, { images: msg.images, streamingBehavior: "steer" })
 			: entry.session.prompt(promptText, { streamingBehavior: "steer" }));
