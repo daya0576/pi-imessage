@@ -8,8 +8,8 @@ import {
 	createLogOutgoingTask,
 	createSendReplyTask,
 } from "../tasks.js";
-import type { AgentReply, IncomingMessage, OutgoingMessage } from "../types.js";
-import { createOutgoingMessage } from "../types.js";
+import type { AgentReply, ChatContext, IncomingMessage, OutgoingMessage } from "../types.js";
+import { createOutgoingMessage, toChatContext } from "../types.js";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -23,6 +23,15 @@ function makeMessage(overrides: Partial<IncomingMessage> = {}): IncomingMessage 
 		replyToText: null,
 		attachments: [],
 		images: [],
+		...overrides,
+	};
+}
+
+function makeChat(overrides: Partial<ChatContext> = {}): ChatContext {
+	return {
+		chatGuid: "iMessage;-;+1111111111",
+		messageType: "imessage",
+		groupName: "",
 		...overrides,
 	};
 }
@@ -47,13 +56,13 @@ describe("createLogIncomingTask", () => {
 	it("passes the outgoing through unchanged", () => {
 		const task = createLogIncomingTask(makeDigestLogger());
 		const outgoing = makeOutgoing();
-		expect(task(makeMessage(), outgoing)).toEqual(outgoing);
+		expect(task(makeChat(), makeMessage(), outgoing)).toEqual(outgoing);
 	});
 
 	it("logs DM with sender", () => {
 		const spy = vi.spyOn(console, "log").mockImplementation(() => {});
 		const task = createLogIncomingTask(makeDigestLogger());
-		task(makeMessage({ text: "hi" }), makeOutgoing());
+		task(makeChat(), makeMessage({ text: "hi" }), makeOutgoing());
 		expect(spy).toHaveBeenCalledWith(expect.stringContaining("[DM]"));
 		expect(spy).toHaveBeenCalledWith(expect.stringContaining("+1111111111"));
 		spy.mockRestore();
@@ -62,7 +71,8 @@ describe("createLogIncomingTask", () => {
 	it("logs group with group name and sender", () => {
 		const spy = vi.spyOn(console, "log").mockImplementation(() => {});
 		const task = createLogIncomingTask(makeDigestLogger());
-		task(makeMessage({ messageType: "group", groupName: "Family", sender: "alice" }), makeOutgoing());
+		const chat = makeChat({ messageType: "group", groupName: "Family" });
+		task(chat, makeMessage({ messageType: "group", groupName: "Family", sender: "alice" }), makeOutgoing());
 		expect(spy).toHaveBeenCalledWith(expect.stringContaining("[GROUP] Family|alice"));
 		spy.mockRestore();
 	});
@@ -74,10 +84,11 @@ describe("createDropSelfEchoTask", () => {
 	it("drops a message that matches a remembered echo", async () => {
 		const echoFilter = createSelfEchoFilter();
 		const task = createDropSelfEchoTask(echoFilter);
+		const chat = makeChat();
 		const msg = makeMessage({ text: "pong" });
 
-		echoFilter.remember(msg.chatGuid, "pong");
-		const result = await task(msg, makeOutgoing());
+		echoFilter.remember(chat.chatGuid, "pong");
+		const result = await task(chat, msg, makeOutgoing());
 		expect(result.shouldContinue).toBe(false);
 	});
 
@@ -86,7 +97,7 @@ describe("createDropSelfEchoTask", () => {
 		const task = createDropSelfEchoTask(echoFilter);
 		const msg = makeMessage({ text: "hello" });
 
-		const result = await task(msg, makeOutgoing());
+		const result = await task(makeChat(), msg, makeOutgoing());
 		expect(result.shouldContinue).toBe(true);
 	});
 });
@@ -110,7 +121,7 @@ describe("createCallAgentTask", () => {
 			dispatched.push(out);
 		});
 
-		await task(makeMessage(), makeOutgoing(), dispatch);
+		await task(makeChat(), makeMessage(), makeOutgoing(), dispatch);
 
 		expect(dispatched).toHaveLength(2);
 		expect(dispatched[0].reply).toEqual({ type: "message", text: "first reply" });
@@ -127,7 +138,7 @@ describe("createCallAgentTask", () => {
 		const task = createCallAgentTask(agent);
 		const dispatch = vi.fn();
 
-		await task(makeMessage(), makeOutgoing(), dispatch);
+		await task(makeChat(), makeMessage(), makeOutgoing(), dispatch);
 		expect(dispatch).not.toHaveBeenCalled();
 	});
 });
@@ -139,13 +150,13 @@ describe("createSendReplyTask", () => {
 		const echoFilter = createSelfEchoFilter();
 		const sender = makeMockSender();
 		const task = createSendReplyTask(echoFilter, sender);
-		const msg = makeMessage();
+		const chat = makeChat();
 		const outgoing = makeOutgoing({ reply: { type: "message", text: "pong" } });
 
-		await task(msg, outgoing);
+		await task(chat, outgoing);
 
-		expect(sender.sendMessage).toHaveBeenCalledWith(msg.chatGuid, "pong");
-		expect(echoFilter.isEcho(msg.chatGuid, "pong")).toBe(true);
+		expect(sender.sendMessage).toHaveBeenCalledWith(chat.chatGuid, "pong");
+		expect(echoFilter.isEcho(chat.chatGuid, "pong")).toBe(true);
 	});
 });
 
@@ -155,7 +166,7 @@ describe("createLogOutgoingTask", () => {
 	it("logs the outgoing text reply", () => {
 		const spy = vi.spyOn(console, "log").mockImplementation(() => {});
 		const task = createLogOutgoingTask(makeDigestLogger());
-		task(makeMessage(), makeOutgoing({ reply: { type: "message", text: "pong" } }));
+		task(makeChat(), makeOutgoing({ reply: { type: "message", text: "pong" } }));
 		expect(spy).toHaveBeenCalledWith(expect.stringContaining("pong"));
 		spy.mockRestore();
 	});

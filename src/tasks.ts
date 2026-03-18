@@ -16,8 +16,9 @@
  *   callAgent        — sends the message to the agent and yields replies as they arrive
  *
  * end:
- *   sendReply        — remembers echo, sends reply via BlueBubbles
+ *   sendReply        — remembers echo, sends reply via Messages.app
  *   logOutgoing      — logs the outgoing reply
+ *   storeOutgoing    — persists the outgoing reply to log.jsonl
  */
 
 import { execFile } from "node:child_process";
@@ -34,18 +35,18 @@ import type { MessageSender } from "./send.js";
 import type { Settings } from "./settings.js";
 import { isReplyEnabled } from "./settings.js";
 import type { ChatStore } from "./store.js";
-import { formatAgentReply } from "./types.js";
-import type { IncomingMessage, OutgoingMessage } from "./types.js";
+import { displayTarget, formatAgentReply } from "./types.js";
+import type { AgentReply, ChatContext, IncomingMessage, OutgoingMessage } from "./types.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function messageTypeLabel(msg: IncomingMessage): string {
-	if (msg.messageType === "group") return "GROUP";
-	return msg.messageType === "sms" ? "SMS" : "DM";
+function messageTypeLabel(chat: ChatContext): string {
+	if (chat.messageType === "group") return "GROUP";
+	return chat.messageType === "sms" ? "SMS" : "DM";
 }
 
-function formatTarget(msg: IncomingMessage): string {
-	return msg.messageType === "group" ? `${msg.groupName}|${msg.sender}` : msg.sender;
+function formatIncomingTarget(chat: ChatContext, incoming: IncomingMessage): string {
+	return chat.messageType === "group" ? `${chat.groupName}|${incoming.sender}` : incoming.sender;
 }
 
 // ── before tasks ──────────────────────────────────────────────────────────────
@@ -59,9 +60,9 @@ function formatTarget(msg: IncomingMessage): string {
  *   [sid] <- [GROUP] Family|+16501234567: dinner at 6? [2 attachment(s)]
  */
 export function createLogIncomingTask(digestLogger: DigestLogger): BeforeTask {
-	return (incoming, outgoing) => {
-		const label = messageTypeLabel(incoming);
-		const target = formatTarget(incoming);
+	return (chat, incoming, outgoing) => {
+		const label = messageTypeLabel(chat);
+		const target = formatIncomingTarget(chat, incoming);
 		const attachmentNote = incoming.attachments.length > 0 ? ` [${incoming.attachments.length} attachment(s)]` : "";
 		digestLogger.log(
 			`[sid] <- [${label}] ${target}: ${(incoming.text ?? "(attachment)").substring(0, 80)}${attachmentNote}`
@@ -72,9 +73,9 @@ export function createLogIncomingTask(digestLogger: DigestLogger): BeforeTask {
 
 /** Persist the incoming message to log.jsonl. Always passes through. */
 export function createStoreIncomingTask(store: ChatStore): BeforeTask {
-	return (incoming, outgoing) => {
+	return (chat, incoming, outgoing) => {
 		store.logIncoming(incoming).catch((error) => {
-			console.error(`[sid] failed to store incoming message for ${incoming.chatGuid}:`, error);
+			console.error(`[sid] failed to store incoming message for ${chat.chatGuid}:`, error);
 		});
 		return outgoing;
 	};
@@ -82,9 +83,9 @@ export function createStoreIncomingTask(store: ChatStore): BeforeTask {
 
 /** Drop messages that are echoes of the bot's own replies. */
 export function createDropSelfEchoTask(echoFilter: SelfEchoFilter): BeforeTask {
-	return (incoming, outgoing) => {
-		if (incoming.text && echoFilter.isEcho(incoming.chatGuid, incoming.text)) {
-			console.warn(`[sid] drop self-echo ${incoming.chatGuid}: ${incoming.text.substring(0, 40)}`);
+	return (chat, incoming, outgoing) => {
+		if (incoming.text && echoFilter.isEcho(chat.chatGuid, incoming.text)) {
+			console.warn(`[sid] drop self-echo ${chat.chatGuid}: ${incoming.text.substring(0, 40)}`);
 			return { ...outgoing, shouldContinue: false };
 		}
 		return outgoing;
@@ -106,9 +107,9 @@ export function createDropSelfEchoTask(echoFilter: SelfEchoFilter): BeforeTask {
  *   whitelist: ["1"], bl: ["1"]   → no reply (blacklist wins)
  */
 export function createCheckReplyEnabledTask(getSettings: () => Settings): BeforeTask {
-	return (incoming, outgoing) => {
-		if (!isReplyEnabled(getSettings(), incoming.chatGuid)) {
-			console.log(`[sid] reply disabled for ${incoming.chatGuid}, log-only`);
+	return (chat, _incoming, outgoing) => {
+		if (!isReplyEnabled(getSettings(), chat.chatGuid)) {
+			console.log(`[sid] reply disabled for ${chat.chatGuid}, log-only`);
 			return { ...outgoing, shouldContinue: false };
 		}
 		return outgoing;
@@ -127,17 +128,17 @@ export function createCheckReplyEnabledTask(getSettings: () => Settings): Before
  *   /reload — reload models and clear all sessions.
  */
 export function createCommandHandlerTask(agent: AgentManager): StartTask {
-	return async (incoming, outgoing, dispatch) => {
+	return async (chat, incoming, outgoing, dispatch) => {
 		const text = incoming.text?.trim();
 
 		if (text === "/new") {
-			await agent.newSession(incoming.chatGuid);
+			await agent.newSession(chat.chatGuid);
 			const newSessionReply = "✓ New session started";
-			console.log(`[sid] /new command: ${incoming.chatGuid} → ${newSessionReply}`);
+			console.log(`[sid] /new command: ${chat.chatGuid} → ${newSessionReply}`);
 			await dispatch({ ...outgoing, reply: { type: "message", text: newSessionReply } });
 
-			const statusReply = await agent.getSessionStatus(incoming.chatGuid);
-			console.log(`[sid] /new status: ${incoming.chatGuid} → ${statusReply}`);
+			const statusReply = await agent.getSessionStatus(chat.chatGuid);
+			console.log(`[sid] /new status: ${chat.chatGuid} → ${statusReply}`);
 			await dispatch({ ...outgoing, reply: { type: "message", text: statusReply } });
 
 			outgoing.shouldContinue = false;
@@ -145,18 +146,18 @@ export function createCommandHandlerTask(agent: AgentManager): StartTask {
 		}
 
 		if (text === "/status") {
-			const replyText = await agent.getSessionStatus(incoming.chatGuid);
-			console.log(`[sid] /status command: ${incoming.chatGuid} → ${replyText}`);
+			const replyText = await agent.getSessionStatus(chat.chatGuid);
+			console.log(`[sid] /status command: ${chat.chatGuid} → ${replyText}`);
 			await dispatch({ ...outgoing, reply: { type: "message", text: replyText } });
 			outgoing.shouldContinue = false;
 			return;
 		}
 
 		if (text === "/reload") {
-			await agent.reload(incoming.chatGuid);
-			const statusReply = await agent.getSessionStatus(incoming.chatGuid);
+			await agent.reload(chat.chatGuid);
+			const statusReply = await agent.getSessionStatus(chat.chatGuid);
 			const replyText = `✓ Models reloaded\n${statusReply}`;
-			console.log(`[sid] /reload command: ${incoming.chatGuid} → ${replyText}`);
+			console.log(`[sid] /reload command: ${chat.chatGuid} → ${replyText}`);
 			await dispatch({ ...outgoing, reply: { type: "message", text: replyText } });
 			outgoing.shouldContinue = false;
 			return;
@@ -171,7 +172,7 @@ export function createCommandHandlerTask(agent: AgentManager): StartTask {
  * Non-image attachments are skipped; failed reads are logged and silently skipped.
  */
 export function createDownloadImagesTask(): BeforeTask {
-	return async (incoming, outgoing) => {
+	return async (_chat, incoming, outgoing) => {
 		const images: ImageContent[] = [];
 		for (const attachment of incoming.attachments) {
 			const mimeType = attachment.mimeType;
@@ -204,7 +205,7 @@ export function createDownloadImagesTask(): BeforeTask {
 const MAX_EDGE_PX = 1024;
 
 export function createResizeImagesTask(): BeforeTask {
-	return async (incoming, outgoing) => {
+	return async (_chat, incoming, outgoing) => {
 		const resized: ImageContent[] = [];
 		for (const image of incoming.images) {
 			try {
@@ -274,21 +275,20 @@ async function resizeImageIfNeeded(image: ImageContent): Promise<ImageContent> {
 	}
 }
 
-/** Send the message to the agent and dispatch a reply for each agent turn. */
 /** Decorator: wrap a StartTask with retry logic for transient errors. */
 function withRetry(task: StartTask, options: { delays: number[]; retryable: (message: string) => boolean }): StartTask {
-	return async (incoming, outgoing, dispatch) => {
+	return async (chat, incoming, outgoing, dispatch) => {
 		const { delays, retryable } = options;
 		for (let attempt = 0; ; attempt++) {
 			try {
-				await task(incoming, outgoing, dispatch);
+				await task(chat, incoming, outgoing, dispatch);
 				return;
 			} catch (error: unknown) {
 				const message = error instanceof Error ? error.message : String(error);
 				if (attempt >= delays.length || !retryable(message)) throw error;
 				const delay = delays[attempt];
 				console.log(
-					`[agent] retrying ${incoming.chatGuid} (attempt ${attempt + 2}/${delays.length + 1}) ` +
+					`[agent] retrying ${chat.chatGuid} (attempt ${attempt + 2}/${delays.length + 1}) ` +
 						`in ${delay / 1000}s: ${message.substring(0, 80)}`
 				);
 				await new Promise((resolve) => setTimeout(resolve, delay));
@@ -297,8 +297,9 @@ function withRetry(task: StartTask, options: { delays: number[]; retryable: (mes
 	};
 }
 
+/** Send the message to the agent and dispatch a reply for each agent turn. */
 export function createCallAgentTask(agent: AgentManager): StartTask {
-	const task: StartTask = async (incoming, outgoing, dispatch) => {
+	const task: StartTask = async (_chat, incoming, outgoing, dispatch) => {
 		await agent.processMessage(incoming, async (agentReply) => {
 			const text = formatAgentReply(agentReply);
 			await dispatch({ ...outgoing, reply: { type: "message" as const, text } });
@@ -314,12 +315,12 @@ export function createCallAgentTask(agent: AgentManager): StartTask {
 
 /** Remember echo and send reply via Messages.app AppleScript. */
 export function createSendReplyTask(echoFilter: SelfEchoFilter, sender: MessageSender): EndTask {
-	return async (incoming, outgoing) => {
+	return async (chat, outgoing) => {
 		const { reply, sendReply } = outgoing;
 		if (!sendReply) return outgoing;
 		if (reply.type === "message") {
-			echoFilter.remember(incoming.chatGuid, reply.text);
-			await sender.sendMessage(incoming.chatGuid, reply.text);
+			echoFilter.remember(chat.chatGuid, reply.text);
+			await sender.sendMessage(chat.chatGuid, reply.text);
 		}
 		return outgoing;
 	};
@@ -332,14 +333,13 @@ export function createSendReplyTask(echoFilter: SelfEchoFilter, sender: MessageS
  *   [sid] -> [DM]    +16501234567: sure, I'll check
  *   [sid] -> [SMS]   +16501234567: got it
  *   [sid] -> [GROUP] Family: sounds good!
- *   [sid] -> [DM]    +16501234567: (reaction: love)
  */
 export function createLogOutgoingTask(digestLogger: DigestLogger): EndTask {
-	return (incoming, outgoing) => {
+	return (chat, outgoing) => {
 		const { reply } = outgoing;
 		if (reply.type === "message") {
-			const label = messageTypeLabel(incoming);
-			const target = incoming.messageType === "group" ? incoming.groupName : incoming.sender;
+			const label = messageTypeLabel(chat);
+			const target = displayTarget(chat);
 			digestLogger.log(`[sid] -> [${label}] ${target}: ${reply.text.substring(0, 80)}`);
 		}
 		return outgoing;
@@ -348,14 +348,12 @@ export function createLogOutgoingTask(digestLogger: DigestLogger): EndTask {
 
 /** Persist the outgoing reply to log.jsonl. */
 export function createStoreOutgoingTask(store: ChatStore): EndTask {
-	return (incoming, outgoing) => {
+	return (chat, outgoing) => {
 		const { reply, sendReply } = outgoing;
 		if (reply.type === "message") {
-			store
-				.logOutgoing(incoming.chatGuid, reply.text, incoming.messageType, incoming.groupName, !sendReply)
-				.catch((error) => {
-					console.error(`[sid] failed to store outgoing message for ${incoming.chatGuid}:`, error);
-				});
+			store.logOutgoing(chat.chatGuid, reply.text, chat.messageType, chat.groupName, !sendReply).catch((error) => {
+				console.error(`[sid] failed to store outgoing message for ${chat.chatGuid}:`, error);
+			});
 		}
 		return outgoing;
 	};

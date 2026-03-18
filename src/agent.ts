@@ -4,8 +4,8 @@
  * Each chat gets a lazily-created AgentSession with persistent context
  * (context.jsonl per chat directory).
  *
- * Reply delivery: each tool or assistant event enqueues an onReply call
- * through replyChain, so iMessages arrive in order.
+ * Reply delivery: each tool or assistant event is routed through activeMessageHandler
+ * serialized via replyChain so iMessages arrive in order.
  *
  * Model: uses ~/.pi/agent/ defaults (via createAgentSession).
  */
@@ -33,6 +33,12 @@ export interface AgentManagerConfig {
 interface ChatSession {
 	session: AgentSession;
 	chatGuid: string;
+	/** Active handler for the message currently being processed; null when session is idle. */
+	activeMessageHandler: (reply: AgentReply) => Promise<void>;
+	/** Serializes handler calls so iMessages arrive in order. */
+	replyChain: Promise<void>;
+	/** Tracks in-flight tool calls for duration logging. */
+	pendingTools: Map<string, { toolName: string; args: Record<string, unknown>; startTime: number }>;
 }
 
 // ── Shared Resources (initialized once) ───────────────────────────────────────
@@ -238,7 +244,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 	const { modelRegistry, resourceLoader } = await initSharedResources(workingDir);
 
 	/** Create a new AgentSession for a chat, persisted to context.jsonl. */
-	async function createSession(chatGuid: string): Promise<ChatSession> {
+	async function createSession(chatGuid: string, handler: (reply: AgentReply) => Promise<void>): Promise<ChatSession> {
 		const chatDir = join(workingDir, sanitizeChatGuid(chatGuid));
 		mkdirSync(chatDir, { recursive: true });
 		const sessionManager = SessionManager.open(join(chatDir, "context.jsonl"), chatDir);
@@ -252,78 +258,80 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		const modelLabel = session.model ? `${session.model.provider}/${session.model.id}` : "default";
 		console.log(`[agent] session created: ${chatGuid} model=${modelLabel}`);
 
-		const entry: ChatSession = { session, chatGuid };
+		const entry: ChatSession = {
+			session,
+			chatGuid,
+			activeMessageHandler: handler,
+			replyChain: Promise.resolve(),
+			pendingTools: new Map(),
+		};
 		sessionMap.set(chatGuid, entry);
-		return entry;
-	}
 
-	/** Get existing session or create one for a chat. */
-	async function getOrCreateSession(chatGuid: string): Promise<ChatSession> {
-		return sessionMap.get(chatGuid) ?? createSession(chatGuid);
-	}
-
-	/**
-	 * Send a user message through the agent and deliver replies via onReply.
-	 *
-	 * Events are serialized: each tool_execution_start/end and assistant
-	 * message_end enqueues an onReply call through replyChain so iMessages
-	 * arrive in order.
-	 */
-	async function processMessage(msg: IncomingMessage, onReply: (reply: AgentReply) => Promise<void>): Promise<void> {
-		const entry = await getOrCreateSession(msg.chatGuid);
-
-		// Track pending tool calls for duration logging
-		const pendingTools = new Map<string, { toolName: string; args: Record<string, unknown>; startTime: number }>();
-
-		// Serialize onReply calls — subscribe is sync so we chain promises
-		let replyChain = Promise.resolve();
-		const unsub = entry.session.subscribe((event) => {
+		// Session-level subscriber — lives for the entire session lifetime so
+		// steered messages (injected mid-stream) produce events that are never lost.
+		// Reads entry.activeMessageHandler which is updated at the start of each processMessage call.
+		session.subscribe((event) => {
 			if (event.type === "message_end" && event.message.role === "assistant") {
 				const assistantMsg = event.message as AssistantMessage;
 				const text = extractMessageText(event.message);
 				const stopReason = assistantMsg.stopReason;
 				const errorMessage = assistantMsg.errorMessage;
 				console.log(
-					`[agent] message end: ${entry.chatGuid} role=assistant stopReason=${stopReason}` +
+					`[agent] message end: ${chatGuid} role=assistant stopReason=${stopReason}` +
 						`${errorMessage ? ` error="${errorMessage}"` : ""}` +
 						` text="${(text ?? "(empty)").substring(0, 60)}"`
 				);
 				if (text) {
-					replyChain = replyChain.then(() => onReply({ kind: "assistant", text }));
+					const callback = entry.activeMessageHandler;
+					entry.replyChain = entry.replyChain.then(() => callback({ kind: "assistant", text }));
 				}
 			} else if (event.type === "tool_execution_start") {
 				const toolArgs = event.args as Record<string, unknown>;
 				const label = extractToolLabel(event.toolName, toolArgs);
 
-				pendingTools.set(event.toolCallId, {
+				entry.pendingTools.set(event.toolCallId, {
 					toolName: event.toolName,
 					args: toolArgs,
 					startTime: Date.now(),
 				});
 
-				console.log(`[agent] tool start: ${entry.chatGuid} → ${label}`);
-				replyChain = replyChain.then(() => onReply({ kind: "tool_start", label }));
+				console.log(`[agent] tool start: ${chatGuid} → ${label}`);
+				const callback = entry.activeMessageHandler;
+				entry.replyChain = entry.replyChain.then(() => callback({ kind: "tool_start", label }));
 			} else if (event.type === "tool_execution_end") {
 				const resultText = extractToolResultText(event.result);
-				const pending = pendingTools.get(event.toolCallId);
-				pendingTools.delete(event.toolCallId);
+				const pending = entry.pendingTools.get(event.toolCallId);
+				entry.pendingTools.delete(event.toolCallId);
 
 				const durationMs = pending ? Date.now() - pending.startTime : 0;
 				const duration = (durationMs / 1000).toFixed(1);
 				const symbol = event.isError ? "✗" : "✓";
 
 				console.log(
-					`[agent] tool end: ${entry.chatGuid} ${symbol} ${event.toolName} (${duration}s)` +
+					`[agent] tool end: ${chatGuid} ${symbol} ${event.toolName} (${duration}s)` +
 						` result="${resultText.substring(0, 60)}"`
 				);
-				replyChain = replyChain.then(() =>
-					onReply({ kind: "tool_end", toolName: event.toolName, symbol, duration, result: resultText })
+				const callback = entry.activeMessageHandler;
+				entry.replyChain = entry.replyChain.then(() =>
+					callback({ kind: "tool_end", toolName: event.toolName, symbol, duration, result: resultText })
 				);
 			}
 		});
 
+		return entry;
+	}
+
+	/**
+	 * Send a user message through the agent and deliver replies via the active message handler.
+	 *
+	 * Sessions are created on first message. The session-level subscriber fires events
+	 * for each tool call and assistant message, routing them through activeMessageHandler.
+	 */
+	async function processMessage(msg: IncomingMessage, handler: (reply: AgentReply) => Promise<void>): Promise<void> {
+		const entry = sessionMap.get(msg.chatGuid) ?? (await createSession(msg.chatGuid, handler));
+		entry.activeMessageHandler = handler;
+
 		// Build prompt with sender/chat context prefix
-		// Format: "[DM from +1234567890] hey" or "[Group 'Family' from alice@example.com] hey"
 		const promptText = formatPromptText(msg);
 
 		// Refresh system prompt with current memory before each prompt
@@ -336,22 +344,12 @@ export async function createAgentManager(config: AgentManagerConfig) {
 			`[agent] prompt start (steer): ${entry.chatGuid} model=${currentModelLabel} "${promptText.substring(0, 60)}"`
 		);
 
-		const promptPromise =
-			msg.images.length > 0
-				? entry.session.prompt(promptText, { images: msg.images, streamingBehavior: "steer" })
-				: entry.session.prompt(promptText, { streamingBehavior: "steer" });
+		await (msg.images.length > 0
+			? entry.session.prompt(promptText, { images: msg.images, streamingBehavior: "steer" })
+			: entry.session.prompt(promptText, { streamingBehavior: "steer" }));
 
-		const timeoutPromise = new Promise<never>((_, reject) =>
-			setTimeout(() => reject(new Error("agent prompt timed out after 120s")), 120_000)
-		);
-
-		try {
-			await Promise.race([promptPromise, timeoutPromise]);
-			await replyChain; // wait for all dispatched replies to finish
-			console.log(`[agent] prompt end: ${entry.chatGuid}`);
-		} finally {
-			unsub();
-		}
+		await entry.replyChain; // wait for all dispatched replies to finish
+		console.log(`[agent] prompt end: ${entry.chatGuid}`);
 	}
 
 	/** Start a new session for a chat by deleting context and evicting the in-memory session. */
@@ -366,15 +364,15 @@ export async function createAgentManager(config: AgentManagerConfig) {
 	}
 
 	/**
-	 * Get a formatted status string for a chat session.
-	 * Lazily creates/resumes the session from disk if not already in memory.
+	 * Get a formatted status string for an active chat session.
 	 *
 	 * Format (two lines):
 	 *   💬 3 msgs - ↑7.2k ↓505 1.1%/128k
 	 *   🤖 github-copilot/gpt-5-mini • 💭 minimal
 	 */
 	async function getSessionStatus(chatGuid: string): Promise<string> {
-		const entry = await getOrCreateSession(chatGuid);
+		const entry = sessionMap.get(chatGuid);
+		if (!entry) return "no active session";
 		const { session } = entry;
 		const stats = session.getSessionStats();
 		const contextUsage = session.getContextUsage();
@@ -423,7 +421,11 @@ export async function createAgentManager(config: AgentManagerConfig) {
 			return;
 		}
 
-		const entry = await getOrCreateSession(chatGuid);
+		const entry = sessionMap.get(chatGuid);
+		if (!entry) {
+			console.log(`[agent] reload: no active session for ${chatGuid}`);
+			return;
+		}
 		await entry.session.setModel(newModel);
 		console.log(`[agent] reloaded: ${chatGuid} switched to ${provider}/${modelId}`);
 	}

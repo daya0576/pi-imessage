@@ -15,6 +15,35 @@ import type { ImageContent } from "@mariozechner/pi-ai";
  */
 export type MessageType = "sms" | "imessage" | "group";
 
+// ── Chat context (fixed per chat session) ────────────────────────────────────
+
+/**
+ * Chat-level identity — fixed per chat session.
+ * Passed as a first-class parameter through all pipeline tasks.
+ */
+export interface ChatContext {
+	chatGuid: string;
+	messageType: MessageType;
+	groupName: string;
+}
+
+/** Extract ChatContext from an IncomingMessage. */
+export function toChatContext(msg: IncomingMessage): ChatContext {
+	return { chatGuid: msg.chatGuid, messageType: msg.messageType, groupName: msg.groupName };
+}
+
+/**
+ * Human-readable display target for a chat.
+ *   DM/SMS  → address extracted from chatGuid ("iMessage;-;+1234" → "+1234")
+ *   Group   → group name
+ */
+export function displayTarget(chat: ChatContext): string {
+	if (chat.messageType === "group") return chat.groupName;
+	return chat.chatGuid.split(";").pop() ?? chat.chatGuid;
+}
+
+// ── Incoming message ─────────────────────────────────────────────────────────
+
 /** Attachment metadata — local path on disk. */
 export interface Attachment {
 	/** Local file path (e.g. ~/Library/Messages/Attachments/...). */
