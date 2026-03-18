@@ -237,12 +237,8 @@ export async function createAgentManager(config: AgentManagerConfig) {
 	const sessionMap = new Map<string, ChatSession>();
 	const { modelRegistry, resourceLoader } = await initSharedResources(workingDir);
 
-	/** Lazily create one AgentSession per chat, persisted to context.jsonl. */
-	async function getOrCreateSession(chatGuid: string): Promise<ChatSession> {
-		const existing = sessionMap.get(chatGuid);
-		if (existing) return existing;
-
-		// Per-chat session manager — each chat gets its own context.jsonl.
+	/** Create a new AgentSession for a chat, persisted to context.jsonl. */
+	async function createSession(chatGuid: string): Promise<ChatSession> {
 		const chatDir = join(workingDir, sanitizeChatGuid(chatGuid));
 		mkdirSync(chatDir, { recursive: true });
 		const sessionManager = SessionManager.open(join(chatDir, "context.jsonl"), chatDir);
@@ -253,13 +249,17 @@ export async function createAgentManager(config: AgentManagerConfig) {
 			resourceLoader,
 		});
 
-		const model = session.model;
-		const modelLabel = model ? `${model.provider}/${model.id}` : "default";
+		const modelLabel = session.model ? `${session.model.provider}/${session.model.id}` : "default";
 		console.log(`[agent] session created: ${chatGuid} model=${modelLabel}`);
 
 		const entry: ChatSession = { session, chatGuid };
 		sessionMap.set(chatGuid, entry);
 		return entry;
+	}
+
+	/** Get existing session or create one for a chat. */
+	async function getOrCreateSession(chatGuid: string): Promise<ChatSession> {
+		return sessionMap.get(chatGuid) ?? createSession(chatGuid);
 	}
 
 	/**
@@ -400,25 +400,24 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		return `${line1}\n${line2}`;
 	}
 
-	/** Reload models and resources, then evict and rebuild the requesting session with new default model. */
+	/** Reload models and resources, then switch the requesting session to new default model. */
 	async function reload(chatGuid: string): Promise<void> {
 		await resourceLoader.reload();
 		modelRegistry.refresh();
 
-		// Evict then immediately rebuild from context.jsonl (preserves history)
-		sessionMap.delete(chatGuid);
 		const entry = await getOrCreateSession(chatGuid);
 
-		// Apply new default model to the idle session (safe — no prompt running)
+		// Resolve new default model from settings and apply via session API
 		const settings = SettingsManager.create();
 		const provider = settings.getDefaultProvider();
 		const modelId = settings.getDefaultModel();
 		const newModel = provider && modelId ? modelRegistry.find(provider, modelId) : undefined;
+
 		if (newModel) {
-			entry.session.agent.setModel(newModel);
+			await entry.session.setModel(newModel);
 			console.log(`[agent] reloaded: ${chatGuid} switched to ${provider}/${modelId}`);
 		} else {
-			console.log(`[agent] reloaded: ${chatGuid} (no default model in settings)`);
+			console.log(`[agent] reloaded: ${chatGuid} (no model change)`);
 		}
 	}
 
