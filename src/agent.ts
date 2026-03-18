@@ -271,7 +271,9 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		// steered messages (injected mid-stream) produce events that are never lost.
 		// Reads entry.activeMessageHandler which is updated at the start of each processMessage call.
 		session.subscribe((event) => {
-			if (event.type === "message_end" && event.message.role === "assistant") {
+			if (event.type === "message_start" && event.message.role === "assistant") {
+				console.log(`[agent] message start: ${chatGuid} role=assistant`);
+			} else if (event.type === "message_end" && event.message.role === "assistant") {
 				const assistantMsg = event.message as AssistantMessage;
 				const text = extractMessageText(event.message);
 				const stopReason = assistantMsg.stopReason;
