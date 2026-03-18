@@ -432,8 +432,14 @@ export async function createAgentManager(config: AgentManagerConfig) {
 			console.log(`[agent] reload: no active session for ${chatGuid}`);
 			return;
 		}
+		const thinkingLevel = settings.getDefaultThinkingLevel();
 		await entry.session.setModel(newModel);
-		console.log(`[agent] reloaded: ${chatGuid} switched to ${provider}/${modelId}`);
+		if (thinkingLevel) {
+			entry.session.setThinkingLevel(thinkingLevel);
+		}
+		console.log(
+			`[agent] reloaded: ${chatGuid} switched to ${provider}/${modelId} thinkingLevel=${thinkingLevel ?? "unchanged"}`
+		);
 	}
 
 	return { processMessage, newSession, getSessionStatus, reload };
