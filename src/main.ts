@@ -31,19 +31,12 @@ async function main() {
 	await checkEnvironment();
 
 	const sender = createMessageSender();
-	let settings = readSettings(workingDir);
-	const getSettings = (): Settings => {
-		settings = readSettings(workingDir);
-		return settings;
-	};
+	const getSettings = (): Settings => readSettings(workingDir);
+	const setSettings = (updated: Settings): void => writeSettings(workingDir, updated);
 	const agent = await createAgentManager({ workingDir });
 	const store = createChatStore({ workingDir });
 	const queue = createAsyncQueue<IncomingMessage>();
 	const watcher = createWatcher({ queue });
-	const setSettings = (updated: Settings): void => {
-		settings = updated;
-		writeSettings(workingDir, updated);
-	};
 
 	const bot = createIMessageBot({ queue, agent, sender, store, getSettings, digestLogger });
 	const web = webEnabled

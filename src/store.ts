@@ -11,7 +11,7 @@
  * The file is never rewritten — only appended to.
  */
 
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { MessageType } from "./types.js";

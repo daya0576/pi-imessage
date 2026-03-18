@@ -3,7 +3,7 @@
  *
  * Two log destinations:
  *   app.log    — receives ALL console output (log / warn / error / info)
- *   diget.log  — receives only incoming/outgoing digest lines
+ *   digest.log — receives only incoming/outgoing digest lines
  *
  * Rotation strategy:
  *   - Rotate when the active file reaches MAX_BYTES (default 10 MB)
@@ -115,11 +115,11 @@ export function createAppLogger(workingDir: string, options: { maxBytes?: number
 	};
 }
 
-// ── Digest logger — writes incoming/outgoing lines to diget.log ───────────────
+// ── Digest logger — writes incoming/outgoing lines to digest.log ──────────────
 
 export interface DigestLogger {
 	/**
-	 * Write a digest line to diget.log and forward to console.log
+	 * Write a digest line to digest.log and forward to console.log
 	 * (which in turn lands in app.log via the app logger patch).
 	 */
 	log(msg: string): void;
@@ -131,7 +131,7 @@ export function createDigestLogger(
 	options: { maxBytes?: number; maxFiles?: number } = {}
 ): DigestLogger {
 	const writer = new RotatingFileWriter(
-		join(workingDir, "diget.log"),
+		join(workingDir, "digest.log"),
 		options.maxBytes ?? DEFAULT_MAX_BYTES,
 		options.maxFiles ?? DEFAULT_MAX_FILES
 	);

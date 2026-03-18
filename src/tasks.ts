@@ -8,11 +8,11 @@
  *   dropSelfEcho     — drops messages that are echoes of the bot's own replies
  *   storeIncoming    — persists the incoming message to log.jsonl
  *   checkReplyEnabled — drops messages when reply is disabled by settings
- *   downloadImages   — downloads image attachments and populates incoming.images
+ *   downloadImages   — reads image attachments from disk and populates incoming.images
  *   resizeImages     — resizes oversized images via macOS sips
  *
  * start:
- *   commandHandler   — intercepts slash commands (/new, /status) before the agent
+ *   commandHandler   — intercepts slash commands (/new, /status, /reload) before the agent
  *   callAgent        — sends the message to the agent and yields replies as they arrive
  *
  * end:
@@ -125,57 +125,6 @@ export function createCheckReplyEnabledTask(getSettings: () => Settings): Before
 	};
 }
 
-// ── command tasks ─────────────────────────────────────────────────────────────
-
-/**
- * Intercept slash commands (e.g. "/new", "/status") before they reach the agent.
- * Sets shouldContinue=false on the outgoing message to skip subsequent start tasks.
- *
- * Supported commands:
- *   /new    — reset the agent session for this chat (equivalent to /new in pi coding agent).
- *   /status — show session stats: tokens, cost, context usage, model, thinking level.
- *   /reload — reload models and clear all sessions.
- */
-export function createCommandHandlerTask(agent: AgentManager): StartTask {
-	return async (chat, incoming, outgoing, emit) => {
-		const text = incoming.text?.trim();
-
-		if (text === "/new") {
-			await agent.newSession(chat.chatGuid);
-			const newSessionReply = "✓ New session started";
-			console.log(`[sid] /new command: ${chat.chatGuid} → ${newSessionReply}`);
-			emit({ ...outgoing, reply: { type: "message", text: newSessionReply } });
-
-			const statusReply = await agent.getSessionStatus(chat.chatGuid);
-			console.log(`[sid] /new status: ${chat.chatGuid} → ${statusReply}`);
-			emit({ ...outgoing, reply: { type: "message", text: statusReply } });
-
-			outgoing.shouldContinue = false;
-			return;
-		}
-
-		if (text === "/status") {
-			const replyText = await agent.getSessionStatus(chat.chatGuid);
-			console.log(`[sid] /status command: ${chat.chatGuid} → ${replyText}`);
-			emit({ ...outgoing, reply: { type: "message", text: replyText } });
-			outgoing.shouldContinue = false;
-			return;
-		}
-
-		if (text === "/reload") {
-			await agent.reload(chat.chatGuid);
-			const statusReply = await agent.getSessionStatus(chat.chatGuid);
-			const replyText = `✓ Models reloaded\n${statusReply}`;
-			console.log(`[sid] /reload command: ${chat.chatGuid} → ${replyText}`);
-			emit({ ...outgoing, reply: { type: "message", text: replyText } });
-			outgoing.shouldContinue = false;
-			return;
-		}
-	};
-}
-
-// ── start tasks ───────────────────────────────────────────────────────────────
-
 /**
  * Read image attachments from local disk and populate incoming.images in-place.
  * Non-image attachments are skipped; failed reads are logged and silently skipped.
@@ -202,7 +151,7 @@ export function createDownloadImagesTask(): BeforeTask {
 }
 
 /**
- * Resize images whose longest edge exceeds MAX_EDGE_PX using sharp.
+ * Resize images whose longest edge exceeds MAX_EDGE_PX using macOS sips.
  * Converts to JPEG at 80% quality to keep size well under Anthropic's 5MB limit.
  *
  *   before: raw downloaded image (any size, any format)
@@ -282,6 +231,55 @@ async function resizeImageIfNeeded(image: ImageContent): Promise<ImageContent> {
 	} finally {
 		await rm(tempDir, { recursive: true, force: true });
 	}
+}
+
+// ── start tasks ───────────────────────────────────────────────────────────────
+
+/**
+ * Intercept slash commands (e.g. "/new", "/status") before they reach the agent.
+ * Sets shouldContinue=false on the outgoing message to skip subsequent start tasks.
+ *
+ * Supported commands:
+ *   /new    — reset the agent session for this chat (equivalent to /new in pi coding agent).
+ *   /status — show session stats: tokens, cost, context usage, model, thinking level.
+ *   /reload — reload models and clear all sessions.
+ */
+export function createCommandHandlerTask(agent: AgentManager): StartTask {
+	return async (chat, incoming, outgoing, emit) => {
+		const text = incoming.text?.trim();
+
+		if (text === "/new") {
+			await agent.newSession(chat.chatGuid);
+			const newSessionReply = "✓ New session started";
+			console.log(`[sid] /new command: ${chat.chatGuid} → ${newSessionReply}`);
+			emit({ ...outgoing, reply: { type: "message", text: newSessionReply } });
+
+			const statusReply = await agent.getSessionStatus(chat.chatGuid);
+			console.log(`[sid] /new status: ${chat.chatGuid} → ${statusReply}`);
+			emit({ ...outgoing, reply: { type: "message", text: statusReply } });
+
+			outgoing.shouldContinue = false;
+			return;
+		}
+
+		if (text === "/status") {
+			const replyText = await agent.getSessionStatus(chat.chatGuid);
+			console.log(`[sid] /status command: ${chat.chatGuid} → ${replyText}`);
+			emit({ ...outgoing, reply: { type: "message", text: replyText } });
+			outgoing.shouldContinue = false;
+			return;
+		}
+
+		if (text === "/reload") {
+			await agent.reload(chat.chatGuid);
+			const statusReply = await agent.getSessionStatus(chat.chatGuid);
+			const replyText = `✓ Models reloaded\n${statusReply}`;
+			console.log(`[sid] /reload command: ${chat.chatGuid} → ${replyText}`);
+			emit({ ...outgoing, reply: { type: "message", text: replyText } });
+			outgoing.shouldContinue = false;
+			return;
+		}
+	};
 }
 
 /** Decorator: wrap a StartTask with retry logic for transient errors. */
