@@ -42,8 +42,6 @@ export function displayTarget(chat: ChatContext): string {
 	return chat.chatGuid.split(";").pop() ?? chat.chatGuid;
 }
 
-// ── Incoming message ─────────────────────────────────────────────────────────
-
 /** Attachment metadata — local path on disk. */
 export interface Attachment {
 	/** Local file path (e.g. ~/Library/Messages/Attachments/...). */
@@ -107,16 +105,13 @@ export type ReplyAction = { type: "message"; text: string } | { type: "none" };
  *   reply          — the reply action to perform (text or nothing).
  *   shouldContinue — if false, remaining tasks in the current phase and all
  *                    later phases are skipped.
- *   sendReply      — if false, the reply is logged but not sent to the user
- *                    (e.g. agent encountered an error).
  */
 export interface OutgoingMessage {
 	reply: ReplyAction;
 	shouldContinue: boolean;
-	sendReply: boolean;
 }
 
 /** Create a default OutgoingMessage (no reply, continue processing). */
 export function createOutgoingMessage(): OutgoingMessage {
-	return { reply: { type: "none" }, shouldContinue: true, sendReply: true };
+	return { reply: { type: "none" }, shouldContinue: true };
 }

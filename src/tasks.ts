@@ -29,12 +29,12 @@ import { promisify } from "node:util";
 import type { ImageContent } from "@mariozechner/pi-ai";
 import type { AgentManager } from "./agent.js";
 import type { DigestLogger } from "./logger.js";
-import type { BeforeTask, DispatchFn, EndTask, StartTask } from "./pipeline.js";
+import type { BeforeTask, EmitFn, EndTask, StartTask } from "./pipeline.js";
 import type { SelfEchoFilter } from "./self-echo.js";
 import type { MessageSender } from "./send.js";
 import type { Settings } from "./settings.js";
 import { isReplyEnabled } from "./settings.js";
-import type { ChatStore } from "./store.js";
+import type { ChatStore, Message } from "./store.js";
 import { displayTarget, formatAgentReply } from "./types.js";
 import type { AgentReply, ChatContext, IncomingMessage, OutgoingMessage } from "./types.js";
 
@@ -74,9 +74,18 @@ export function createLogIncomingTask(digestLogger: DigestLogger): BeforeTask {
 /** Persist the incoming message to log.jsonl. Always passes through. */
 export function createStoreIncomingTask(store: ChatStore): BeforeTask {
 	return (chat, incoming, outgoing) => {
-		store.logIncoming(incoming).catch((error) => {
-			console.error(`[sid] failed to store incoming message for ${chat.chatGuid}:`, error);
-		});
+		store
+			.log(chat.chatGuid, {
+				sender: incoming.sender,
+				text: incoming.text,
+				attachments: incoming.attachments.map((a) => a.path),
+				fromAgent: false,
+				messageType: chat.messageType,
+				...(chat.messageType === "group" && { groupName: chat.groupName }),
+			})
+			.catch((error) => {
+				console.error(`[sid] failed to store incoming message for ${chat.chatGuid}:`, error);
+			});
 		return outgoing;
 	};
 }
@@ -128,18 +137,18 @@ export function createCheckReplyEnabledTask(getSettings: () => Settings): Before
  *   /reload — reload models and clear all sessions.
  */
 export function createCommandHandlerTask(agent: AgentManager): StartTask {
-	return async (chat, incoming, outgoing, dispatch) => {
+	return async (chat, incoming, outgoing, emit) => {
 		const text = incoming.text?.trim();
 
 		if (text === "/new") {
 			await agent.newSession(chat.chatGuid);
 			const newSessionReply = "✓ New session started";
 			console.log(`[sid] /new command: ${chat.chatGuid} → ${newSessionReply}`);
-			await dispatch({ ...outgoing, reply: { type: "message", text: newSessionReply } });
+			emit({ ...outgoing, reply: { type: "message", text: newSessionReply } });
 
 			const statusReply = await agent.getSessionStatus(chat.chatGuid);
 			console.log(`[sid] /new status: ${chat.chatGuid} → ${statusReply}`);
-			await dispatch({ ...outgoing, reply: { type: "message", text: statusReply } });
+			emit({ ...outgoing, reply: { type: "message", text: statusReply } });
 
 			outgoing.shouldContinue = false;
 			return;
@@ -148,7 +157,7 @@ export function createCommandHandlerTask(agent: AgentManager): StartTask {
 		if (text === "/status") {
 			const replyText = await agent.getSessionStatus(chat.chatGuid);
 			console.log(`[sid] /status command: ${chat.chatGuid} → ${replyText}`);
-			await dispatch({ ...outgoing, reply: { type: "message", text: replyText } });
+			emit({ ...outgoing, reply: { type: "message", text: replyText } });
 			outgoing.shouldContinue = false;
 			return;
 		}
@@ -158,7 +167,7 @@ export function createCommandHandlerTask(agent: AgentManager): StartTask {
 			const statusReply = await agent.getSessionStatus(chat.chatGuid);
 			const replyText = `✓ Models reloaded\n${statusReply}`;
 			console.log(`[sid] /reload command: ${chat.chatGuid} → ${replyText}`);
-			await dispatch({ ...outgoing, reply: { type: "message", text: replyText } });
+			emit({ ...outgoing, reply: { type: "message", text: replyText } });
 			outgoing.shouldContinue = false;
 			return;
 		}
@@ -277,11 +286,11 @@ async function resizeImageIfNeeded(image: ImageContent): Promise<ImageContent> {
 
 /** Decorator: wrap a StartTask with retry logic for transient errors. */
 function withRetry(task: StartTask, options: { delays: number[]; retryable: (message: string) => boolean }): StartTask {
-	return async (chat, incoming, outgoing, dispatch) => {
+	return async (chat, incoming, outgoing, emit) => {
 		const { delays, retryable } = options;
 		for (let attempt = 0; ; attempt++) {
 			try {
-				await task(chat, incoming, outgoing, dispatch);
+				await task(chat, incoming, outgoing, emit);
 				return;
 			} catch (error: unknown) {
 				const message = error instanceof Error ? error.message : String(error);
@@ -299,10 +308,10 @@ function withRetry(task: StartTask, options: { delays: number[]; retryable: (mes
 
 /** Send the message to the agent and dispatch a reply for each agent turn. */
 export function createCallAgentTask(agent: AgentManager): StartTask {
-	const task: StartTask = async (_chat, incoming, outgoing, dispatch) => {
+	const task: StartTask = async (_chat, incoming, outgoing, emit) => {
 		await agent.processMessage(incoming, async (agentReply) => {
 			const text = formatAgentReply(agentReply);
-			await dispatch({ ...outgoing, reply: { type: "message" as const, text } });
+			emit({ ...outgoing, reply: { type: "message" as const, text } });
 		});
 	};
 	return withRetry(task, {
@@ -316,11 +325,9 @@ export function createCallAgentTask(agent: AgentManager): StartTask {
 /** Remember echo and send reply via Messages.app AppleScript. */
 export function createSendReplyTask(echoFilter: SelfEchoFilter, sender: MessageSender): EndTask {
 	return async (chat, outgoing) => {
-		const { reply, sendReply } = outgoing;
-		if (!sendReply) return outgoing;
-		if (reply.type === "message") {
-			echoFilter.remember(chat.chatGuid, reply.text);
-			await sender.sendMessage(chat.chatGuid, reply.text);
+		if (outgoing.reply.type === "message") {
+			echoFilter.remember(chat.chatGuid, outgoing.reply.text);
+			await sender.sendMessage(chat.chatGuid, outgoing.reply.text);
 		}
 		return outgoing;
 	};
@@ -349,11 +356,19 @@ export function createLogOutgoingTask(digestLogger: DigestLogger): EndTask {
 /** Persist the outgoing reply to log.jsonl. */
 export function createStoreOutgoingTask(store: ChatStore): EndTask {
 	return (chat, outgoing) => {
-		const { reply, sendReply } = outgoing;
-		if (reply.type === "message") {
-			store.logOutgoing(chat.chatGuid, reply.text, chat.messageType, chat.groupName, !sendReply).catch((error) => {
-				console.error(`[sid] failed to store outgoing message for ${chat.chatGuid}:`, error);
-			});
+		if (outgoing.reply.type === "message") {
+			store
+				.log(chat.chatGuid, {
+					sender: "bot",
+					text: outgoing.reply.text,
+					attachments: [],
+					fromAgent: true,
+					messageType: chat.messageType,
+					...(chat.messageType === "group" && { groupName: chat.groupName }),
+				})
+				.catch((error) => {
+					console.error(`[sid] failed to store outgoing message for ${chat.chatGuid}:`, error);
+				});
 		}
 		return outgoing;
 	};

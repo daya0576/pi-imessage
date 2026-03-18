@@ -2,25 +2,25 @@
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import type { LoggedMessage } from "../store.js";
+import type { Message } from "../store.js";
 
 export interface ChatBlock {
 	guid: string;
 	displayName: string;
-	messages: LoggedMessage[];
+	messages: Message[];
 	lastTime: number;
 }
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
-function readMessages(workingDir: string, chatGuid: string): LoggedMessage[] {
+function readMessages(workingDir: string, chatGuid: string): Message[] {
 	const logFile = join(workingDir, chatGuid, "log.jsonl");
 	if (!existsSync(logFile)) return [];
 	const lines = readFileSync(logFile, "utf-8").trim().split("\n").filter(Boolean);
-	const messages: LoggedMessage[] = [];
+	const messages: Message[] = [];
 	for (const line of lines) {
 		try {
-			messages.push(JSON.parse(line) as LoggedMessage);
+			messages.push(JSON.parse(line) as Message);
 		} catch {
 			// skip malformed lines
 		}

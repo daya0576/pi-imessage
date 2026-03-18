@@ -58,7 +58,7 @@ function prepareCard(block: ChatBlock): CardData {
 		rows.push({
 			gap: false,
 			time: formatTime(message.date),
-			arrow: message.isBot ? "->" : "<-",
+			arrow: message.fromAgent ? "->" : "<-",
 			channel: channelLabel(message.messageType),
 			sender: senderLabel(message),
 			text: firstLinePreview(message.text),
