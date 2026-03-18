@@ -400,25 +400,32 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		return `${line1}\n${line2}`;
 	}
 
-	/** Reload models and resources, then switch the requesting session to new default model. */
+	/**
+	 * Switch the requesting session to the current default model from settings.
+	 *
+	 * Mirrors pi TUI's /model command flow:
+	 *   1. modelRegistry.refresh() — reload models from disk
+	 *   2. Resolve model from settings (TUI uses manual selection instead)
+	 *   3. session.setModel() — updates agent + context.jsonl + settings.json
+	 *
+	 * Reference: pi-coding-agent/dist/modes/interactive/interactive-mode.js
+	 *   handleModelCommand() → getModelCandidates() → session.setModel()
+	 */
 	async function reload(chatGuid: string): Promise<void> {
-		await resourceLoader.reload();
 		modelRegistry.refresh();
-
-		const entry = await getOrCreateSession(chatGuid);
-
-		// Resolve new default model from settings and apply via session API
 		const settings = SettingsManager.create();
 		const provider = settings.getDefaultProvider();
 		const modelId = settings.getDefaultModel();
 		const newModel = provider && modelId ? modelRegistry.find(provider, modelId) : undefined;
 
-		if (newModel) {
-			await entry.session.setModel(newModel);
-			console.log(`[agent] reloaded: ${chatGuid} switched to ${provider}/${modelId}`);
-		} else {
-			console.log(`[agent] reloaded: ${chatGuid} (no model change)`);
+		if (!newModel) {
+			console.log("[agent] reload: no default model in settings");
+			return;
 		}
+
+		const entry = await getOrCreateSession(chatGuid);
+		await entry.session.setModel(newModel);
+		console.log(`[agent] reloaded: ${chatGuid} switched to ${provider}/${modelId}`);
 	}
 
 	return { processMessage, newSession, getSessionStatus, reload };

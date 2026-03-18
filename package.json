@@ -1,6 +1,6 @@
 {
 	"name": "@kingcrab/pi-imessage",
-	"version": "0.0.13",
+	"version": "0.0.14",
 	"description": "AI-powered iMessage bot using pi coding agent — understands images, quoted replies, and conversation context",
 	"type": "module",
 	"license": "MIT",
@@ -26,8 +26,8 @@
 	"scripts": {
 		"build": "tsc && mkdir -p dist/web/templates && cp src/web/templates/* dist/web/templates/",
 		"prepublishOnly": "npm run build",
-		"dev": "tsx watch src/main.ts",
-		"start": "tsx src/main.ts",
+		"dev": "NODE_OPTIONS='--use-env-proxy' tsx watch src/main.ts",
+		"start": "NODE_OPTIONS='--use-env-proxy' tsx src/main.ts",
 		"test": "vitest run",
 		"typecheck": "tsc --noEmit",
 		"lint": "biome check .",
