@@ -137,13 +137,13 @@ function getMemory(workingDir: string, chatDir?: string): string {
 
 function getCustomPrompt(workingDir: string, chatDir?: string): string {
 	const parts: string[] = [];
-	const globalCustomPath = join(workingDir, "SYSTEM_PROMPT.md");
+	const globalCustomPath = join(workingDir, "SYSTEM.md");
 	if (existsSync(globalCustomPath)) {
 		const content = readFileSync(globalCustomPath, "utf-8").trim();
 		if (content) parts.push(content);
 	}
 	if (chatDir) {
-		const chatCustomPath = join(chatDir, "SYSTEM_PROMPT.md");
+		const chatCustomPath = join(chatDir, "SYSTEM.md");
 		if (existsSync(chatCustomPath)) {
 			const content = readFileSync(chatCustomPath, "utf-8").trim();
 			if (content) parts.push(content);
