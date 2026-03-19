@@ -346,6 +346,12 @@ export async function createAgentManager(config: AgentManagerConfig) {
 	 *
 	 * Sessions are created on first message. The session-level subscriber fires events
 	 * for each tool call and assistant message, routing them through activeMessageHandler.
+	 *
+	 * Streaming behavior:
+	 *   - When the session is already streaming (agent mid-run), use "steer" to inject
+	 *     the new message into the active agentic loop without interrupting it.
+	 *   - When the session is idle, omit streamingBehavior so the agent starts normally.
+	 *     (Passing undefined while streaming would throw; pi enforces explicit queuing.)
 	 */
 	async function processMessage(msg: IncomingMessage, handler: (reply: AgentReply) => Promise<void>): Promise<void> {
 		const entry = sessionMap.get(msg.chatGuid) ?? (await createSession(msg.chatGuid, handler));
@@ -358,19 +364,11 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		const chatDir = join(workingDir, sanitizeChatGuid(msg.chatGuid));
 		entry.session.agent.setSystemPrompt(buildSystemPrompt(workingDir, chatDir));
 
-		const currentModel = entry.session.model;
-		const currentModelLabel = currentModel ? `${currentModel.provider}/${currentModel.id}` : "default";
-		console.log(
-			`[agent] prompt start (steer): ${entry.chatGuid} model=${currentModelLabel} "${promptText.substring(0, 60)}"`
-		);
+		const images = msg.images.length > 0 ? msg.images : undefined;
+		const streamingBehavior = entry.session.isStreaming ? "steer" : undefined;
 
-		// 1) Session idle   → prompt() blocks until the full agentic run completes.
-		// 2) Session active → new message is steered in; prompt() returns immediately,
-		//    events (tool_start/end, message_end) keep firing via the subscriber above.
-		// TODO: detect active run and fire-and-forget to avoid blocking on a hanging tool.
-		await (msg.images.length > 0
-			? entry.session.prompt(promptText, { images: msg.images, streamingBehavior: "steer" })
-			: entry.session.prompt(promptText, { streamingBehavior: "steer" }));
+		logPromptStart(entry, promptText, streamingBehavior);
+		await entry.session.prompt(promptText, { images, streamingBehavior });
 
 		await entry.replyChain; // wait for all dispatched replies to finish
 		console.log(`[agent] prompt end: ${entry.chatGuid}`);
@@ -461,6 +459,14 @@ export async function createAgentManager(config: AgentManagerConfig) {
 	}
 
 	return { processMessage, newSession, getSessionStatus, reload };
+}
+
+/** Log the start of a prompt, including streaming mode and model. */
+function logPromptStart(entry: ChatSession, promptText: string, streamingBehavior: "steer" | undefined): void {
+	const model = entry.session.model;
+	const modelLabel = model ? `${model.provider}/${model.id}` : "default";
+	const mode = streamingBehavior ?? "default";
+	console.log(`[agent] prompt start (${mode}): ${entry.chatGuid} model=${modelLabel} "${promptText.substring(0, 60)}"`);
 }
 
 /** Format a token count as a compact string: 0, 1.2k, 5.9k, 12k, 1.8M, etc. */
