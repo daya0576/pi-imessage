@@ -135,8 +135,26 @@ function getMemory(workingDir: string, chatDir?: string): string {
 	return parts.length > 0 ? parts.join("\n\n") : "(no memory yet)";
 }
 
+function getCustomPrompt(workingDir: string, chatDir?: string): string {
+	const parts: string[] = [];
+	const globalCustomPath = join(workingDir, "SYSTEM_PROMPT.md");
+	if (existsSync(globalCustomPath)) {
+		const content = readFileSync(globalCustomPath, "utf-8").trim();
+		if (content) parts.push(content);
+	}
+	if (chatDir) {
+		const chatCustomPath = join(chatDir, "SYSTEM_PROMPT.md");
+		if (existsSync(chatCustomPath)) {
+			const content = readFileSync(chatCustomPath, "utf-8").trim();
+			if (content) parts.push(content);
+		}
+	}
+	return parts.join("\n\n");
+}
+
 function buildSystemPrompt(workingDir: string, chatDir?: string): string {
 	const memory = getMemory(workingDir, chatDir);
+	const customPrompt = getCustomPrompt(workingDir, chatDir);
 
 	return `You are the user's best friend communicating via iMessage. Be concise. No emojis.
 
@@ -194,7 +212,7 @@ name: skill-name
 description: What this skill does
 ---
 Usage instructions and details here.
-\`\`\``;
+\`\`\`${customPrompt ? `\n\n${customPrompt}` : ""}`;
 }
 
 /** Extract concatenated text from a Message, ignoring non-text content parts. */
