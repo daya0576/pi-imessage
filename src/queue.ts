@@ -1,8 +1,8 @@
 /**
- * Generic unbounded async queue.
+ * Queue primitives.
  *
- * push() never blocks; pull() returns a promise that resolves when an item
- * is available. close() rejects all pending waiters and future pull() calls.
+ * AsyncQueue  — generic unbounded async queue (push/pull/close).
+ * KeyedQueue  — keyed serial executor (same key serialized, different keys concurrent).
  */
 
 export class QueueClosedError extends Error {
@@ -49,5 +49,15 @@ export function createAsyncQueue<T>(): AsyncQueue<T> {
 			waiters.length = 0;
 			buffer.length = 0;
 		},
+	};
+}
+
+// ── KeyedQueue ────────────────────────────────────────────────────────────────
+
+/** Same key → serial. Different keys → concurrent. */
+export function createKeyedQueue(): (key: string, task: () => Promise<void>) => void {
+	const chains = new Map<string, Promise<void>>();
+	return (key, task) => {
+		chains.set(key, (chains.get(key) ?? Promise.resolve()).then(task, task));
 	};
 }

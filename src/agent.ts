@@ -4,8 +4,9 @@
  * Each chat gets a lazily-created AgentSession with persistent context
  * (context.jsonl per chat directory).
  *
- * Reply delivery: each tool or assistant event is routed through activeMessageHandler
- * serialized via replyChain so iMessages arrive in order.
+ * Concurrency: callers must serialize messages for the same chat externally
+ * (imessage.ts does this via per-chat promise chains). Different chats run
+ * concurrently.
  *
  * Model: uses ~/.pi/agent/ defaults (via createAgentSession).
  */
@@ -33,42 +34,9 @@ export interface AgentManagerConfig {
 interface ChatSession {
 	session: AgentSession;
 	chatGuid: string;
-	/** Active handler for the message currently being processed; null when session is idle. */
-	activeMessageHandler: (reply: AgentReply) => Promise<void>;
-	/** Serializes handler calls so iMessages arrive in order. */
-	replyChain: Promise<void>;
-	/** Tracks in-flight tool calls for duration logging. */
-	pendingTools: Map<string, { toolName: string; args: Record<string, unknown>; startTime: number }>;
 }
 
-// ── Shared Resources (initialized once) ───────────────────────────────────────
-
-/** Resources that are expensive to create and shared across all chat sessions. */
-interface SharedResources {
-	authStorage: AuthStorage;
-	modelRegistry: ModelRegistry;
-	resourceLoader: DefaultResourceLoader;
-}
-
-/** Create and initialize shared resources (auth, model registry, resource loader). */
-async function initSharedResources(workingDir: string): Promise<SharedResources> {
-	const authStorage = AuthStorage.create();
-	const modelRegistry = new ModelRegistry(authStorage);
-
-	// Resource loader with iMessage-specific system prompt; no extensions/skills needed.
-	const resourceLoader = new DefaultResourceLoader({
-		systemPrompt: buildSystemPrompt(workingDir),
-		noExtensions: true,
-		noSkills: true,
-		noPromptTemplates: true,
-		noThemes: true,
-	});
-	await resourceLoader.reload();
-
-	return { authStorage, modelRegistry, resourceLoader };
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
 /**
  * Format a prompt with sender/chat context prefix.
@@ -102,52 +70,37 @@ function sanitizeChatGuid(chatGuid: string): string {
 	return chatGuid.replace(/[^a-zA-Z0-9_\-;+.@]/g, "_");
 }
 
+/** Read a file's trimmed content, or return undefined if missing/empty. */
+function readFileIfExists(path: string): string | undefined {
+	if (!existsSync(path)) return undefined;
+	try {
+		const content = readFileSync(path, "utf-8").trim();
+		return content || undefined;
+	} catch (error) {
+		console.warn(`[agent] failed to read ${path}: ${error}`);
+		return undefined;
+	}
+}
+
 /** Read global and chat-specific MEMORY.md files, returning combined content. */
 function getMemory(workingDir: string, chatDir?: string): string {
 	const parts: string[] = [];
-
-	const globalMemoryPath = join(workingDir, "MEMORY.md");
-	if (existsSync(globalMemoryPath)) {
-		try {
-			const content = readFileSync(globalMemoryPath, "utf-8").trim();
-			if (content) {
-				parts.push(`### Global Memory\n${content}`);
-			}
-		} catch (error) {
-			console.warn(`[agent] failed to read global memory: ${error}`);
-		}
-	}
-
+	const global = readFileIfExists(join(workingDir, "MEMORY.md"));
+	if (global) parts.push(`### Global Memory\n${global}`);
 	if (chatDir) {
-		const chatMemoryPath = join(chatDir, "MEMORY.md");
-		if (existsSync(chatMemoryPath)) {
-			try {
-				const content = readFileSync(chatMemoryPath, "utf-8").trim();
-				if (content) {
-					parts.push(`### Chat Memory\n${content}`);
-				}
-			} catch (error) {
-				console.warn(`[agent] failed to read chat memory: ${error}`);
-			}
-		}
+		const chat = readFileIfExists(join(chatDir, "MEMORY.md"));
+		if (chat) parts.push(`### Chat Memory\n${chat}`);
 	}
-
 	return parts.length > 0 ? parts.join("\n\n") : "(no memory yet)";
 }
 
 function getCustomPrompt(workingDir: string, chatDir?: string): string {
 	const parts: string[] = [];
-	const globalCustomPath = join(workingDir, "SYSTEM.md");
-	if (existsSync(globalCustomPath)) {
-		const content = readFileSync(globalCustomPath, "utf-8").trim();
-		if (content) parts.push(content);
-	}
+	const global = readFileIfExists(join(workingDir, "SYSTEM.md"));
+	if (global) parts.push(global);
 	if (chatDir) {
-		const chatCustomPath = join(chatDir, "SYSTEM.md");
-		if (existsSync(chatCustomPath)) {
-			const content = readFileSync(chatCustomPath, "utf-8").trim();
-			if (content) parts.push(content);
-		}
+		const chat = readFileIfExists(join(chatDir, "SYSTEM.md"));
+		if (chat) parts.push(chat);
 	}
 	return parts.join("\n\n");
 }
@@ -259,10 +212,19 @@ function extractToolLabel(toolName: string, args: Record<string, unknown>): stri
 export async function createAgentManager(config: AgentManagerConfig) {
 	const { workingDir } = config;
 	const sessionMap = new Map<string, ChatSession>();
-	const { modelRegistry, resourceLoader } = await initSharedResources(workingDir);
+
+	const modelRegistry = new ModelRegistry(AuthStorage.create());
+	const resourceLoader = new DefaultResourceLoader({
+		systemPrompt: buildSystemPrompt(workingDir),
+		noExtensions: true,
+		noSkills: true,
+		noPromptTemplates: true,
+		noThemes: true,
+	});
+	await resourceLoader.reload();
 
 	/** Create a new AgentSession for a chat, persisted to context.jsonl. */
-	async function createSession(chatGuid: string, handler: (reply: AgentReply) => Promise<void>): Promise<ChatSession> {
+	async function createSession(chatGuid: string): Promise<ChatSession> {
 		const chatDir = join(workingDir, sanitizeChatGuid(chatGuid));
 		mkdirSync(chatDir, { recursive: true });
 		const sessionManager = SessionManager.open(join(chatDir, "context.jsonl"), chatDir);
@@ -276,102 +238,75 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		const modelLabel = session.model ? `${session.model.provider}/${session.model.id}` : "default";
 		console.log(`[agent] session created: ${chatGuid} model=${modelLabel}`);
 
-		const entry: ChatSession = {
-			session,
-			chatGuid,
-			activeMessageHandler: handler,
-			replyChain: Promise.resolve(),
-			pendingTools: new Map(),
-		};
+		const entry: ChatSession = { session, chatGuid };
 		sessionMap.set(chatGuid, entry);
+		return entry;
+	}
 
-		// Session-level subscriber — lives for the entire session lifetime so
-		// steered messages (injected mid-stream) produce events that are never lost.
-		// Reads entry.activeMessageHandler which is updated at the start of each processMessage call.
-		session.subscribe((event) => {
+	/**
+	 * Send a user message through the agent and deliver replies via the handler.
+	 *
+	 * Callers must serialize calls for the same chat (imessage.ts does this).
+	 */
+	async function processMessage(msg: IncomingMessage, handler: (reply: AgentReply) => Promise<void>): Promise<void> {
+		const entry = sessionMap.get(msg.chatGuid) ?? (await createSession(msg.chatGuid));
+		const { session, chatGuid } = entry;
+
+		const promptText = formatPromptText(msg);
+		const chatDir = join(workingDir, sanitizeChatGuid(chatGuid));
+		session.agent.setSystemPrompt(buildSystemPrompt(workingDir, chatDir));
+
+		const images = msg.images.length > 0 ? msg.images : undefined;
+		const modelLabel = session.model ? `${session.model.provider}/${session.model.id}` : "default";
+		console.log(`[agent] prompt start: ${chatGuid} model=${modelLabel} "${promptText.substring(0, 60)}"`);
+
+		// Subscribe for this prompt's lifetime, routing events through handler
+		let replyChain = Promise.resolve();
+		const pendingTools = new Map<string, { toolName: string; startTime: number }>();
+
+		const unsubscribe = session.subscribe((event) => {
 			if (event.type === "message_start" && event.message.role === "assistant") {
 				console.log(`[agent] message start: ${chatGuid} role=assistant`);
 			} else if (event.type === "message_end" && event.message.role === "assistant") {
 				const assistantMsg = event.message as AssistantMessage;
 				const text = extractMessageText(event.message);
-				const stopReason = assistantMsg.stopReason;
-				const errorMessage = assistantMsg.errorMessage;
 				console.log(
-					`[agent] message end: ${chatGuid} role=assistant stopReason=${stopReason}` +
-						`${errorMessage ? ` error="${errorMessage}"` : ""}` +
+					`[agent] message end: ${chatGuid} stopReason=${assistantMsg.stopReason}` +
+						`${assistantMsg.errorMessage ? ` error="${assistantMsg.errorMessage}"` : ""}` +
 						` text="${(text ?? "(empty)").substring(0, 60)}"`
 				);
 				if (text) {
-					const callback = entry.activeMessageHandler;
-					entry.replyChain = entry.replyChain.then(() => callback({ kind: "assistant", text }));
+					replyChain = replyChain.then(() => handler({ kind: "assistant", text }));
 				}
 			} else if (event.type === "tool_execution_start") {
 				const toolArgs = event.args as Record<string, unknown>;
 				const label = extractToolLabel(event.toolName, toolArgs);
-
-				entry.pendingTools.set(event.toolCallId, {
-					toolName: event.toolName,
-					args: toolArgs,
-					startTime: Date.now(),
-				});
-
+				pendingTools.set(event.toolCallId, { toolName: event.toolName, startTime: Date.now() });
 				console.log(`[agent] tool start: ${chatGuid} → ${label}`);
-				const callback = entry.activeMessageHandler;
-				entry.replyChain = entry.replyChain.then(() => callback({ kind: "tool_start", label }));
+				replyChain = replyChain.then(() => handler({ kind: "tool_start", label }));
 			} else if (event.type === "tool_execution_end") {
 				const resultText = extractToolResultText(event.result);
-				const pending = entry.pendingTools.get(event.toolCallId);
-				entry.pendingTools.delete(event.toolCallId);
-
-				const durationMs = pending ? Date.now() - pending.startTime : 0;
-				const duration = (durationMs / 1000).toFixed(1);
+				const pending = pendingTools.get(event.toolCallId);
+				pendingTools.delete(event.toolCallId);
+				const duration = ((pending ? Date.now() - pending.startTime : 0) / 1000).toFixed(1);
 				const symbol = event.isError ? "✗" : "✓";
-
 				console.log(
 					`[agent] tool end: ${chatGuid} ${symbol} ${event.toolName} (${duration}s)` +
 						` result="${resultText.substring(0, 60)}"`
 				);
-				const callback = entry.activeMessageHandler;
-				entry.replyChain = entry.replyChain.then(() =>
-					callback({ kind: "tool_end", toolName: event.toolName, symbol, duration, result: resultText })
+				replyChain = replyChain.then(() =>
+					handler({ kind: "tool_end", toolName: event.toolName, symbol, duration, result: resultText })
 				);
 			}
 		});
 
-		return entry;
-	}
-
-	/**
-	 * Send a user message through the agent and deliver replies via the active message handler.
-	 *
-	 * Sessions are created on first message. The session-level subscriber fires events
-	 * for each tool call and assistant message, routing them through activeMessageHandler.
-	 *
-	 * Streaming behavior:
-	 *   - When the session is already streaming (agent mid-run), use "steer" to inject
-	 *     the new message into the active agentic loop without interrupting it.
-	 *   - When the session is idle, omit streamingBehavior so the agent starts normally.
-	 *     (Passing undefined while streaming would throw; pi enforces explicit queuing.)
-	 */
-	async function processMessage(msg: IncomingMessage, handler: (reply: AgentReply) => Promise<void>): Promise<void> {
-		const entry = sessionMap.get(msg.chatGuid) ?? (await createSession(msg.chatGuid, handler));
-		entry.activeMessageHandler = handler;
-
-		// Build prompt with sender/chat context prefix
-		const promptText = formatPromptText(msg);
-
-		// Refresh system prompt with current memory before each prompt
-		const chatDir = join(workingDir, sanitizeChatGuid(msg.chatGuid));
-		entry.session.agent.setSystemPrompt(buildSystemPrompt(workingDir, chatDir));
-
-		const images = msg.images.length > 0 ? msg.images : undefined;
-		const streamingBehavior = entry.session.isStreaming ? "steer" : undefined;
-
-		logPromptStart(entry, promptText, streamingBehavior);
-		await entry.session.prompt(promptText, { images, streamingBehavior });
-
-		await entry.replyChain; // wait for all dispatched replies to finish
-		console.log(`[agent] prompt end: ${entry.chatGuid}`);
+		try {
+			await session.prompt(promptText, { images });
+			await replyChain;
+			console.log(`[agent] prompt end: ${chatGuid}`);
+		} finally {
+			unsubscribe();
+		}
 	}
 
 	/** Start a new session for a chat by deleting context and evicting the in-memory session. */
@@ -459,14 +394,6 @@ export async function createAgentManager(config: AgentManagerConfig) {
 	}
 
 	return { processMessage, newSession, getSessionStatus, reload };
-}
-
-/** Log the start of a prompt, including streaming mode and model. */
-function logPromptStart(entry: ChatSession, promptText: string, streamingBehavior: "steer" | undefined): void {
-	const model = entry.session.model;
-	const modelLabel = model ? `${model.provider}/${model.id}` : "default";
-	const mode = streamingBehavior ?? "default";
-	console.log(`[agent] prompt start (${mode}): ${entry.chatGuid} model=${modelLabel} "${promptText.substring(0, 60)}"`);
 }
 
 /** Format a token count as a compact string: 0, 1.2k, 5.9k, 12k, 1.8M, etc. */

@@ -5,17 +5,15 @@
  *   watcher → queue → pipeline.process()
  *
  * Message ordering: every pulled message is immediately dispatched to the
- * pipeline (fire-and-forget). Different chats run concurrently. For the
- * same chat, the agent's steering mode (streamingBehavior: "steer") handles
- * rapid messages: if the agent is mid-run, a new message interrupts it as
- * a steering prompt rather than queuing behind the previous run.
+ * pipeline (fire-and-forget). Different chats run concurrently. Same-chat
+ * messages are serialized via per-chat promise chains so the agent never
+ * receives concurrent prompts for the same session.
  */
 
 import type { AgentManager } from "./agent.js";
 import type { DigestLogger } from "./logger.js";
 import { createMessagePipeline } from "./pipeline.js";
-import type { AsyncQueue } from "./queue.js";
-import { QueueClosedError } from "./queue.js";
+import { type AsyncQueue, QueueClosedError, createKeyedQueue } from "./queue.js";
 import { createSelfEchoFilter } from "./self-echo.js";
 import type { MessageSender } from "./send.js";
 import type { Settings } from "./settings.js";
@@ -76,13 +74,17 @@ export function createIMessageBot(config: IMessageBotConfig) {
 
 	return {
 		start() {
+			const enqueue = createKeyedQueue();
+
 			async function loop(): Promise<void> {
 				while (true) {
 					const msg = await queue.pull();
-
-					// Fire-and-forget — steering handles same-guid concurrency
-					pipeline.process(msg).catch((error: unknown) => {
-						console.error(`[sid] failed to process message from ${msg.sender}:`, error);
+					enqueue(msg.chatGuid, async () => {
+						try {
+							await pipeline.process(msg);
+						} catch (error: unknown) {
+							console.error(`[sid] failed to process message from ${msg.sender}:`, error);
+						}
 					});
 				}
 			}
