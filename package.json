@@ -1,17 +1,28 @@
 {
 	"name": "@kingcrab/pi-imessage",
-	"version": "0.0.19",
+	"version": "0.0.20",
 	"description": "AI-powered iMessage bot using pi coding agent — understands images, quoted replies, and conversation context",
 	"type": "module",
 	"license": "MIT",
 	"author": "Henry Zhu",
 	"homepage": "https://github.com/daya0576/pi-imessage#readme",
 	"bugs": "https://github.com/daya0576/pi-imessage/issues",
-	"keywords": ["imessage", "ai", "chatbot", "pi", "macos"],
+	"keywords": [
+		"imessage",
+		"ai",
+		"chatbot",
+		"pi",
+		"macos"
+	],
 	"bin": {
 		"pi-imessage": "./dist/cli.js"
 	},
-	"files": ["dist", "!dist/__tests__", "README.md", "LICENSE"],
+	"files": [
+		"dist",
+		"!dist/__tests__",
+		"README.md",
+		"LICENSE"
+	],
 	"publishConfig": {
 		"access": "public",
 		"provenance": true
