@@ -79,6 +79,16 @@ export function createIMessageBot(config: IMessageBotConfig) {
 			async function loop(): Promise<void> {
 				while (true) {
 					const msg = await queue.pull();
+
+					// /stop bypasses the per-chat queue so it can abort a running prompt
+					if (msg.text?.trim() === "/stop") {
+						await agent.stop(msg.chatGuid);
+						const replyText = "✓ Stopped";
+						console.log(`[sid] /stop command: ${msg.chatGuid} → ${replyText}`);
+						await sender.sendMessage(msg.chatGuid, replyText);
+						continue;
+					}
+
 					enqueue(msg.chatGuid, async () => {
 						try {
 							await pipeline.process(msg);

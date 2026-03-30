@@ -270,6 +270,19 @@ export function createCommandHandlerTask(agent: AgentManager): StartTask {
 			return;
 		}
 
+		if (text?.startsWith("/compact")) {
+			const customInstructions = text.slice("/compact".length).trim() || undefined;
+			const compactReply = await agent.compact(chat.chatGuid, customInstructions);
+			console.log(`[sid] /compact command: ${chat.chatGuid} → ${compactReply}`);
+			emit({ ...outgoing, reply: { type: "message", text: compactReply } });
+
+			const statusReply = await agent.getSessionStatus(chat.chatGuid);
+			console.log(`[sid] /compact status: ${chat.chatGuid} → ${statusReply}`);
+			emit({ ...outgoing, reply: { type: "message", text: statusReply } });
+			outgoing.shouldContinue = false;
+			return;
+		}
+
 		if (text === "/reload") {
 			await agent.reload(chat.chatGuid);
 			const statusReply = await agent.getSessionStatus(chat.chatGuid);

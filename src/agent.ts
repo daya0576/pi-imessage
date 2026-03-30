@@ -14,6 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { AssistantMessage, Message, TextContent } from "@mariozechner/pi-ai";
+import type { CompactionResult } from "@mariozechner/pi-coding-agent";
 import {
 	type AgentSession,
 	AuthStorage,
@@ -213,7 +214,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 	const { workingDir } = config;
 	const sessionMap = new Map<string, ChatSession>();
 
-	const modelRegistry = new ModelRegistry(AuthStorage.create());
+	const modelRegistry = ModelRegistry.create(AuthStorage.create());
 	const resourceLoader = new DefaultResourceLoader({
 		systemPrompt: buildSystemPrompt(workingDir),
 		noExtensions: true,
@@ -309,6 +310,40 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		}
 	}
 
+	/** Abort the in-progress agent run for a chat. No-op if no session or not running. */
+	async function stop(chatGuid: string): Promise<void> {
+		const entry = sessionMap.get(chatGuid);
+		if (!entry) {
+			console.log(`[agent] stop: no active session for ${chatGuid}`);
+			return;
+		}
+		await entry.session.steer("stop");
+		console.log(`[agent] stop steered: ${chatGuid}`);
+	}
+
+	/** Compact the session context, reducing token usage while preserving a summary. */
+	/** Compact the session context, reducing token usage while preserving a summary. */
+	/** Compact the session context, reducing token usage while preserving a summary. */
+	async function compact(chatGuid: string, customInstructions?: string): Promise<string> {
+		const entry = sessionMap.get(chatGuid) ?? (await createSession(chatGuid));
+		const { session } = entry;
+		let result: CompactionResult;
+		try {
+			result = await session.compact(customInstructions);
+		} catch (error: unknown) {
+			const message = error instanceof Error ? error.message : String(error);
+			if (message.includes("Already compacted")) {
+				console.log(`[agent] compact skipped (already compacted): ${chatGuid}`);
+				return "Already compacted — nothing to do";
+			}
+			throw error;
+		}
+		const beforeTokens = formatTokenCount(result.tokensBefore);
+		const summary = `\u2713 Compacted ${beforeTokens} tokens`;
+		console.log(`[agent] compact: ${chatGuid} ${summary}`);
+		return summary;
+	}
+
 	/** Start a new session for a chat by deleting context and evicting the in-memory session. */
 	async function newSession(chatGuid: string): Promise<void> {
 		sessionMap.delete(chatGuid);
@@ -393,7 +428,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		);
 	}
 
-	return { processMessage, newSession, getSessionStatus, reload };
+	return { processMessage, newSession, getSessionStatus, reload, stop, compact };
 }
 
 /** Format a token count as a compact string: 0, 1.2k, 5.9k, 12k, 1.8M, etc. */
@@ -407,5 +442,5 @@ function formatTokenCount(tokens: number): string {
 
 export type AgentManager = Pick<
 	Awaited<ReturnType<typeof createAgentManager>>,
-	"processMessage" | "newSession" | "getSessionStatus" | "reload"
+	"processMessage" | "newSession" | "getSessionStatus" | "reload" | "stop" | "compact"
 >;
