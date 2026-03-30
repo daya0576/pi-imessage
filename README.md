@@ -58,11 +58,17 @@ All fields are optional.
   "chatAllowlist": {
     "whitelist": ["iMessage;-;+11234567890"],
     "blacklist": ["*"]
+  },
+  "richText": {
+    "enabled": false,
+    "markdown": true
   }
 }
 ```
 
 **Chat allowlist** controls which chats receive replies (messages are always logged). By default, replies are **off** for all chats (`blacklist: ["*"]`) — opt in specific chats via the web UI or by adding their guid to `whitelist`. Resolution priority: `blacklist[guid]` > `whitelist[guid]` > `blacklist["*"]` > `whitelist["*"]`.
+
+**Rich text** is optional and disabled by default. When enabled, pi-imessage uses a UI automation fallback to open the target conversation, paste an RTF payload, and send it. Currently this is intended for direct-message iMessage chats. With `markdown: true`, pi-imessage interprets `**bold**` spans and renders them as actual bold text in Messages.
 
 ## Environment Variables
 

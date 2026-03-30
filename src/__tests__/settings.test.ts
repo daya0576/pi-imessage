@@ -3,7 +3,10 @@ import type { Settings } from "../settings.js";
 import { isReplyEnabled } from "../settings.js";
 
 function makeSettings(whitelist: string[], blacklist: string[]): Settings {
-	return { chatAllowlist: { whitelist, blacklist } };
+	return {
+		chatAllowlist: { whitelist, blacklist },
+		richText: { enabled: false, markdown: true },
+	};
 }
 
 describe("isReplyEnabled", () => {

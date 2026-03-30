@@ -334,11 +334,15 @@ export function createCallAgentTask(agent: AgentManager): StartTask {
 // ── end tasks ─────────────────────────────────────────────────────────────────
 
 /** Remember echo and send reply via Messages.app AppleScript. */
-export function createSendReplyTask(echoFilter: SelfEchoFilter, sender: MessageSender): EndTask {
+export function createSendReplyTask(
+	echoFilter: SelfEchoFilter,
+	sender: MessageSender,
+	getSettings: () => Settings
+): EndTask {
 	return async (chat, outgoing) => {
 		if (outgoing.reply.type === "message") {
 			echoFilter.remember(chat.chatGuid, outgoing.reply.text);
-			await sender.sendMessage(chat.chatGuid, outgoing.reply.text);
+			await sender.sendMessage(chat.chatGuid, outgoing.reply.text, getSettings().richText);
 		}
 		return outgoing;
 	};
