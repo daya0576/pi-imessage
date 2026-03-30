@@ -8,7 +8,6 @@ import type { SelfEchoFilter } from "../self-echo.js";
 import type { MessageSender } from "../send.js";
 import type { Settings } from "../settings.js";
 import type { AgentReply } from "../types.js";
-import { formatAgentReply } from "../types.js";
 import { getChatBlocks } from "./data.js";
 import { renderLogsPage, renderPage } from "./render.js";
 
@@ -173,13 +172,18 @@ export function createWebServer(config: WebServerConfig): WebServer {
 						images: [],
 					},
 					async (agentReply: AgentReply) => {
-						const text = formatAgentReply(agentReply);
-						echoFilter.remember(chatGuid, text);
-						await sender.sendMessage(chatGuid, text);
-						replies.push(text);
+						if (agentReply.kind === "assistant") {
+							replies.push(agentReply.text);
+						}
 					},
 					{ streamingBehavior: "followUp" }
 				);
+				// Send all assistant replies to the chat after processing
+				for (const text of replies) {
+					echoFilter.remember(chatGuid, text);
+					await sender.sendMessage(chatGuid, text);
+				}
+				console.log(`[web] /prompt done: ${chatGuid} ${replies.length} reply(s)`);
 				jsonResponse(response, 200, { ok: true, replies });
 			} catch (error) {
 				console.error("[web] /prompt error:", error);
