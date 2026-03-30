@@ -272,7 +272,11 @@ export async function createAgentManager(config: AgentManagerConfig) {
 	 *
 	 * Callers must serialize calls for the same chat (imessage.ts does this).
 	 */
-	async function processMessage(msg: IncomingMessage, handler: (reply: AgentReply) => Promise<void>): Promise<void> {
+	async function processMessage(
+		msg: IncomingMessage,
+		handler: (reply: AgentReply) => Promise<void>,
+		options?: { streamingBehavior?: "steer" | "followUp" }
+	): Promise<void> {
 		const entry = sessionMap.get(msg.chatGuid) ?? (await createSession(msg.chatGuid));
 		const { session, chatGuid } = entry;
 
@@ -325,7 +329,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		});
 
 		try {
-			await session.prompt(promptText, { images });
+			await session.prompt(promptText, { images, streamingBehavior: options?.streamingBehavior });
 			await replyChain;
 			console.log(`[agent] prompt end: ${chatGuid}`);
 		} finally {

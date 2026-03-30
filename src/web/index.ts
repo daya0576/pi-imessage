@@ -177,7 +177,8 @@ export function createWebServer(config: WebServerConfig): WebServer {
 						echoFilter.remember(chatGuid, text);
 						await sender.sendMessage(chatGuid, text);
 						replies.push(text);
-					}
+					},
+					{ streamingBehavior: "followUp" }
 				);
 				jsonResponse(response, 200, { ok: true, replies });
 			} catch (error) {
