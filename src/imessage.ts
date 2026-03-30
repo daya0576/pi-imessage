@@ -14,7 +14,7 @@ import type { AgentManager } from "./agent.js";
 import type { DigestLogger } from "./logger.js";
 import { createMessagePipeline } from "./pipeline.js";
 import { type AsyncQueue, QueueClosedError, createKeyedQueue } from "./queue.js";
-import { createSelfEchoFilter } from "./self-echo.js";
+import type { SelfEchoFilter } from "./self-echo.js";
 import type { MessageSender } from "./send.js";
 import type { Settings } from "./settings.js";
 import type { ChatStore } from "./store.js";
@@ -39,14 +39,14 @@ export interface IMessageBotConfig {
 	queue: AsyncQueue<IncomingMessage>;
 	agent: AgentManager;
 	sender: MessageSender;
+	echoFilter: SelfEchoFilter;
 	store: ChatStore;
 	getSettings: () => Settings;
 	digestLogger: DigestLogger;
 }
 
 export function createIMessageBot(config: IMessageBotConfig) {
-	const { queue, agent, sender, store, getSettings, digestLogger } = config;
-	const echoFilter = createSelfEchoFilter();
+	const { queue, agent, sender, echoFilter, store, getSettings, digestLogger } = config;
 	const pipeline = createMessagePipeline();
 
 	// ── Pipeline tasks ─────────────────────────────────────────────────────────

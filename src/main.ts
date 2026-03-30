@@ -9,6 +9,7 @@ import { createAgentManager } from "./agent.js";
 import { createIMessageBot } from "./imessage.js";
 import { createAppLogger, createDigestLogger } from "./logger.js";
 import { createAsyncQueue } from "./queue.js";
+import { createSelfEchoFilter } from "./self-echo.js";
 import { checkEnvironment, createMessageSender } from "./send.js";
 import { readSettings, writeSettings } from "./settings.js";
 import type { Settings } from "./settings.js";
@@ -31,16 +32,16 @@ async function main() {
 	await checkEnvironment();
 
 	const sender = createMessageSender();
+	const echoFilter = createSelfEchoFilter();
 	const getSettings = (): Settings => readSettings(workingDir);
 	const setSettings = (updated: Settings): void => writeSettings(workingDir, updated);
 	const agent = await createAgentManager({ workingDir });
 	const store = createChatStore({ workingDir });
 	const queue = createAsyncQueue<IncomingMessage>();
 	const watcher = createWatcher({ queue });
-
-	const bot = createIMessageBot({ queue, agent, sender, store, getSettings, digestLogger });
+	const bot = createIMessageBot({ queue, agent, sender, echoFilter, store, getSettings, digestLogger });
 	const web = webEnabled
-		? createWebServer({ workingDir, host: webHost, port: webPort, getSettings, setSettings })
+		? createWebServer({ workingDir, host: webHost, port: webPort, getSettings, setSettings, sender, echoFilter, agent })
 		: null;
 
 	console.log(`[sid] workspace:  ${workingDir}`);

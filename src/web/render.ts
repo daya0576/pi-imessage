@@ -72,3 +72,7 @@ export function renderPage(blocks: ChatBlock[], settings: Settings): string {
 	const replyEnabledMap = (chatGuid: string) => isReplyEnabled(settings, chatGuid);
 	return eta.render("page", { blocks, prepareCard, anchorId, replyEnabledMap });
 }
+
+export function renderLogsPage(appLog: string, digestLog: string): string {
+	return eta.render("logs", { appLog, digestLog });
+}

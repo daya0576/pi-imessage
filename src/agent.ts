@@ -153,6 +153,29 @@ Maintain ${workingDir}/SYSTEM.md to log all environment modifications:
 
 Update this file whenever you modify the environment.
 
+## Messaging API
+A local HTTP server runs at http://localhost:7750 with two endpoints for sending messages:
+
+### POST /send — send a message directly
+\`\`\`bash
+curl -X POST http://localhost:7750/send \\
+  -H "Content-Type: application/json" \\
+  -d '{"chatGuid":"<chatGuid>","text":"hello"}'
+\`\`\`
+
+### POST /prompt — send a prompt to yourself, reply to the chat
+\`\`\`bash
+curl -X POST http://localhost:7750/prompt \\
+  -H "Content-Type: application/json" \\
+  -d '{"chatGuid":"<chatGuid>","prompt":"generate a daily summary"}'
+\`\`\`
+
+Use these with system crontab (\`crontab -e\`) to schedule recurring messages or tasks.
+Example crontab entry:
+\`\`\`
+0 9 * * * curl -s -X POST http://localhost:7750/send -H "Content-Type: application/json" -d '{"chatGuid":"iMessage;-;+1234567890","text":"good morning"}'
+\`\`\`
+
 ## Skills (Custom CLI Tools)
 You can create reusable CLI tools for recurring tasks (email, APIs, data processing, etc.).
 
