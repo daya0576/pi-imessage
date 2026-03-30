@@ -163,17 +163,24 @@ curl -X POST http://localhost:7750/send \\
   -d '{"chatGuid":"<chatGuid>","text":"hello"}'
 \`\`\`
 
-### POST /prompt — send a prompt to yourself, reply to the chat
+### POST /prompt — send a prompt to the agent, send the agent's reply to the chat
+The prompt is processed by the agent (you). After processing completes, only the final
+assistant text replies are sent to the chat. Tool execution output is not sent.
 \`\`\`bash
 curl -X POST http://localhost:7750/prompt \\
   -H "Content-Type: application/json" \\
   -d '{"chatGuid":"<chatGuid>","prompt":"generate a daily summary"}'
 \`\`\`
+If the agent is already processing a message for this chat, the prompt is queued (followUp)
+and will run after the current processing finishes.
 
 Use these with system crontab (\`crontab -e\`) to schedule recurring messages or tasks.
-Example crontab entry:
+Example crontab entries:
 \`\`\`
+# Send a static message every morning at 9:00
 0 9 * * * curl -s -X POST http://localhost:7750/send -H "Content-Type: application/json" -d '{"chatGuid":"iMessage;-;+1234567890","text":"good morning"}'
+# Generate and send a daily summary every evening at 21:00
+0 21 * * * curl -s -X POST http://localhost:7750/prompt -H "Content-Type: application/json" -d '{"chatGuid":"iMessage;-;+1234567890","prompt":"generate a daily summary and send it"}'
 \`\`\`
 
 ## Skills (Custom CLI Tools)
