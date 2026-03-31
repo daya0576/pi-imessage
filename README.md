@@ -47,6 +47,8 @@ Send these as iMessage to interact with the bot:
 |---|---|---|
 | `/new` | Reset the session, starting a fresh conversation | `✓ New session started` |
 | `/status` | Show session stats: tokens, context, model | `💬 3 msgs - ↑7.2k ↓505 1.1%/128k`<br>`🤖 anthropic/claude-sonnet-4 • 💭 minimal` |
+| `/compact` | Compress session context to free up token space | `✓ Compacted: 15.2k → 2.1k tokens` |
+| `/stop` | Steer the agent to stop after current tool calls finish, then process the next queued message | |
 | `/reload` | Reload models and clear all sessions | `✓ Models reloaded` |
 
 ## Settings (`WORKING_DIR/settings.json`)

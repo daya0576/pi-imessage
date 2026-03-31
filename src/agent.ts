@@ -356,8 +356,6 @@ export async function createAgentManager(config: AgentManagerConfig) {
 	}
 
 	/** Compact the session context, reducing token usage while preserving a summary. */
-	/** Compact the session context, reducing token usage while preserving a summary. */
-	/** Compact the session context, reducing token usage while preserving a summary. */
 	async function compact(chatGuid: string, customInstructions?: string): Promise<string> {
 		const entry = sessionMap.get(chatGuid) ?? (await createSession(chatGuid));
 		const { session } = entry;
