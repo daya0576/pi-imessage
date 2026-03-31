@@ -261,6 +261,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		const sessionManager = SessionManager.open(join(chatDir, "context.jsonl"), chatDir);
 
 		const { session } = await createAgentSession({
+			cwd: workingDir,
 			modelRegistry,
 			sessionManager,
 			resourceLoader,
