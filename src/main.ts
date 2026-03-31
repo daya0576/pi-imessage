@@ -37,7 +37,7 @@ async function main() {
 	const setSettings = (updated: Settings): void => writeSettings(workingDir, updated);
 	const agent = await createAgentManager({ workingDir });
 	const store = createChatStore({ workingDir });
-	const queue = createAsyncQueue<IncomingMessage>();
+	const queue = createAsyncQueue<IncomingMessage>(join(workingDir, "queue.json"));
 	const watcher = createWatcher({ queue });
 	const bot = createIMessageBot({ queue, agent, sender, echoFilter, store, getSettings, digestLogger });
 	const web = webEnabled
