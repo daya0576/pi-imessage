@@ -153,13 +153,16 @@ describe("createSendReplyTask", () => {
 	it("sends text reply and remembers echo", async () => {
 		const echoFilter = createSelfEchoFilter();
 		const sender = makeMockSender();
-		const task = createSendReplyTask(echoFilter, sender);
+		const task = createSendReplyTask(echoFilter, sender, () => ({
+			chatAllowlist: { whitelist: [], blacklist: ["*"] },
+			richText: { enabled: false, markdown: true },
+		}));
 		const chat = makeChat();
 		const outgoing = makeOutgoing({ reply: { type: "message", text: "pong" } });
 
 		await task(chat, outgoing);
 
-		expect(sender.sendMessage).toHaveBeenCalledWith(chat.chatGuid, "pong");
+		expect(sender.sendMessage).toHaveBeenCalledWith(chat.chatGuid, "pong", { enabled: false, markdown: true });
 		expect(echoFilter.isEcho(chat.chatGuid, "pong")).toBe(true);
 	});
 });

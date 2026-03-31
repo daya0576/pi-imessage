@@ -68,7 +68,7 @@ export function createIMessageBot(config: IMessageBotConfig) {
 	pipeline.start(createCallAgentTask(agent));
 
 	// end
-	pipeline.end(createSendReplyTask(echoFilter, sender));
+	pipeline.end(createSendReplyTask(echoFilter, sender, getSettings));
 	pipeline.end(createLogOutgoingTask(digestLogger));
 	pipeline.end(createStoreOutgoingTask(store));
 

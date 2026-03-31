@@ -14,6 +14,8 @@ import { constants, accessSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { sendRichTextMessage } from "./rich-text.js";
+import type { RichTextSettings } from "./settings.js";
 
 const execFileAsync = promisify(execFile);
 const SCRIPT_TIMEOUT_MS = 30_000;
@@ -109,12 +111,16 @@ end tell`;
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export interface MessageSender {
-	sendMessage(chatGuid: string, text: string): Promise<void>;
+	sendMessage(chatGuid: string, text: string, richText?: RichTextSettings): Promise<void>;
 }
 
 export function createMessageSender(): MessageSender {
 	return {
-		async sendMessage(chatGuid: string, text: string): Promise<void> {
+		async sendMessage(chatGuid: string, text: string, richText?: RichTextSettings): Promise<void> {
+			if (richText?.enabled) {
+				await sendRichTextMessage(chatGuid, text, { markdown: richText.markdown });
+				return;
+			}
 			const script = buildSendScript(chatGuid, text);
 			await execFileAsync("osascript", ["-e", script], { timeout: SCRIPT_TIMEOUT_MS });
 			console.log(`[send] sent to ${chatGuid}: "${text.substring(0, 60)}"`);
