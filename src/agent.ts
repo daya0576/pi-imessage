@@ -244,7 +244,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 	const { workingDir } = config;
 	const sessionMap = new Map<string, ChatSession>();
 
-	const modelRegistry = new ModelRegistry(AuthStorage.create());
+	const modelRegistry = ModelRegistry.create(AuthStorage.create());
 	const resourceLoader = new DefaultResourceLoader({
 		systemPrompt: buildSystemPrompt(workingDir),
 		noExtensions: true,

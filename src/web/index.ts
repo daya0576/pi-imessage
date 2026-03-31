@@ -159,32 +159,34 @@ export function createWebServer(config: WebServerConfig): WebServer {
 					return;
 				}
 				console.log(`[web] /prompt: ${chatGuid} "${prompt.substring(0, 60)}"`);
-				const replies: string[] = [];
-				await agent.processMessage(
-					{
-						chatGuid,
-						sender: "cron",
-						text: prompt,
-						messageType: "imessage",
-						groupName: "",
-						replyToText: null,
-						attachments: [],
-						images: [],
-					},
-					async (agentReply: AgentReply) => {
-						if (agentReply.kind === "assistant") {
-							replies.push(agentReply.text);
-						}
-					},
-					{ streamingBehavior: "followUp" }
-				);
-				// Send all assistant replies to the chat after processing
-				for (const text of replies) {
-					echoFilter.remember(chatGuid, text);
-					await sender.sendMessage(chatGuid, text);
-				}
-				console.log(`[web] /prompt done: ${chatGuid} ${replies.length} reply(s)`);
-				jsonResponse(response, 200, { ok: true, replies });
+				jsonResponse(response, 200, { ok: true });
+				// Process asynchronously — agent replies are sent to the chat when ready
+				agent
+					.processMessage(
+						{
+							chatGuid,
+							sender: "cron",
+							text: prompt,
+							messageType: "imessage",
+							groupName: "",
+							replyToText: null,
+							attachments: [],
+							images: [],
+						},
+						async (agentReply: AgentReply) => {
+							if (agentReply.kind === "assistant") {
+								echoFilter.remember(chatGuid, agentReply.text);
+								await sender.sendMessage(chatGuid, agentReply.text);
+							}
+						},
+						{ streamingBehavior: "followUp" }
+					)
+					.then(() => {
+						console.log(`[web] /prompt done: ${chatGuid}`);
+					})
+					.catch((error) => {
+						console.error(`[web] /prompt error: ${chatGuid}`, error);
+					});
 			} catch (error) {
 				console.error("[web] /prompt error:", error);
 				jsonResponse(response, 500, { error: String(error) });

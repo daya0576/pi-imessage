@@ -37,6 +37,13 @@ Available at `http://localhost:7750` (configurable via `WEB_PORT`).
 - Toggle reply on/off per chat
 - Live updates via SSE when new messages arrive
 
+### API
+
+| Endpoint | Description | Example |
+|---|---|---|
+| `POST /send` | Send a raw iMessage to a chat (bypasses the agent) | `curl -X POST localhost:7750/send -d '{"chatGuid": "iMessage;-;+11234567890", "text": "hello"}'`<br>→ `{"ok": true}` |
+| `POST /prompt` | Feed a prompt to the agent asynchronously; replies are sent to the chat when ready | `curl -X POST localhost:7750/prompt -d '{"chatGuid": "iMessage;-;+11234567890", "prompt": "say hello"}'`<br>→ `{"ok": true}` |
+
 P.S. Disable with `WEB_ENABLED=false` and let the agent build your own web UI
 
 ## Commands
