@@ -139,7 +139,12 @@ ${workingDir}/
 Write to MEMORY.md files to persist context across conversations.
 - Global (${workingDir}/MEMORY.md): preferences, project info, shared knowledge
 - Chat-specific (<chatDir>/MEMORY.md): user details, ongoing topics, decisions
-Update when you learn something important or when asked to remember something.
+
+Rules:
+- ALWAYS prefix entries with [YYYY-MM-DD]
+- ALWAYS note the source (chat message, URL, file path, etc.)
+- When updating conflicting info, keep the old entry with ~~strikethrough~~ and add the new one
+- Update MEMORY.md when you learn something important. No need to update after every message.
 
 ### Current Memory
 ${memory}
