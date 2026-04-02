@@ -76,3 +76,12 @@ export function renderPage(blocks: ChatBlock[], settings: Settings): string {
 export function renderLogsPage(appLog: string, digestLog: string): string {
 	return eta.render("logs", { appLog, digestLog });
 }
+
+export interface ChatMemory {
+	name: string;
+	content: string;
+}
+
+export function renderMemoryPage(globalMemory: string, chatMemories: ChatMemory[]): string {
+	return eta.render("memory", { globalMemory, chatMemories });
+}

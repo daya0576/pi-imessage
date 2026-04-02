@@ -27,6 +27,7 @@ td { vertical-align: top; padding: 1px 0 }
 <nav>
   <a href="/" class="active">Recent Chats</a>
   <a href="/logs">Logs</a>
+  <a href="/memory">Memory</a>
 </nav>
 
 <div class="content">

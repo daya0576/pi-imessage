@@ -1,6 +1,6 @@
 /** Web server: serves the chat log UI, logs page, and API endpoints. */
 
-import { existsSync, readFileSync, watch } from "node:fs";
+import { existsSync, readFileSync, readdirSync, watch } from "node:fs";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
 import { join } from "node:path";
 import type { AgentManager } from "../agent.js";
@@ -9,7 +9,7 @@ import type { MessageSender } from "../send.js";
 import type { Settings } from "../settings.js";
 import type { AgentReply } from "../types.js";
 import { getChatBlocks } from "./data.js";
-import { renderLogsPage, renderPage } from "./render.js";
+import { type ChatMemory, renderLogsPage, renderMemoryPage, renderPage } from "./render.js";
 
 export interface WebServerConfig {
 	workingDir: string;
@@ -75,7 +75,7 @@ export function createWebServer(config: WebServerConfig): WebServer {
 		if (!existsSync(workingDir)) return;
 		try {
 			fsWatcher = watch(workingDir, { recursive: true }, (_event, filename) => {
-				if (filename?.endsWith("log.jsonl")) broadcast();
+				if (filename?.endsWith("log.jsonl") || filename?.endsWith(".log")) broadcast();
 			});
 			fsWatcher.on("error", () => {});
 		} catch {
@@ -117,6 +117,27 @@ export function createWebServer(config: WebServerConfig): WebServer {
 			return;
 		}
 
+		// Memory page
+		if (url.pathname === "/memory" && request.method === "GET") {
+			const globalMemoryPath = join(workingDir, "MEMORY.md");
+			const globalMemory = existsSync(globalMemoryPath) ? readFileSync(globalMemoryPath, "utf-8").trim() : "";
+			const chatMemories: ChatMemory[] = [];
+			if (existsSync(workingDir)) {
+				for (const entry of readdirSync(workingDir, { withFileTypes: true })) {
+					if (!entry.isDirectory()) continue;
+					const memPath = join(workingDir, entry.name, "MEMORY.md");
+					if (existsSync(memPath)) {
+						const content = readFileSync(memPath, "utf-8").trim();
+						if (content) chatMemories.push({ name: entry.name, content });
+					}
+				}
+			}
+			const html = renderMemoryPage(globalMemory, chatMemories);
+			response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+			response.end(html);
+			return;
+		}
+
 		// Logs page
 		if (url.pathname === "/logs" && request.method === "GET") {
 			const appLog = readLogTail(join(workingDir, "app.log"), 200);
@@ -124,6 +145,14 @@ export function createWebServer(config: WebServerConfig): WebServer {
 			const html = renderLogsPage(appLog, digestLog);
 			response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
 			response.end(html);
+			return;
+		}
+
+		// Logs data API (JSON)
+		if (url.pathname === "/logs/data" && request.method === "GET") {
+			const appLog = readLogTail(join(workingDir, "app.log"), 200);
+			const digestLog = readLogTail(join(workingDir, "digest.log"), 200);
+			jsonResponse(response, 200, { appLog, digestLog });
 			return;
 		}
 

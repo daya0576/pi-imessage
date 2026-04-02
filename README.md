@@ -31,11 +31,11 @@ pi-imessage install     # install as launchd service (auto-start on boot, restar
 
 ## Web UI
 
-Available at `http://localhost:7750` (configurable via `WEB_PORT`).
+Available at `http://localhost:7750` (configurable via `WEB_HOST` and `WEB_PORT`).
 
-- Displays chat logs from the last 7 days, sorted by most recent activity
-- Toggle reply on/off per chat
-- Live updates via SSE when new messages arrive
+- Chat history with live updates
+- Logs (tail -f style)
+- Memory (global & per-chat)
 
 P.S. Disable with `WEB_ENABLED=false` and let the agent build your own web UI
 
