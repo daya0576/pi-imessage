@@ -55,6 +55,24 @@ function parseJsonBody(request: IncomingMessage): Promise<Record<string, unknown
 	});
 }
 
+/** Read global and per-chat MEMORY.md files. */
+function readMemories(workingDir: string): { globalMemory: string; chatMemories: ChatMemory[] } {
+	const globalMemoryPath = join(workingDir, "MEMORY.md");
+	const globalMemory = existsSync(globalMemoryPath) ? readFileSync(globalMemoryPath, "utf-8").trim() : "";
+	const chatMemories: ChatMemory[] = [];
+	if (existsSync(workingDir)) {
+		for (const entry of readdirSync(workingDir, { withFileTypes: true })) {
+			if (!entry.isDirectory()) continue;
+			const memPath = join(workingDir, entry.name, "MEMORY.md");
+			if (existsSync(memPath)) {
+				const content = readFileSync(memPath, "utf-8").trim();
+				if (content) chatMemories.push({ name: entry.name, content });
+			}
+		}
+	}
+	return { globalMemory, chatMemories };
+}
+
 export function createWebServer(config: WebServerConfig): WebServer {
 	const { workingDir, host, port, getSettings, setSettings, sender, echoFilter, agent } = config;
 	const sseClients = new Set<ServerResponse>();
@@ -75,7 +93,8 @@ export function createWebServer(config: WebServerConfig): WebServer {
 		if (!existsSync(workingDir)) return;
 		try {
 			fsWatcher = watch(workingDir, { recursive: true }, (_event, filename) => {
-				if (filename?.endsWith("log.jsonl") || filename?.endsWith(".log")) broadcast();
+				if (filename?.endsWith("log.jsonl") || filename?.endsWith(".log") || filename?.endsWith("MEMORY.md"))
+					broadcast();
 			});
 			fsWatcher.on("error", () => {});
 		} catch {
@@ -119,22 +138,16 @@ export function createWebServer(config: WebServerConfig): WebServer {
 
 		// Memory page
 		if (url.pathname === "/memory" && request.method === "GET") {
-			const globalMemoryPath = join(workingDir, "MEMORY.md");
-			const globalMemory = existsSync(globalMemoryPath) ? readFileSync(globalMemoryPath, "utf-8").trim() : "";
-			const chatMemories: ChatMemory[] = [];
-			if (existsSync(workingDir)) {
-				for (const entry of readdirSync(workingDir, { withFileTypes: true })) {
-					if (!entry.isDirectory()) continue;
-					const memPath = join(workingDir, entry.name, "MEMORY.md");
-					if (existsSync(memPath)) {
-						const content = readFileSync(memPath, "utf-8").trim();
-						if (content) chatMemories.push({ name: entry.name, content });
-					}
-				}
-			}
+			const { globalMemory, chatMemories } = readMemories(workingDir);
 			const html = renderMemoryPage(globalMemory, chatMemories);
 			response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
 			response.end(html);
+			return;
+		}
+
+		// Memory data API (JSON)
+		if (url.pathname === "/memory/data" && request.method === "GET") {
+			jsonResponse(response, 200, readMemories(workingDir));
 			return;
 		}
 
