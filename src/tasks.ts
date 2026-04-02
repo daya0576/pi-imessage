@@ -249,21 +249,10 @@ export function createCommandHandlerTask(agent: AgentManager): StartTask {
 		const text = incoming.text?.trim();
 
 		if (text === "/new") {
-			// Auto-save memory before clearing session
-			await agent.compact(
-				chat.chatGuid,
-				"Summarize key facts learned in this session into MEMORY.md (with [date] and source). Then compact."
-			);
-			console.log(`[sid] /new: auto-saved memory for ${chat.chatGuid}`);
-
 			await agent.newSession(chat.chatGuid);
 			const newSessionReply = "✓ New session started";
 			console.log(`[sid] /new command: ${chat.chatGuid} → ${newSessionReply}`);
 			emit({ ...outgoing, reply: { type: "message", text: newSessionReply } });
-
-			const statusReply = await agent.getSessionStatus(chat.chatGuid);
-			console.log(`[sid] /new status: ${chat.chatGuid} → ${statusReply}`);
-			emit({ ...outgoing, reply: { type: "message", text: statusReply } });
 
 			outgoing.shouldContinue = false;
 			return;
