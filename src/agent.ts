@@ -35,6 +35,8 @@ export interface AgentManagerConfig {
 interface ChatSession {
 	session: AgentSession;
 	chatGuid: string;
+	/** Promise chain serializing prompts/steers for this chat. */
+	chain: Promise<void>;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -275,7 +277,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		const modelLabel = session.model ? `${session.model.provider}/${session.model.id}` : "default";
 		console.log(`[agent] session created: ${chatGuid} model=${modelLabel}`);
 
-		const entry: ChatSession = { session, chatGuid };
+		const entry: ChatSession = { session, chatGuid, chain: Promise.resolve() };
 		sessionMap.set(chatGuid, entry);
 		return entry;
 	}
@@ -283,7 +285,8 @@ export async function createAgentManager(config: AgentManagerConfig) {
 	/**
 	 * Send a user message through the agent and deliver replies via the handler.
 	 *
-	 * Callers must serialize calls for the same chat (imessage.ts does this).
+	 * Calls are serialized per chat via a promise chain on the session entry,
+	 * so concurrent callers (queue + web) safely queue instead of colliding.
 	 */
 	async function processMessage(
 		msg: IncomingMessage,
@@ -291,6 +294,17 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		options?: { streamingBehavior?: "steer" | "followUp" }
 	): Promise<void> {
 		const entry = sessionMap.get(msg.chatGuid) ?? (await createSession(msg.chatGuid));
+		const run = () => runPrompt(entry, msg, handler, options);
+		entry.chain = entry.chain.then(run, run);
+		return entry.chain;
+	}
+
+	async function runPrompt(
+		entry: ChatSession,
+		msg: IncomingMessage,
+		handler: (reply: AgentReply) => Promise<void>,
+		options?: { streamingBehavior?: "steer" | "followUp" }
+	): Promise<void> {
 		const { session, chatGuid } = entry;
 
 		const promptText = formatPromptText(msg);
@@ -345,6 +359,12 @@ export async function createAgentManager(config: AgentManagerConfig) {
 			await session.prompt(promptText, { images, streamingBehavior: options?.streamingBehavior });
 			await replyChain;
 			console.log(`[agent] prompt end: ${chatGuid}`);
+		} catch (error) {
+			// Defensively reset SDK state: some error paths leave isProcessing=true,
+			// which would make every subsequent prompt on this session fail with
+			// "already processing". steer("stop") clears that flag.
+			await session.steer("stop").catch(() => {});
+			throw error;
 		} finally {
 			unsubscribe();
 		}
