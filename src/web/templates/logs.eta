@@ -3,6 +3,11 @@
 <style>
 * { margin: 0; padding: 0 }
 body { background: #111; color: #ccc; font: 13px/1.6 monospace; display: flex; height: 100vh; overflow: hidden }
+::-webkit-scrollbar { width: 8px; height: 8px }
+::-webkit-scrollbar-track { background: transparent }
+::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 0 }
+::-webkit-scrollbar-thumb:hover { background: #3a3a3a }
+* { scrollbar-width: thin; scrollbar-color: #2a2a2a transparent }
 nav { width: 100px; flex-shrink: 0; padding: 40px 16px; border-right: 1px solid #1a1a1a }
 nav a { display: block; color: inherit; text-decoration: none; line-height: 2.4; opacity: .35 }
 nav a:hover, nav a.active { opacity: 1 }
