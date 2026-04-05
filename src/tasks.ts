@@ -253,7 +253,9 @@ export function createCommandHandlerTask(agent: AgentManager): StartTask {
 			const newSessionReply = "✓ New session started";
 			console.log(`[sid] /new command: ${chat.chatGuid} → ${newSessionReply}`);
 			emit({ ...outgoing, reply: { type: "message", text: newSessionReply } });
-
+			const statusReply = await agent.getSessionStatus(chat.chatGuid);
+			console.log(`[sid] /new status: ${chat.chatGuid} → ${statusReply}`);
+			emit({ ...outgoing, reply: { type: "message", text: statusReply } });
 			outgoing.shouldContinue = false;
 			return;
 		}
