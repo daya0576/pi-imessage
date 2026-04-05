@@ -1,22 +1,55 @@
 {
-	"name": "pi-imessage",
-	"private": true,
+	"name": "@kingcrab/pi-imessage",
+	"version": "0.0.33",
+	"description": "AI-powered iMessage bot using pi coding agent — understands images, quoted replies, and conversation context",
 	"type": "module",
-	"workspaces": ["packages/*"],
+	"license": "MIT",
+	"author": "Henry Zhu",
+	"homepage": "https://github.com/daya0576/pi-imessage#readme",
+	"bugs": "https://github.com/daya0576/pi-imessage/issues",
+	"keywords": ["imessage", "ai", "chatbot", "pi", "macos"],
+	"bin": {
+		"pi-imessage": "./dist/cli.js"
+	},
+	"files": ["dist", "!dist/__tests__", "README.md", "LICENSE"],
+	"publishConfig": {
+		"access": "public",
+		"provenance": true
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/daya0576/pi-imessage.git"
+	},
 	"engines": {
 		"node": ">=20.0.0"
 	},
 	"scripts": {
-		"build": "npm run build --workspaces --if-present",
-		"dev": "npm run dev -w packages/blue",
-		"start": "npm run start -w packages/blue",
-		"typecheck": "npm run typecheck --workspaces --if-present",
+		"build": "tsc && mkdir -p dist/web/templates && cp src/web/templates/* dist/web/templates/",
+		"prepublishOnly": "npm run build",
+		"dev": "NODE_OPTIONS='--use-env-proxy' tsx watch src/main.ts",
+		"start": "NODE_OPTIONS='--use-env-proxy' tsx src/main.ts",
+		"test": "vitest run",
+		"typecheck": "tsc --noEmit",
 		"lint": "biome check .",
-		"format": "biome format --write ."
+		"format": "biome format --write .",
+		"check": "tsc --noEmit && biome check ."
+	},
+	"dependencies": {
+		"@mariozechner/pi-agent-core": "latest",
+		"@mariozechner/pi-ai": "latest",
+		"@mariozechner/pi-coding-agent": "latest",
+		"better-sqlite3": "^12.6.2",
+		"dotenv": "^17.3.1",
+		"eta": "^4.5.1"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.4",
+		"@types/better-sqlite3": "^7.6.13",
 		"@types/node": "^22.0.0",
-		"typescript": "^5.7.3"
+		"@types/sharp": "^0.31.1",
+		"@vitest/coverage-v8": "^3.2.4",
+		"tsx": "^4.0.0",
+		"typescript": "^5.7.3",
+		"vitest": "^3.0.0"
 	}
 }

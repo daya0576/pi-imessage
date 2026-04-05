@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>blue — memory</title>
+<style>
+* { margin: 0; padding: 0 }
+body { background: #111; color: #ccc; font: 13px/1.6 monospace; display: flex; height: 100vh; overflow: hidden }
+nav { width: 100px; flex-shrink: 0; padding: 40px 16px; border-right: 1px solid #1a1a1a }
+nav a { display: block; color: inherit; text-decoration: none; line-height: 2.4; opacity: .35 }
+nav a:hover, nav a.active { opacity: 1 }
+.content { flex: 1; padding: 40px; overflow-y: auto }
+.sidebar { width: 200px; flex-shrink: 0; padding: 40px 16px; border-left: 1px solid #1a1a1a; overflow-y: auto }
+.sidebar a { display: block; color: inherit; text-decoration: none; line-height: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .55 }
+.sidebar a:hover { opacity: 1 }
+.card { background: #1a1a1a; margin-bottom: 24px; scroll-margin-top: 40px }
+.card-header { padding: 8px 16px; opacity: .4; border-bottom: 1px solid #252525 }
+.card-body { padding: 12px 16px }
+pre { white-space: pre-wrap; word-break: break-word; opacity: .7; margin: 0 }
+.empty { opacity: .3; font-style: italic }
+</style></head><body>
+
+<nav>
+  <a href="/">Recent Chats</a>
+  <a href="/logs">Logs</a>
+  <a href="/memory" class="active">Memory</a>
+</nav>
+
+<div class="content" id="content">
+  <div class="card">
+    <div class="card-header">MEMORY.md (global)</div>
+    <div class="card-body">
+<% if (it.globalMemory) { %>
+      <pre><%= it.globalMemory %></pre>
+<% } else { %>
+      <p class="empty">(empty)</p>
+<% } %>
+    </div>
+  </div>
+
+<% it.chatMemories.forEach(function(chat) { %>
+  <div class="card" id="mem-<%= chat.name %>">
+    <div class="card-header"><%= chat.name %>/MEMORY.md</div>
+    <div class="card-body">
+      <pre><%= chat.content %></pre>
+    </div>
+  </div>
+<% }) %>
+</div>
+
+<div class="sidebar">
+  <a href="#" style="opacity:.4">global</a>
+<% it.chatMemories.forEach(function(chat) { %>
+  <a href="#mem-<%= chat.name %>"><%= chat.name %></a>
+<% }) %>
+</div>
+
+<script>
+async function refreshMemory() {
+  try {
+    const resp = await fetch('/memory/data');
+    const data = await resp.json();
+    const content = document.getElementById('content');
+    let html = '<div class="card"><div class="card-header">MEMORY.md (global)</div><div class="card-body">';
+    if (data.globalMemory) {
+      html += '<pre>' + escapeHtml(data.globalMemory) + '</pre>';
+    } else {
+      html += '<p class="empty">(empty)</p>';
+    }
+    html += '</div></div>';
+    for (const chat of data.chatMemories) {
+      html += '<div class="card" id="mem-' + chat.name + '"><div class="card-header">'
+        + escapeHtml(chat.name) + '/MEMORY.md</div><div class="card-body"><pre>'
+        + escapeHtml(chat.content) + '</pre></div></div>';
+    }
+    content.innerHTML = html;
+  } catch {}
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+const es = new EventSource('/events');
+es.addEventListener('update', refreshMemory);
+</script>
+</body></html>

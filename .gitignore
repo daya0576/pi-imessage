@@ -5,6 +5,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# Test coverage
+coverage/
+
 # Data directory (runtime, not committed)
 data/
 
