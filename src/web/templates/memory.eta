@@ -12,7 +12,7 @@ nav a:hover, nav a.active { opacity: 1 }
 .sidebar a:hover { opacity: 1 }
 .card { background: #1a1a1a; margin-bottom: 24px; scroll-margin-top: 40px }
 .card-header { padding: 8px 16px; opacity: .4; border-bottom: 1px solid #252525 }
-.card-body { padding: 12px 16px }
+.card-body { padding: 12px 16px; max-height: 400px; overflow-y: auto }
 pre { white-space: pre-wrap; word-break: break-word; opacity: .7; margin: 0 }
 .empty { opacity: .3; font-style: italic }
 </style></head><body>
