@@ -252,20 +252,22 @@ export async function createAgentManager(config: AgentManagerConfig) {
 	const sessionMap = new Map<string, ChatSession>();
 
 	const modelRegistry = ModelRegistry.create(AuthStorage.create());
-	const resourceLoader = new DefaultResourceLoader({
-		systemPrompt: buildSystemPrompt(workingDir),
-		noExtensions: true,
-		noSkills: true,
-		noPromptTemplates: true,
-		noThemes: true,
-	});
-	await resourceLoader.reload();
 
 	/** Create a new AgentSession for a chat, persisted to context.jsonl. */
 	async function createSession(chatGuid: string): Promise<ChatSession> {
 		const chatDir = join(workingDir, sanitizeChatGuid(chatGuid));
 		mkdirSync(chatDir, { recursive: true });
 		const sessionManager = SessionManager.open(join(chatDir, "context.jsonl"), chatDir);
+
+		// Per-chat resource loader so the system prompt can reference chatDir.
+		const resourceLoader = new DefaultResourceLoader({
+			systemPrompt: buildSystemPrompt(workingDir, chatDir),
+			noExtensions: true,
+			noSkills: true,
+			noPromptTemplates: true,
+			noThemes: true,
+		});
+		await resourceLoader.reload();
 
 		const { session } = await createAgentSession({
 			cwd: workingDir,
@@ -308,8 +310,6 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		const { session, chatGuid } = entry;
 
 		const promptText = formatPromptText(msg);
-		const chatDir = join(workingDir, sanitizeChatGuid(chatGuid));
-		session.agent.setSystemPrompt(buildSystemPrompt(workingDir, chatDir));
 
 		const images = msg.images.length > 0 ? msg.images : undefined;
 		const modelLabel = session.model ? `${session.model.provider}/${session.model.id}` : "default";
