@@ -402,7 +402,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		return summary;
 	}
 
-	/** Start a new session for a chat by deleting context and evicting the in-memory session. */
+	/** Start a new session for a chat: evict in-memory session, delete context, recreate fresh. */
 	async function newSession(chatGuid: string): Promise<void> {
 		sessionMap.delete(chatGuid);
 		const chatDir = join(workingDir, sanitizeChatGuid(chatGuid));
@@ -410,6 +410,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		if (existsSync(contextFile)) {
 			unlinkSync(contextFile);
 		}
+		await createSession(chatGuid);
 		console.log(`[agent] new session: ${chatGuid}`);
 	}
 
