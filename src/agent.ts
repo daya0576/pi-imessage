@@ -23,6 +23,7 @@ import {
 	SessionManager,
 	SettingsManager,
 	createAgentSession,
+	getAgentDir,
 } from "@mariozechner/pi-coding-agent";
 import type { AgentReply, IncomingMessage } from "./types.js";
 
@@ -261,6 +262,8 @@ export async function createAgentManager(config: AgentManagerConfig) {
 
 		// Per-chat resource loader so the system prompt can reference chatDir.
 		const resourceLoader = new DefaultResourceLoader({
+			cwd: workingDir,
+			agentDir: getAgentDir(),
 			systemPrompt: buildSystemPrompt(workingDir, chatDir),
 			noExtensions: true,
 			noSkills: true,
