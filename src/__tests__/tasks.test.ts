@@ -3,6 +3,7 @@ import type { DigestLogger } from "../logger.js";
 import { createSelfEchoFilter } from "../self-echo.js";
 import {
 	createCallAgentTask,
+	createCommandHandlerTask,
 	createDropSelfEchoTask,
 	createLogIncomingTask,
 	createLogOutgoingTask,
@@ -99,6 +100,32 @@ describe("createDropSelfEchoTask", () => {
 
 		const result = await task(makeChat(), msg, makeOutgoing());
 		expect(result.shouldContinue).toBe(true);
+	});
+});
+
+// ── start: commandHandler ─────────────────────────────────────────────────────
+
+describe("createCommandHandlerTask", () => {
+	it("lists commands for /help and skips the agent", async () => {
+		const agent = {
+			processMessage: vi.fn(async () => {}),
+			newSession: vi.fn(async () => {}),
+			getSessionStatus: vi.fn(async () => "↑0 ↓0"),
+			reload: vi.fn(async () => {}),
+			stop: vi.fn(async () => {}),
+			compact: vi.fn(async () => "compacted"),
+		};
+		const task = createCommandHandlerTask(agent);
+		const outgoing = makeOutgoing();
+		const dispatch = vi.fn();
+
+		await task(makeChat(), makeMessage({ text: "/help" }), outgoing, dispatch);
+
+		expect(dispatch).toHaveBeenCalledWith(
+			expect.objectContaining({ reply: expect.objectContaining({ text: expect.stringContaining("/status") }) })
+		);
+		expect(outgoing.shouldContinue).toBe(false);
+		expect(agent.processMessage).not.toHaveBeenCalled();
 	});
 });
 

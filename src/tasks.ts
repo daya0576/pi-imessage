@@ -12,7 +12,7 @@
  *   resizeImages     — resizes oversized images via macOS sips
  *
  * start:
- *   commandHandler   — intercepts slash commands (/new, /status, /reload) before the agent
+ *   commandHandler   — intercepts slash commands (/help, /new, /status, /reload) before the agent
  *   callAgent        — sends the message to the agent and yields replies as they arrive
  *
  * end:
@@ -48,6 +48,16 @@ function messageTypeLabel(chat: ChatContext): string {
 function formatIncomingTarget(chat: ChatContext, incoming: IncomingMessage): string {
 	return chat.messageType === "group" ? `${chat.groupName}|${incoming.sender}` : incoming.sender;
 }
+
+const HELP_TEXT = [
+	"Commands:",
+	"/help — list commands",
+	"/new — reset this chat session",
+	"/status — show session stats",
+	"/compact [instructions] — compress session context",
+	"/stop — stop the current agent run",
+	"/reload — reload models and clear sessions",
+].join("\n");
 
 // ── before tasks ──────────────────────────────────────────────────────────────
 
@@ -236,17 +246,27 @@ async function resizeImageIfNeeded(image: ImageContent): Promise<ImageContent> {
 // ── start tasks ───────────────────────────────────────────────────────────────
 
 /**
- * Intercept slash commands (e.g. "/new", "/status") before they reach the agent.
+ * Intercept slash commands (e.g. "/help", "/new", "/status") before they reach the agent.
  * Sets shouldContinue=false on the outgoing message to skip subsequent start tasks.
  *
  * Supported commands:
- *   /new    — reset the agent session for this chat (equivalent to /new in pi coding agent).
- *   /status — show session stats: tokens, cost, context usage, model, thinking level.
- *   /reload — reload models and clear all sessions.
+ *   /help            — list available commands.
+ *   /new             — reset the agent session for this chat (equivalent to /new in pi coding agent).
+ *   /status          — show session stats: tokens, cost, context usage, model, thinking level.
+ *   /compact [text]  — compact context with optional custom instructions.
+ *   /stop            — stop the current agent run (handled before the per-chat queue).
+ *   /reload          — reload models and clear all sessions.
  */
 export function createCommandHandlerTask(agent: AgentManager): StartTask {
 	return async (chat, incoming, outgoing, emit) => {
 		const text = incoming.text?.trim();
+
+		if (text === "/help") {
+			console.log(`[sid] /help command: ${chat.chatGuid} → listed commands`);
+			emit({ ...outgoing, reply: { type: "message", text: HELP_TEXT } });
+			outgoing.shouldContinue = false;
+			return;
+		}
 
 		if (text === "/new") {
 			await agent.newSession(chat.chatGuid);
