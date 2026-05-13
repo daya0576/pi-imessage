@@ -23,6 +23,7 @@ import {
 	SessionManager,
 	SettingsManager,
 	createAgentSession,
+	getAgentDir,
 } from "@mariozechner/pi-coding-agent";
 import type { AgentReply, IncomingMessage } from "./types.js";
 
@@ -250,6 +251,7 @@ function extractToolLabel(toolName: string, args: Record<string, unknown>): stri
 export async function createAgentManager(config: AgentManagerConfig) {
 	const { workingDir } = config;
 	const sessionMap = new Map<string, ChatSession>();
+	const agentDir = getAgentDir();
 
 	const modelRegistry = ModelRegistry.create(AuthStorage.create());
 
@@ -261,6 +263,8 @@ export async function createAgentManager(config: AgentManagerConfig) {
 
 		// Per-chat resource loader so the system prompt can reference chatDir.
 		const resourceLoader = new DefaultResourceLoader({
+			cwd: workingDir,
+			agentDir,
 			systemPrompt: buildSystemPrompt(workingDir, chatDir),
 			noExtensions: true,
 			noSkills: true,
@@ -271,6 +275,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 
 		const { session } = await createAgentSession({
 			cwd: workingDir,
+			agentDir,
 			modelRegistry,
 			sessionManager,
 			resourceLoader,
@@ -462,7 +467,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 	 */
 	async function reload(chatGuid: string): Promise<void> {
 		modelRegistry.refresh();
-		const settings = SettingsManager.create();
+		const settings = SettingsManager.create(workingDir, agentDir);
 		const provider = settings.getDefaultProvider();
 		const modelId = settings.getDefaultModel();
 		const newModel = provider && modelId ? modelRegistry.find(provider, modelId) : undefined;
