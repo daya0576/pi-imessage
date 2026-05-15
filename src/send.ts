@@ -117,13 +117,21 @@ export interface MessageSender {
 export function createMessageSender(): MessageSender {
 	return {
 		async sendMessage(chatGuid: string, text: string, richText?: RichTextSettings): Promise<void> {
+			const startTime = Date.now();
+			const mode = richText?.enabled ? "rich" : "plain";
+			console.log(`[send] start: ${chatGuid} mode=${mode} chars=${text.length}`);
 			if (richText?.enabled) {
 				await sendRichTextMessage(chatGuid, text, { markdown: richText.markdown });
+				console.log(
+					`[send] sent to ${chatGuid} mode=${mode} duration_ms=${Date.now() - startTime}: "${text.substring(0, 60)}"`
+				);
 				return;
 			}
 			const script = buildSendScript(chatGuid, text);
 			await execFileAsync("osascript", ["-e", script], { timeout: SCRIPT_TIMEOUT_MS });
-			console.log(`[send] sent to ${chatGuid}: "${text.substring(0, 60)}"`);
+			console.log(
+				`[send] sent to ${chatGuid} mode=${mode} duration_ms=${Date.now() - startTime}: "${text.substring(0, 60)}"`
+			);
 		},
 	};
 }

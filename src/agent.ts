@@ -301,7 +301,8 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		options?: { streamingBehavior?: "steer" | "followUp" }
 	): Promise<void> {
 		const entry = sessionMap.get(msg.chatGuid) ?? (await createSession(msg.chatGuid));
-		const run = () => runPrompt(entry, msg, handler, options);
+		const queuedAt = Date.now();
+		const run = () => runPrompt(entry, msg, handler, queuedAt, options);
 		entry.chain = entry.chain.then(run, run);
 		return entry.chain;
 	}
@@ -310,6 +311,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		entry: ChatSession,
 		msg: IncomingMessage,
 		handler: (reply: AgentReply) => Promise<void>,
+		queuedAt: number,
 		options?: { streamingBehavior?: "steer" | "followUp" }
 	): Promise<void> {
 		const { session, chatGuid } = entry;
@@ -318,22 +320,32 @@ export async function createAgentManager(config: AgentManagerConfig) {
 
 		const images = msg.images.length > 0 ? msg.images : undefined;
 		const modelLabel = session.model ? `${session.model.provider}/${session.model.id}` : "default";
-		console.log(`[agent] prompt start: ${chatGuid} model=${modelLabel} "${promptText.substring(0, 60)}"`);
+		const promptStart = Date.now();
+		const queueWaitMs = promptStart - queuedAt;
+		console.log(
+			`[agent] prompt start: ${chatGuid} model=${modelLabel} queue_ms=${queueWaitMs} ` +
+				`chars=${promptText.length} images=${msg.images.length} "${promptText.substring(0, 60)}"`
+		);
 
 		// Subscribe for this prompt's lifetime, routing events through handler
 		let replyChain = Promise.resolve();
+		let firstAssistantStartMs: number | null = null;
+		let assistantDurationMs: number | null = null;
 		const pendingTools = new Map<string, { toolName: string; startTime: number }>();
 
 		const unsubscribe = session.subscribe((event) => {
 			if (event.type === "message_start" && event.message.role === "assistant") {
-				console.log(`[agent] message start: ${chatGuid} role=assistant`);
+				firstAssistantStartMs ??= Date.now() - promptStart;
+				console.log(`[agent] message start: ${chatGuid} role=assistant first_token_ms=${Date.now() - promptStart}`);
 			} else if (event.type === "message_end" && event.message.role === "assistant") {
 				const assistantMsg = event.message as AssistantMessage;
 				const text = extractMessageText(event.message);
+				assistantDurationMs = firstAssistantStartMs === null ? null : Date.now() - promptStart - firstAssistantStartMs;
 				console.log(
 					`[agent] message end: ${chatGuid} stopReason=${assistantMsg.stopReason}` +
 						`${assistantMsg.errorMessage ? ` error="${assistantMsg.errorMessage}"` : ""}` +
-						` text="${(text ?? "(empty)").substring(0, 60)}"`
+						` first_token_ms=${firstAssistantStartMs ?? "n/a"} generation_ms=${assistantDurationMs ?? "n/a"}` +
+						` chars=${text?.length ?? 0} text="${(text ?? "(empty)").substring(0, 60)}"`
 				);
 				if (text) {
 					replyChain = replyChain.then(() => handler({ kind: "assistant", text }));
@@ -362,8 +374,14 @@ export async function createAgentManager(config: AgentManagerConfig) {
 
 		try {
 			await session.prompt(promptText, { images, streamingBehavior: options?.streamingBehavior });
+			const sessionEnd = Date.now();
 			await replyChain;
-			console.log(`[agent] prompt end: ${chatGuid}`);
+			const replyEnd = Date.now();
+			console.log(
+				`[agent] prompt end: ${chatGuid} total_ms=${replyEnd - promptStart} session_ms=${sessionEnd - promptStart} ` +
+					`handler_ms=${replyEnd - sessionEnd} first_token_ms=${firstAssistantStartMs ?? "n/a"} ` +
+					`generation_ms=${assistantDurationMs ?? "n/a"}`
+			);
 		} catch (error) {
 			// Defensively reset SDK state: some error paths leave isProcessing=true,
 			// which would make every subsequent prompt on this session fail with
