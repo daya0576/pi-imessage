@@ -9,7 +9,7 @@
  *   storeIncoming    — persists the incoming message to log.jsonl
  *   checkReplyEnabled — drops messages when reply is disabled by settings
  *   downloadImages   — reads image attachments from disk and populates incoming.images
- *   resizeImages     — resizes oversized images via macOS sips
+ *   resizeImages     — normalizes images for model-compatible input via macOS sips
  *
  * start:
  *   commandHandler   — intercepts slash commands (/help, /new, /status, /reload) before the agent
@@ -161,52 +161,48 @@ export function createDownloadImagesTask(): BeforeTask {
 }
 
 /**
- * Resize images whose longest edge exceeds MAX_EDGE_PX using macOS sips.
- * Converts to JPEG at 80% quality to keep size well under Anthropic's 5MB limit.
+ * Normalize image attachments before sending them to the model.
  *
- *   before: raw downloaded image (any size, any format)
- *   after:  JPEG ≤ MAX_EDGE_PX on longest edge, 80% quality
- *
- * Images that are already within the limit are left untouched.
- * Resize failures are logged and the original image is kept as-is.
+ * OpenAI only accepts JPEG, PNG, GIF, and WebP image payloads. iMessage often
+ * stores camera images as HEIC, and corrupted/iCloud-placeholder files can also
+ * be tagged as image/* by chat.db. Unsupported formats are converted to JPEG;
+ * invalid images are dropped so one bad attachment cannot fail the whole prompt.
  */
 const MAX_EDGE_PX = 1024;
+const MODEL_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 
 export function createResizeImagesTask(): BeforeTask {
 	return async (_chat, incoming, outgoing) => {
-		const resized: ImageContent[] = [];
+		const normalized: ImageContent[] = [];
 		for (const image of incoming.images) {
 			try {
-				resized.push(await resizeImageIfNeeded(image));
+				normalized.push(await normalizeImageForModel(image));
 			} catch (error) {
-				console.error("[sid] failed to resize image, keeping original:", error);
-				resized.push(image);
+				console.warn(`[sid] skipping invalid or unsupported image (${image.mimeType}):`, error);
 			}
 		}
-		incoming.images = resized;
+		incoming.images = normalized;
 		return outgoing;
 	};
 }
 
 /**
- * Resize a single image if its longest edge exceeds MAX_EDGE_PX.
- * Uses macOS sips to resample and convert to JPEG at 80% quality.
- * Returns the original image unchanged if already within limits.
+ * Convert unsupported formats to JPEG and resize oversized images.
+ * Returns supported images unchanged when already within limits.
  */
 const execFileAsync = promisify(execFile);
 
-async function resizeImageIfNeeded(image: ImageContent): Promise<ImageContent> {
+async function normalizeImageForModel(image: ImageContent): Promise<ImageContent> {
 	const originalBytes = Buffer.from(image.data, "base64");
 	const originalSizeKB = (originalBytes.length / 1024).toFixed(0);
 
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-imessage-resize-"));
+	const tempDir = await mkdtemp(join(tmpdir(), "pi-imessage-image-"));
 	const inputPath = join(tempDir, "input");
 	const outputPath = join(tempDir, "output.jpg");
 
 	try {
 		await writeFile(inputPath, originalBytes);
 
-		// Get dimensions via sips
 		const { stdout } = await execFileAsync("sips", ["-g", "pixelWidth", "-g", "pixelHeight", inputPath]);
 		const widthMatch = stdout.match(/pixelWidth:\s*(\d+)/);
 		const heightMatch = stdout.match(/pixelHeight:\s*(\d+)/);
@@ -214,30 +210,42 @@ async function resizeImageIfNeeded(image: ImageContent): Promise<ImageContent> {
 		const height = heightMatch ? Number.parseInt(heightMatch[1], 10) : 0;
 		const longestEdge = Math.max(width, height);
 
-		if (longestEdge <= MAX_EDGE_PX) {
+		if (longestEdge <= 0) {
+			throw new Error("sips could not read image dimensions");
+		}
+
+		const needsConversion = !MODEL_IMAGE_MIME_TYPES.has(image.mimeType);
+		const needsResize = longestEdge > MAX_EDGE_PX;
+
+		if (!needsConversion && !needsResize) {
 			return image;
 		}
 
-		// Resize with sips — resampleHeightWidthMax scales the longest edge
-		await execFileAsync("sips", [
-			"--resampleHeightWidthMax",
-			String(MAX_EDGE_PX),
-			"-s",
-			"format",
-			"jpeg",
-			"-s",
-			"formatOptions",
-			"80",
-			inputPath,
-			"--out",
-			outputPath,
-		]);
+		const sipsArgs = needsResize
+			? [
+					"--resampleHeightWidthMax",
+					String(MAX_EDGE_PX),
+					"-s",
+					"format",
+					"jpeg",
+					"-s",
+					"formatOptions",
+					"80",
+					inputPath,
+					"--out",
+					outputPath,
+				]
+			: ["-s", "format", "jpeg", "-s", "formatOptions", "80", inputPath, "--out", outputPath];
+		await execFileAsync("sips", sipsArgs);
 
-		const resizedBytes = await readFile(outputPath);
-		const resizedSizeKB = (resizedBytes.length / 1024).toFixed(0);
-		console.log(`[sid] resized image: ${width}x${height} ${originalSizeKB}KB → ${MAX_EDGE_PX}px ${resizedSizeKB}KB`);
+		const normalizedBytes = await readFile(outputPath);
+		const normalizedSizeKB = (normalizedBytes.length / 1024).toFixed(0);
+		const reason = [needsConversion ? `converted ${image.mimeType}→image/jpeg` : null, needsResize ? "resized" : null]
+			.filter(Boolean)
+			.join(", ");
+		console.log(`[sid] normalized image: ${reason} ${width}x${height} ${originalSizeKB}KB → ${normalizedSizeKB}KB`);
 
-		return { type: "image", mimeType: "image/jpeg", data: resizedBytes.toString("base64") };
+		return { type: "image", mimeType: "image/jpeg", data: normalizedBytes.toString("base64") };
 	} finally {
 		await rm(tempDir, { recursive: true, force: true });
 	}
