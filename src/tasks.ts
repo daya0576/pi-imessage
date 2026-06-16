@@ -6,6 +6,7 @@
  * before:
  *   logIncoming      — logs the received message
  *   dropSelfEcho     — drops messages that are echoes of the bot's own replies
+ *   archiveImages    — copies image attachments into chat/images/YYYY-MM-DD
  *   storeIncoming    — persists the incoming message to log.jsonl
  *   checkReplyEnabled — drops messages when reply is disabled by settings
  *   downloadImages   — reads image attachments from disk and populates incoming.images
@@ -77,6 +78,21 @@ export function createLogIncomingTask(digestLogger: DigestLogger): BeforeTask {
 		digestLogger.log(
 			`[sid] <- [${label}] ${target}: ${(incoming.text ?? "(attachment)").substring(0, 80)}${attachmentNote}`
 		);
+		return outgoing;
+	};
+}
+
+/** Copy image attachments into the chat workspace and update their paths before logging/reading. */
+export function createArchiveImagesTask(store: ChatStore): BeforeTask {
+	return async (chat, incoming, outgoing) => {
+		try {
+			const archived = await store.archiveImages(chat.chatGuid, incoming);
+			if (archived.length > 0) {
+				console.log(`[sid] archived ${archived.length} image(s) for ${chat.chatGuid}`);
+			}
+		} catch (error) {
+			console.error(`[sid] failed to archive image attachments for ${chat.chatGuid}:`, error);
+		}
 		return outgoing;
 	};
 }
