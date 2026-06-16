@@ -19,6 +19,7 @@ import type { MessageSender } from "./send.js";
 import type { Settings } from "./settings.js";
 import type { ChatStore } from "./store.js";
 import {
+	createArchiveImagesTask,
 	createCallAgentTask,
 	createCheckReplyEnabledTask,
 	createCommandHandlerTask,
@@ -58,6 +59,7 @@ export function createIMessageBot(config: IMessageBotConfig) {
 	// before
 	pipeline.before(createLogIncomingTask(digestLogger));
 	pipeline.before(createDropSelfEchoTask(echoFilter));
+	pipeline.before(createArchiveImagesTask(store));
 	pipeline.before(createStoreIncomingTask(store));
 	pipeline.before(createCheckReplyEnabledTask(getSettings));
 	pipeline.before(createDownloadImagesTask());
