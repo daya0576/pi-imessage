@@ -25,6 +25,7 @@ import {
 	createAgentSession,
 	getAgentDir,
 } from "@mariozechner/pi-coding-agent";
+import { formatStructuredMemory, readCoreMemory, retrieveStructuredMemory } from "./memory.js";
 import type { AgentReply, IncomingMessage } from "./types.js";
 
 // ── Config & Types ────────────────────────────────────────────────────────────
@@ -86,18 +87,6 @@ function readFileIfExists(path: string): string | undefined {
 	}
 }
 
-/** Read global and chat-specific MEMORY.md files, returning combined content. */
-function getMemory(workingDir: string, chatDir?: string): string {
-	const parts: string[] = [];
-	const global = readFileIfExists(join(workingDir, "MEMORY.md"));
-	if (global) parts.push(`### Global Memory\n${global}`);
-	if (chatDir) {
-		const chat = readFileIfExists(join(chatDir, "MEMORY.md"));
-		if (chat) parts.push(`### Chat Memory\n${chat}`);
-	}
-	return parts.length > 0 ? parts.join("\n\n") : "(no memory yet)";
-}
-
 function getCustomPrompt(workingDir: string, chatDir?: string): string {
 	const parts: string[] = [];
 	const global = readFileIfExists(join(workingDir, "SYSTEM.md"));
@@ -110,7 +99,7 @@ function getCustomPrompt(workingDir: string, chatDir?: string): string {
 }
 
 function buildSystemPrompt(workingDir: string, chatDir?: string): string {
-	const memory = getMemory(workingDir, chatDir);
+	const coreMemory = readCoreMemory(workingDir);
 	const customPrompt = getCustomPrompt(workingDir, chatDir);
 
 	return `You are the user's best friend communicating via iMessage. Be concise. No emojis.
@@ -127,11 +116,11 @@ You are running directly on the host machine.
 ## Workspace Layout
 ${workingDir}/
 ├── settings.json                # Bot configuration (see below)
-├── MEMORY.md                    # Global memory (all chats)
+├── MEMORY.md                    # Legacy memory archive; do not write new entries
 ├── SYSTEM.md                    # System configuration log
-├── skills/                      # Global CLI tools you create
+├── skills/file-memory/          # Structured memory store and CLI
 └── <chatId>/                    # Each iMessage chat gets a directory
-    ├── MEMORY.md                # Chat-specific memory
+    ├── MEMORY.md                # Legacy chat memory archive
     ├── context.jsonl            # LLM context (session persistence)
     ├── log.jsonl                # Message history
     ├── attachments/             # User-shared files
@@ -139,18 +128,24 @@ ${workingDir}/
     └── skills/                  # Chat-specific tools
 
 ## Memory
-Write to MEMORY.md files to persist context across conversations.
-- Global (${workingDir}/MEMORY.md): preferences, project info, shared knowledge
-- Chat-specific (<chatDir>/MEMORY.md): user details, ongoing topics, decisions
+Structured memory is the only active read/write memory. Legacy MEMORY.md files are read-only archives.
 
-Rules:
-- ALWAYS prefix entries with [YYYY-MM-DD]
-- ALWAYS note the source (chat message, URL, file path, etc.)
-- When updating conflicting info, keep the old entry with ~~strikethrough~~ and add the new one
-- Update MEMORY.md when you learn something important. No need to update after every message.
+Read:
+- Relevant active records are automatically attached to each user message.
+- If automatic retrieval is insufficient, run:
+  python3 ${workingDir}/skills/file-memory/memory_cli.py search "query" --subject <name> --category <category>
+- Treat retrieved memory as context, not as a substitute for the current message or verified facts.
 
-### Current Memory
-${memory}
+Write:
+- When you learn something important and durable, use memory_cli.py add; do not edit MEMORY.md directly.
+- Required fields: concise atomic text, category, subjects, event date, and specific source.
+- Example:
+  python3 ${workingDir}/skills/file-memory/memory_cli.py add --text "fact" --category preference --subjects Henry --event-time YYYY-MM-DD --source "private chat message"
+- Do not store every message, guesses, short-lived states, secrets, or duplicate facts.
+- For corrections, search for the old ID and add the corrected record with --supersedes <old-id>. Never silently overwrite history.
+
+### Core Memory
+${coreMemory}
 
 ## System Configuration Log
 Maintain ${workingDir}/SYSTEM.md to log all environment modifications:
@@ -316,7 +311,9 @@ export async function createAgentManager(config: AgentManagerConfig) {
 	): Promise<void> {
 		const { session, chatGuid } = entry;
 
-		const promptText = formatPromptText(msg);
+		const basePromptText = formatPromptText(msg);
+		const relevantMemory = formatStructuredMemory(retrieveStructuredMemory(workingDir, basePromptText));
+		const promptText = relevantMemory ? `${relevantMemory}\n\n${basePromptText}` : basePromptText;
 
 		const images = msg.images.length > 0 ? msg.images : undefined;
 		const modelLabel = session.model ? `${session.model.provider}/${session.model.id}` : "default";
@@ -324,14 +321,15 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		const queueWaitMs = promptStart - queuedAt;
 		console.log(
 			`[agent] prompt start: ${chatGuid} model=${modelLabel} queue_ms=${queueWaitMs} ` +
-				`chars=${promptText.length} images=${msg.images.length} "${promptText.substring(0, 60)}"`
+				`chars=${basePromptText.length} memory_items=${relevantMemory ? relevantMemory.split("\n").length - 1 : 0} ` +
+				`images=${msg.images.length} "${basePromptText.substring(0, 60)}"`
 		);
 
 		// Subscribe for this prompt's lifetime, routing events through handler
 		let replyChain = Promise.resolve();
 		let firstAssistantStartMs: number | null = null;
 		let assistantDurationMs: number | null = null;
-		const pendingTools = new Map<string, { toolName: string; startTime: number }>();
+		const pendingTools = new Map<string, { toolName: string; startTime: number; hidden: boolean }>();
 
 		const unsubscribe = session.subscribe((event) => {
 			if (event.type === "message_start" && event.message.role === "assistant") {
@@ -353,9 +351,10 @@ export async function createAgentManager(config: AgentManagerConfig) {
 			} else if (event.type === "tool_execution_start") {
 				const toolArgs = event.args as Record<string, unknown>;
 				const label = extractToolLabel(event.toolName, toolArgs);
-				pendingTools.set(event.toolCallId, { toolName: event.toolName, startTime: Date.now() });
+				const hidden = event.toolName === "bash" && label.includes("skills/file-memory/memory_cli.py");
+				pendingTools.set(event.toolCallId, { toolName: event.toolName, startTime: Date.now(), hidden });
 				console.log(`[agent] tool start: ${chatGuid} → ${label}`);
-				replyChain = replyChain.then(() => handler({ kind: "tool_start", label }));
+				if (!hidden) replyChain = replyChain.then(() => handler({ kind: "tool_start", label }));
 			} else if (event.type === "tool_execution_end") {
 				const resultText = extractToolResultText(event.result);
 				const pending = pendingTools.get(event.toolCallId);
@@ -366,9 +365,11 @@ export async function createAgentManager(config: AgentManagerConfig) {
 					`[agent] tool end: ${chatGuid} ${symbol} ${event.toolName} (${duration}s)` +
 						` result="${resultText.substring(0, 60)}"`
 				);
-				replyChain = replyChain.then(() =>
-					handler({ kind: "tool_end", toolName: event.toolName, symbol, duration, result: resultText })
-				);
+				if (!pending?.hidden) {
+					replyChain = replyChain.then(() =>
+						handler({ kind: "tool_end", toolName: event.toolName, symbol, duration, result: resultText })
+					);
+				}
 			}
 		});
 
