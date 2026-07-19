@@ -1,54 +1,91 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { appendFile, mkdir, rmdir } from "node:fs/promises";
+import { dirname, join, relative, sep } from "node:path";
+
+export const MEMORY_KINDS = ["fact", "event", "preference", "procedure"] as const;
+export type MemoryKind = (typeof MEMORY_KINDS)[number];
+
+export interface MemorySource {
+	type: string;
+	label: string;
+	path?: string;
+	line_start?: number;
+	line_end?: number;
+	block_hash?: string;
+}
 
 export interface StructuredMemoryItem {
 	id: string;
 	text: string;
-	category: string;
+	namespace: string;
+	kind: MemoryKind;
 	subjects: string[];
-	event_time: string;
+	event_time: string | null;
+	sources: MemorySource[];
 	importance: number;
 	confidence: number;
 	status: "active" | "superseded";
+	created_at: string;
 	supersedes_id?: string;
 }
 
-const CATEGORIES = ["person", "preference", "event", "health", "work_project", "procedure"] as const;
-const SUBJECT_ALIASES: Record<string, string[]> = {
-	Henry: ["henry", "大牙", "朱昌健"],
-	CC: ["cc"],
-	派派: ["派派", "小乖", "帅萌", "小帅萌"],
-};
-const CATEGORY_TERMS: Record<string, string[]> = {
-	health: [
-		"生病",
-		"发烧",
-		"退烧",
-		"体温",
-		"咳嗽",
-		"鼻涕",
-		"感染",
-		"病毒",
-		"肺炎",
-		"住院",
-		"出院",
-		"医生",
-		"药",
-		"检查",
-		"报告",
-		"血常规",
-		"crp",
-		"saa",
-	],
-	work_project: ["工作", "公司", "项目", "optiver", "github", "pi-imessage", "homelab", "sre"],
-	preference: ["喜欢", "不喜欢", "偏好", "希望"],
-	procedure: ["应该怎么", "规则", "原则", "必须", "以后", "排查", "流程"],
-	person: ["是谁", "姓名", "出生", "现居", "家庭", "妻子", "儿子"],
-	event: ["发生", "当时", "最近", "上次", "什么时候"],
-};
+export interface SaveMemoryInput {
+	text: string;
+	namespace: string;
+	kind: MemoryKind;
+	subjects: string[];
+	event_time: string | null;
+	source: string;
+	importance: number;
+	confidence: number;
+	supersedes_id?: string;
+}
+
+const NAMESPACE_PATTERN = /^[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)+$/;
 
 function memoryRoot(workingDir: string): string {
 	return join(workingDir, "skills", "file-memory");
+}
+
+function namespaceRoot(workingDir: string): string {
+	return join(memoryRoot(workingDir), "namespaces");
+}
+
+function namespacePath(workingDir: string, namespace: string): string {
+	if (!NAMESPACE_PATTERN.test(namespace)) throw new Error(`Invalid memory namespace: ${namespace}`);
+	return `${join(namespaceRoot(workingDir), ...namespace.split("/"))}.jsonl`;
+}
+
+function findJsonlFiles(root: string): string[] {
+	if (!existsSync(root)) return [];
+	const result: string[] = [];
+	for (const entry of readdirSync(root, { withFileTypes: true })) {
+		const path = join(root, entry.name);
+		if (entry.isDirectory()) result.push(...findJsonlFiles(path));
+		else if (entry.isFile() && entry.name.endsWith(".jsonl")) result.push(path);
+	}
+	return result.sort();
+}
+
+function namespaceFromPath(workingDir: string, path: string): string {
+	return relative(namespaceRoot(workingDir), path)
+		.replaceAll(sep, "/")
+		.replace(/\.jsonl$/, "");
+}
+
+function parseJsonl(path: string): StructuredMemoryItem[] {
+	if (!existsSync(path)) return [];
+	const items: StructuredMemoryItem[] = [];
+	for (const [index, raw] of readFileSync(path, "utf8").split("\n").entries()) {
+		if (!raw.trim()) continue;
+		try {
+			items.push(JSON.parse(raw) as StructuredMemoryItem);
+		} catch (error) {
+			throw new Error(`Invalid memory JSONL ${path}:${index + 1}: ${error}`);
+		}
+	}
+	return items;
 }
 
 export function readCoreMemory(workingDir: string): string {
@@ -62,111 +99,149 @@ export function readCoreMemory(workingDir: string): string {
 	}
 }
 
-export function loadStructuredMemories(workingDir: string): StructuredMemoryItem[] {
-	const items: StructuredMemoryItem[] = [];
-	for (const category of CATEGORIES) {
-		const path = join(memoryRoot(workingDir), "categories", `${category}.jsonl`);
-		if (!existsSync(path)) continue;
-		try {
-			for (const [index, raw] of readFileSync(path, "utf8").split("\n").entries()) {
-				if (!raw.trim()) continue;
-				try {
-					items.push(JSON.parse(raw) as StructuredMemoryItem);
-				} catch (error) {
-					console.warn(`[memory] invalid JSONL ${path}:${index + 1}: ${error}`);
-				}
-			}
-		} catch (error) {
-			console.warn(`[memory] failed to read ${path}: ${error}`);
-		}
-	}
-	return items;
+export function listMemoryNamespaces(workingDir: string): Array<{ namespace: string; total: number; active: number }> {
+	return findJsonlFiles(namespaceRoot(workingDir)).map((path) => {
+		const items = parseJsonl(path);
+		return {
+			namespace: namespaceFromPath(workingDir, path),
+			total: items.length,
+			active: activeMemoryItems(items).length,
+		};
+	});
 }
 
-function activeMemories(items: StructuredMemoryItem[]): StructuredMemoryItem[] {
+export function loadAllMemoryItems(workingDir: string): StructuredMemoryItem[] {
+	return findJsonlFiles(namespaceRoot(workingDir)).flatMap(parseJsonl);
+}
+
+export function activeMemoryItems(items: StructuredMemoryItem[]): StructuredMemoryItem[] {
 	const supersededIds = new Set(
 		items.filter((item) => item.status === "active" && item.supersedes_id).map((item) => item.supersedes_id as string)
 	);
 	return items.filter((item) => item.status === "active" && !supersededIds.has(item.id));
 }
 
-function matchedSubjects(query: string): string[] {
-	const low = query.toLowerCase();
-	const result: string[] = [];
-	for (const [subject, aliases] of Object.entries(SUBJECT_ALIASES)) {
-		if (aliases.some((alias) => low.includes(alias))) result.push(subject);
-	}
-	if (result.length === 0 && /(^|[\s])我(的|们|感觉|觉得|想|不|要|是|有|在|会|能|就|也|还|最近|今天)/.test(query)) {
-		if (query.includes("from +8617612150403")) result.push("Henry");
-		if (query.includes("from +8618930176019")) result.push("CC");
-	}
-	return result;
+export function loadMemoryNamespaces(workingDir: string, namespaces: string[]): StructuredMemoryItem[] {
+	const selected = new Set(namespaces);
+	for (const namespace of selected) namespacePath(workingDir, namespace);
+	return activeMemoryItems(loadAllMemoryItems(workingDir)).filter((item) => selected.has(item.namespace));
 }
 
-function matchedCategories(query: string): string[] {
-	const low = query.toLowerCase();
-	return Object.entries(CATEGORY_TERMS)
-		.filter(([, terms]) => terms.some((term) => low.includes(term)))
-		.map(([category]) => category);
+export function searchMemory(
+	workingDir: string,
+	query: string,
+	options: { namespaces?: string[]; limit?: number } = {}
+): StructuredMemoryItem[] {
+	const terms = query
+		.toLowerCase()
+		.split(/[\s,，、]+/)
+		.filter(Boolean);
+	const selected = options.namespaces ? new Set(options.namespaces) : undefined;
+	const matches = activeMemoryItems(loadAllMemoryItems(workingDir))
+		.filter((item) => !selected || selected.has(item.namespace))
+		.map((item) => {
+			const haystack = [item.text, item.namespace, item.kind, ...item.subjects].join(" ").toLowerCase();
+			const lexical = terms.filter((term) => haystack.includes(term)).length;
+			return { item, lexical };
+		})
+		.filter(({ lexical }) => terms.length === 0 || lexical > 0)
+		.sort(
+			(a, b) =>
+				b.lexical - a.lexical ||
+				b.item.importance - a.item.importance ||
+				(b.item.event_time ?? "").localeCompare(a.item.event_time ?? "")
+		);
+	return matches.slice(0, options.limit ?? 10).map(({ item }) => item);
 }
 
-function queryTerms(query: string): string[] {
-	const low = query.toLowerCase();
-	const knownTerms = [
-		...new Set(
-			Object.values(CATEGORY_TERMS)
-				.flat()
-				.filter((term) => low.includes(term))
-		),
-	];
-	const latinTerms = low.match(/[a-z0-9][a-z0-9_.-]{1,}/g) ?? [];
-	const chineseStopBigrams = new Set(["我们", "他们", "什么", "怎么", "现在", "最近", "时候", "上次", "今天"]);
-	const chineseBigrams: string[] = [];
-	for (const sequence of low.match(/[\p{Script=Han}]{3,}/gu) ?? []) {
-		for (let index = 0; index < sequence.length - 1; index += 1) {
-			const bigram = sequence.slice(index, index + 2);
-			if (!chineseStopBigrams.has(bigram)) chineseBigrams.push(bigram);
+function validateSaveInput(input: SaveMemoryInput): void {
+	if (!input.text.trim()) throw new Error("Memory text must not be empty");
+	if (!NAMESPACE_PATTERN.test(input.namespace)) throw new Error(`Invalid memory namespace: ${input.namespace}`);
+	if (!MEMORY_KINDS.includes(input.kind)) throw new Error(`Invalid memory kind: ${input.kind}`);
+	if (input.event_time !== null && !/^\d{4}-\d{2}-\d{2}$/.test(input.event_time)) {
+		throw new Error("event_time must be YYYY-MM-DD or null");
+	}
+	if (!input.source.trim()) throw new Error("Memory source must not be empty");
+	if (input.importance < 0 || input.importance > 1 || input.confidence < 0 || input.confidence > 1) {
+		throw new Error("importance and confidence must be between 0 and 1");
+	}
+}
+
+function stableKey(input: Omit<SaveMemoryInput, "source" | "importance" | "confidence">): string {
+	return JSON.stringify({
+		text: input.text.trim().replace(/\s+/g, " "),
+		namespace: input.namespace,
+		kind: input.kind,
+		subjects: [...new Set(input.subjects.map((subject) => subject.trim()).filter(Boolean))].sort(),
+		event_time: input.event_time,
+		supersedes_id: input.supersedes_id,
+	});
+}
+
+async function withWriteLock<T>(workingDir: string, operation: () => Promise<T>): Promise<T> {
+	const lockPath = join(memoryRoot(workingDir), ".write-lock");
+	const deadline = Date.now() + 5_000;
+	while (true) {
+		try {
+			await mkdir(lockPath);
+			break;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			if (Date.now() >= deadline) throw new Error("Timed out waiting for memory write lock");
+			await new Promise((resolve) => setTimeout(resolve, 50));
 		}
 	}
-	return [...new Set([...knownTerms, ...latinTerms, ...chineseBigrams])];
-}
-
-export function retrieveStructuredMemory(workingDir: string, query: string, limit = 8): StructuredMemoryItem[] {
-	const content = query.replace(/^\[(?:DM|SMS|Group)[^\]]*\]\s*/i, "").replace(/^\[replying to:[^\]]*\]\s*/i, "");
-	const subjects = matchedSubjects(content).length > 0 ? matchedSubjects(content) : matchedSubjects(query);
-	const categories = matchedCategories(content);
-	const terms = queryTerms(content);
-	if (subjects.length === 0 && categories.length === 0 && terms.length === 0) return [];
-
-	const now = Date.now();
-	const scored: Array<{ item: StructuredMemoryItem; score: number }> = [];
-	const seenText = new Set<string>();
-	for (const item of activeMemories(loadStructuredMemories(workingDir))) {
-		if (subjects.length > 0 && !subjects.some((subject) => item.subjects.includes(subject))) continue;
-		const normalizedText = item.text.replace(/\s+/g, "").toLowerCase();
-		if (seenText.has(normalizedText)) continue;
-		const categoryMatch = categories.includes(item.category) ? 1 : 0;
-		const lexical = terms.filter((term) => normalizedText.includes(term)).length;
-		const subjectMatch = subjects.filter((subject) => item.subjects.includes(subject)).length;
-		if (categoryMatch === 0 && lexical === 0 && subjectMatch === 0) continue;
-		const timestamp = Date.parse(`${item.event_time}T00:00:00Z`);
-		const ageDays = Number.isFinite(timestamp) ? Math.max(0, (now - timestamp) / 86_400_000) : 365;
-		const recency = 1 / (1 + ageDays / 30);
-		const score = lexical * 3 + subjectMatch * 2 + categoryMatch * 2 + item.importance + item.confidence + recency;
-		scored.push({ item, score });
-		seenText.add(normalizedText);
+	try {
+		return await operation();
+	} finally {
+		await rmdir(lockPath).catch(() => {});
 	}
-	return scored
-		.sort((a, b) => b.score - a.score || b.item.event_time.localeCompare(a.item.event_time))
-		.slice(0, limit)
-		.map(({ item }) => item);
 }
 
-export function formatStructuredMemory(items: StructuredMemoryItem[]): string {
-	if (items.length === 0) return "";
-	const lines = items.map(
-		(item) =>
-			`- ${item.event_time} | ${item.category} | ${item.subjects.join(",") || "unspecified"} | ${item.id} | ${item.text}`
-	);
-	return `Relevant structured memory (retrieved automatically; active records only):\n${lines.join("\n")}`;
+export async function saveMemory(
+	workingDir: string,
+	input: SaveMemoryInput
+): Promise<{ added: boolean; item: StructuredMemoryItem }> {
+	validateSaveInput(input);
+	return withWriteLock(workingDir, async () => {
+		const existing = loadAllMemoryItems(workingDir);
+		const ids = new Set(existing.map((item) => item.id));
+		if (input.supersedes_id && !ids.has(input.supersedes_id)) {
+			throw new Error(`Unknown supersedes_id: ${input.supersedes_id}`);
+		}
+		const normalized = stableKey(input);
+		const id = `mem_${createHash("sha256").update(normalized).digest("hex").slice(0, 16)}`;
+		const duplicate = existing.find(
+			(item) =>
+				item.id === id ||
+				stableKey({
+					text: item.text,
+					namespace: item.namespace,
+					kind: item.kind,
+					subjects: item.subjects,
+					event_time: item.event_time,
+					supersedes_id: item.supersedes_id,
+				}) === normalized
+		);
+		if (duplicate) return { added: false, item: duplicate };
+
+		const item: StructuredMemoryItem = {
+			id,
+			text: input.text.trim(),
+			namespace: input.namespace,
+			kind: input.kind,
+			subjects: [...new Set(input.subjects.map((subject) => subject.trim()).filter(Boolean))].sort(),
+			event_time: input.event_time,
+			sources: [{ type: "chat", label: input.source.trim() }],
+			importance: input.importance,
+			confidence: input.confidence,
+			status: "active",
+			created_at: new Date().toISOString(),
+			...(input.supersedes_id ? { supersedes_id: input.supersedes_id } : {}),
+		};
+		const path = namespacePath(workingDir, input.namespace);
+		await mkdir(dirname(path), { recursive: true });
+		await appendFile(path, `${JSON.stringify(item)}\n`, "utf8");
+		return { added: true, item };
+	});
 }
