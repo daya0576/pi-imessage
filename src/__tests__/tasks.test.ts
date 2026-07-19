@@ -48,6 +48,7 @@ function makeDigestLogger(): DigestLogger {
 function makeMockSender() {
 	return {
 		sendMessage: vi.fn().mockResolvedValue(undefined),
+		sendAttachment: vi.fn().mockResolvedValue(undefined),
 	};
 }
 

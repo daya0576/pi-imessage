@@ -45,8 +45,9 @@ The agent is aware of these endpoints via its system prompt and can use them as 
 
 | Endpoint | Description | Example |
 |---|---|---|
-| `POST /send` | Send a raw iMessage to a chat (bypasses the agent) | `curl -X POST localhost:7750/send -d '{"chatGuid": "iMessage;-;+11234567890", "text": "hello"}'`<br>→ `{"ok": true}` |
+| `POST /send` | Send text and/or a local file attachment to a chat (bypasses the agent) | `curl -X POST localhost:7750/send -d '{"chatGuid": "iMessage;-;+11234567890", "text": "hello"}'`<br>→ `{"ok": true}` |
 | `POST /prompt` | Feed a prompt to the agent asynchronously; replies are sent to the chat when ready | `curl -X POST localhost:7750/prompt -d '{"chatGuid": "iMessage;-;+11234567890", "prompt": "say hello"}'`<br>→ `{"ok": true}` |
+| `GET /health/model` | Make a live request to the configured default AI model; returns HTTP 200 when healthy or 503 on failure | `curl localhost:7750/health/model`<br>→ `{"ok":true,"model":"openai/gpt-5","latencyMs":842,"checkedAt":"..."}` |
 
 ## Commands
 
@@ -90,6 +91,8 @@ All fields are optional.
 | `WEB_HOST` | no | `localhost` | Web UI host |
 | `WEB_PORT` | no | `7750` | Web UI port |
 | `WORKING_DIR` | no | `~/.pi/imessage` | Workspace directory |
+| `AGENT_IDLE_TIMEOUT_MS` | no | `120000` | Abort only after this much continuous agent inactivity; model and tool events reset the timer |
+| `AGENT_MAX_PROMPT_DURATION_MS` | no | `1800000` | Absolute ceiling for one prompt, independent of activity |
 
 # Development
 

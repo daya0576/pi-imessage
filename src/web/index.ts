@@ -4,6 +4,7 @@ import { existsSync, readFileSync, readdirSync, watch } from "node:fs";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
 import { join } from "node:path";
 import type { AgentManager } from "../agent.js";
+import type { ModelHealthChecker } from "../model-health.js";
 import type { SelfEchoFilter } from "../self-echo.js";
 import type { MessageSender } from "../send.js";
 import type { Settings } from "../settings.js";
@@ -20,6 +21,7 @@ export interface WebServerConfig {
 	sender: MessageSender;
 	echoFilter: SelfEchoFilter;
 	agent: AgentManager;
+	checkModelHealth: ModelHealthChecker;
 }
 
 export interface WebServer {
@@ -74,7 +76,7 @@ function readMemories(workingDir: string): { globalMemory: string; chatMemories:
 }
 
 export function createWebServer(config: WebServerConfig): WebServer {
-	const { workingDir, host, port, getSettings, setSettings, sender, echoFilter, agent } = config;
+	const { workingDir, host, port, getSettings, setSettings, sender, echoFilter, agent, checkModelHealth } = config;
 	const sseClients = new Set<ServerResponse>();
 	let fsWatcher: ReturnType<typeof watch> | null = null;
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -169,19 +171,34 @@ export function createWebServer(config: WebServerConfig): WebServer {
 			return;
 		}
 
-		// POST /send — send a message directly to a chat
+		// GET /health/model — make a live request to the configured default AI model
+		if (request.method === "GET" && url.pathname === "/health/model") {
+			const result = await checkModelHealth();
+			jsonResponse(response, result.ok ? 200 : 503, result);
+			return;
+		}
+
+		// POST /send — send a message and/or local file attachment directly to a chat
 		if (request.method === "POST" && url.pathname === "/send") {
 			try {
 				const body = await parseJsonBody(request);
 				const chatGuid = body.chatGuid as string;
-				const text = body.text as string;
-				if (!chatGuid || !text) {
-					jsonResponse(response, 400, { error: "chatGuid and text required" });
+				const text = body.text as string | undefined;
+				const filePath = (body.filePath ?? body.attachmentPath) as string | undefined;
+				if (!chatGuid || (!text && !filePath)) {
+					jsonResponse(response, 400, { error: "chatGuid and text or filePath required" });
 					return;
 				}
-				echoFilter.remember(chatGuid, text);
-				await sender.sendMessage(chatGuid, text);
-				console.log(`[web] /send: ${chatGuid} "${text.substring(0, 60)}"`);
+				if (text) {
+					echoFilter.remember(chatGuid, text);
+					await sender.sendMessage(chatGuid, text);
+				}
+				if (filePath) {
+					await sender.sendAttachment(chatGuid, filePath);
+				}
+				console.log(
+					`[web] /send: ${chatGuid} text=${text ? `"${text.substring(0, 60)}"` : "none"} file=${filePath ?? "none"}`
+				);
 				jsonResponse(response, 200, { ok: true });
 			} catch (error) {
 				console.error("[web] /send error:", error);

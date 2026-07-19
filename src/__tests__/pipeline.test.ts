@@ -96,4 +96,22 @@ describe("start + end phase", () => {
 			expect.objectContaining({ reply: { type: "message", text: "pong" } })
 		);
 	});
+
+	it("logs end-task failures without rejecting the process", async () => {
+		const pipeline = createMessagePipeline();
+		const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		const failingEndTask = vi.fn(async () => {
+			throw new Error("send failed");
+		});
+		pipeline.start(async (_chat, _incoming, outgoing, dispatch) => {
+			await dispatch({ ...outgoing, reply: { type: "message" as const, text: "first" } });
+			await dispatch({ ...outgoing, reply: { type: "message" as const, text: "second" } });
+		});
+		pipeline.end(failingEndTask);
+
+		await expect(pipeline.process(makeMessage())).resolves.toBeTruthy();
+		expect(failingEndTask).toHaveBeenCalledTimes(2);
+		expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("[pipeline] end task error"), expect.any(Error));
+		consoleSpy.mockRestore();
+	});
 });

@@ -27,7 +27,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import type { ImageContent } from "@mariozechner/pi-ai";
+import type { ImageContent } from "@earendil-works/pi-ai";
 import type { AgentManager } from "./agent.js";
 import type { DigestLogger } from "./logger.js";
 import type { BeforeTask, EmitFn, EndTask, StartTask } from "./pipeline.js";

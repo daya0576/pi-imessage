@@ -64,7 +64,11 @@ export function createMessagePipeline(): MessagePipeline {
 		// emit() is sync — queues end tasks onto endChain for serialized execution
 		let endChain = Promise.resolve();
 		const emit: EmitFn = (out) => {
-			endChain = endChain.then(() => runEndTasks(chat, out));
+			endChain = endChain
+				.then(() => runEndTasks(chat, out))
+				.catch((error) => {
+					console.error(`[pipeline] end task error for ${chat.chatGuid}:`, error);
+				});
 		};
 		for (const task of startTasks) {
 			await task(chat, incoming, outgoing, emit);

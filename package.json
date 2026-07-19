@@ -7,22 +7,11 @@
 	"author": "Henry Zhu",
 	"homepage": "https://github.com/daya0576/pi-imessage#readme",
 	"bugs": "https://github.com/daya0576/pi-imessage/issues",
-	"keywords": [
-		"imessage",
-		"ai",
-		"chatbot",
-		"pi",
-		"macos"
-	],
+	"keywords": ["imessage", "ai", "chatbot", "pi", "macos"],
 	"bin": {
 		"pi-imessage": "./dist/cli.js"
 	},
-	"files": [
-		"dist",
-		"!dist/__tests__",
-		"README.md",
-		"LICENSE"
-	],
+	"files": ["dist", "!dist/__tests__", "README.md", "LICENSE"],
 	"publishConfig": {
 		"access": "public",
 		"provenance": true
@@ -46,9 +35,9 @@
 		"check": "tsc --noEmit && biome check ."
 	},
 	"dependencies": {
-		"@mariozechner/pi-agent-core": "latest",
-		"@mariozechner/pi-ai": "latest",
-		"@mariozechner/pi-coding-agent": "latest",
+		"@earendil-works/pi-agent-core": "^0.80.6",
+		"@earendil-works/pi-ai": "^0.80.6",
+		"@earendil-works/pi-coding-agent": "^0.80.6",
 		"better-sqlite3": "^12.6.2",
 		"dotenv": "^17.3.1",
 		"eta": "^4.5.1"

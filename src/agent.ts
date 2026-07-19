@@ -13,8 +13,8 @@
 
 import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { type AssistantMessage, type Message, type TextContent, Type } from "@mariozechner/pi-ai";
-import type { CompactionResult, ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { type AssistantMessage, type Message, type TextContent, Type } from "@earendil-works/pi-ai";
+import type { CompactionResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	type AgentSession,
 	AuthStorage,
@@ -25,11 +25,36 @@ import {
 	createAgentSession,
 	defineTool,
 	getAgentDir,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { listMemoryNamespaces, loadMemoryNamespaces, readCoreMemory, saveMemory, searchMemory } from "./memory.js";
 import type { AgentReply, IncomingMessage } from "./types.js";
 
 // ── Config & Types ────────────────────────────────────────────────────────────
+
+/**
+ * Abort a prompt only after this much continuous inactivity. Any agent event —
+ * including streamed model output and tool start/end events — refreshes it.
+ */
+export const AGENT_IDLE_TIMEOUT_MS = Number.parseInt(process.env.AGENT_IDLE_TIMEOUT_MS || "120000", 10);
+
+/** Absolute safety ceiling that activity cannot extend. */
+export const AGENT_MAX_PROMPT_DURATION_MS = Number.parseInt(process.env.AGENT_MAX_PROMPT_DURATION_MS || "1800000", 10);
+export const AUTO_COMPACT_TOKEN_THRESHOLD = Number.parseInt(process.env.AGENT_AUTO_COMPACT_TOKENS || "100000", 10);
+
+const FAST_OPENAI_CODEX_MODELS = /^gpt-5\.6-(?:sol|terra|luna)$/;
+
+/** Enable OpenAI priority processing without enabling user-discovered extensions. */
+export function openAiCodexFastExtension(pi: ExtensionAPI): void {
+	pi.on("before_provider_request", (event, ctx) => {
+		if (ctx.model?.provider !== "openai-codex" || !FAST_OPENAI_CODEX_MODELS.test(ctx.model.id)) {
+			return;
+		}
+		if (typeof event.payload !== "object" || event.payload === null || Array.isArray(event.payload)) {
+			return;
+		}
+		return { ...event.payload, service_tier: "priority" };
+	});
+}
 
 export interface AgentManagerConfig {
 	workingDir: string;
@@ -43,6 +68,101 @@ interface ChatSession {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
+
+/**
+ * Race an async operation against a wall-clock timeout.
+ *
+ * If `operation()` settles first, its result (or rejection) is passed through
+ * and the timer is cleared. If the timeout fires first, `onTimeout()` is invoked
+ * (best-effort — e.g. to abort the underlying request) and the returned promise
+ * rejects with a timeout Error. A failure inside `onTimeout()` never masks the
+ * timeout rejection.
+ *
+ * Note: this does not cancel `operation()` itself — cancellation must happen via
+ * `onTimeout` (the SDK exposes `AgentSession.abort()`). The timeout rejects
+ * immediately without waiting for cancellation, because a stuck abort must not
+ * keep the caller blocked.
+ */
+export async function runWithTimeout<T>(
+	operation: () => Promise<T>,
+	onTimeout: () => Promise<void> | void,
+	timeoutMs: number
+): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const timeout = new Promise<never>((_resolve, reject) => {
+		timer = setTimeout(() => {
+			try {
+				void Promise.resolve(onTimeout()).catch(() => {});
+			} catch {
+				// A cleanup failure must never suppress the timeout.
+			}
+			reject(new Error(`operation timed out after ${timeoutMs}ms`));
+		}, timeoutMs);
+	});
+	try {
+		return await Promise.race([operation(), timeout]);
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
+}
+
+export type ActivityTimeoutKind = "idle" | "max_duration";
+
+/**
+ * Race an operation against a sliding inactivity timeout and a separate hard
+ * duration ceiling. Calling `markActivity()` refreshes only the idle timer.
+ */
+export async function runWithActivityTimeout<T>(
+	operation: (markActivity: () => void) => Promise<T>,
+	onTimeout: (kind: ActivityTimeoutKind) => Promise<void> | void,
+	idleTimeoutMs: number,
+	maxDurationMs: number
+): Promise<T> {
+	let idleTimer: ReturnType<typeof setTimeout> | undefined;
+	let maxTimer: ReturnType<typeof setTimeout> | undefined;
+	let settled = false;
+	let rejectTimeout: (reason: Error) => void = () => {};
+
+	const clearTimers = () => {
+		if (idleTimer) clearTimeout(idleTimer);
+		if (maxTimer) clearTimeout(maxTimer);
+	};
+	const fireTimeout = (kind: ActivityTimeoutKind, timeoutMs: number) => {
+		if (settled) return;
+		settled = true;
+		clearTimers();
+		try {
+			void Promise.resolve(onTimeout(kind)).catch(() => {});
+		} catch {
+			// A cleanup failure must never suppress the timeout.
+		}
+		const message =
+			kind === "idle"
+				? `operation idle timed out after ${timeoutMs}ms`
+				: `operation exceeded maximum duration of ${timeoutMs}ms`;
+		rejectTimeout(new Error(message));
+	};
+	const markActivity = () => {
+		if (settled) return;
+		if (idleTimer) clearTimeout(idleTimer);
+		idleTimer = setTimeout(() => fireTimeout("idle", idleTimeoutMs), idleTimeoutMs);
+	};
+
+	const timeout = new Promise<never>((_resolve, reject) => {
+		rejectTimeout = reject;
+		markActivity();
+		if (maxDurationMs > 0) {
+			maxTimer = setTimeout(() => fireTimeout("max_duration", maxDurationMs), maxDurationMs);
+		}
+	});
+	const operationPromise = Promise.resolve().then(() => operation(markActivity));
+	try {
+		return await Promise.race([operationPromise, timeout]);
+	} finally {
+		settled = true;
+		clearTimers();
+	}
+}
 
 /**
  * Format a prompt with sender/chat context prefix.
@@ -162,11 +282,15 @@ Update this file whenever you modify the environment.
 ## Messaging API
 A local HTTP server runs at http://localhost:7750 with two endpoints for sending messages:
 
-### POST /send — send a message directly
+### POST /send — send a message or local file attachment directly
 \`\`\`bash
 curl -X POST http://localhost:7750/send \\
   -H "Content-Type: application/json" \\
   -d '{"chatGuid":"<chatGuid>","text":"hello"}'
+
+curl -X POST http://localhost:7750/send \\
+  -H "Content-Type: application/json" \\
+  -d '{"chatGuid":"<chatGuid>","filePath":"/path/to/image.png"}'
 \`\`\`
 
 ### POST /prompt — send a prompt to the agent, send the agent's reply to the chat
@@ -350,29 +474,45 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		const sessionManager = SessionManager.open(join(chatDir, "context.jsonl"), chatDir);
 		const loadedMemoryIds = new Set<string>();
 
+		// Force SSE for pi-imessage. Large Codex contexts frequently exceed the
+		// WebSocket frame limit or leave an auto-selected socket half-open.
+		const settingsManager = SettingsManager.create(workingDir, agentDir);
+		settingsManager.applyOverrides({ transport: "sse" });
+
 		// Per-chat resource loader so the system prompt can reference chatDir.
 		const resourceLoader = new DefaultResourceLoader({
 			cwd: workingDir,
 			agentDir,
+			settingsManager,
 			systemPrompt: buildSystemPrompt(workingDir, chatDir),
+			// Keep extension discovery disabled, but install this one controlled
+			// inline hook so Codex 5.6 fast mode still applies to iMessage.
+			extensionFactories: [
+				{ name: "openai-codex-fast", factory: openAiCodexFastExtension },
+				{ name: "structured-memory", factory: createMemoryExtension(workingDir, loadedMemoryIds) },
+			],
 			noExtensions: true,
-			extensionFactories: [createMemoryExtension(workingDir, loadedMemoryIds)],
 			noSkills: true,
 			noPromptTemplates: true,
 			noThemes: true,
 		});
 		await resourceLoader.reload();
+		const extensionErrors = resourceLoader.getExtensions().errors;
+		if (extensionErrors.length > 0) {
+			throw new Error(`Failed to enable Codex fast mode: ${extensionErrors.map((item) => item.error).join("; ")}`);
+		}
 
 		const { session } = await createAgentSession({
 			cwd: workingDir,
 			agentDir,
 			modelRegistry,
 			sessionManager,
+			settingsManager,
 			resourceLoader,
 		});
 
 		const modelLabel = session.model ? `${session.model.provider}/${session.model.id}` : "default";
-		console.log(`[agent] session created: ${chatGuid} model=${modelLabel}`);
+		console.log(`[agent] session created: ${chatGuid} model=${modelLabel} transport=sse sol_fast=priority`);
 
 		const entry: ChatSession = { session, chatGuid, chain: Promise.resolve() };
 		sessionMap.set(chatGuid, entry);
@@ -422,8 +562,19 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		let firstAssistantStartMs: number | null = null;
 		let assistantDurationMs: number | null = null;
 		const pendingTools = new Map<string, { toolName: string; startTime: number; hidden: boolean }>();
+		let markActivity = () => {};
+		const queueReply = (reply: AgentReply) => {
+			replyChain = replyChain
+				.then(() => handler(reply))
+				.catch((error) => {
+					console.error(`[agent] reply handler error: ${chatGuid}`, error);
+				});
+		};
 
 		const unsubscribe = session.subscribe((event) => {
+			// Every session event proves the run is alive. This includes streamed
+			// message updates as well as tool lifecycle events.
+			markActivity();
 			if (event.type === "message_start" && event.message.role === "assistant") {
 				firstAssistantStartMs ??= Date.now() - promptStart;
 				console.log(`[agent] message start: ${chatGuid} role=assistant first_token_ms=${Date.now() - promptStart}`);
@@ -438,7 +589,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 						` chars=${text?.length ?? 0} text="${(text ?? "(empty)").substring(0, 60)}"`
 				);
 				if (text) {
-					replyChain = replyChain.then(() => handler({ kind: "assistant", text }));
+					queueReply({ kind: "assistant", text });
 				}
 			} else if (event.type === "tool_execution_start") {
 				const toolArgs = event.args as Record<string, unknown>;
@@ -448,7 +599,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 					(event.toolName === "bash" && label.includes("skills/file-memory/memory_cli.py"));
 				pendingTools.set(event.toolCallId, { toolName: event.toolName, startTime: Date.now(), hidden });
 				console.log(`[agent] tool start: ${chatGuid} → ${label}`);
-				if (!hidden) replyChain = replyChain.then(() => handler({ kind: "tool_start", label }));
+				if (!hidden) queueReply({ kind: "tool_start", label });
 			} else if (event.type === "tool_execution_end") {
 				const resultText = extractToolResultText(event.result);
 				const pending = pendingTools.get(event.toolCallId);
@@ -460,15 +611,48 @@ export async function createAgentManager(config: AgentManagerConfig) {
 						` result="${resultText.substring(0, 60)}"`
 				);
 				if (!pending?.hidden) {
-					replyChain = replyChain.then(() =>
-						handler({ kind: "tool_end", toolName: event.toolName, symbol, duration, result: resultText })
-					);
+					queueReply({ kind: "tool_end", toolName: event.toolName, symbol, duration, result: resultText });
 				}
 			}
 		});
 
 		try {
-			await session.prompt(promptText, { images, streamingBehavior: options?.streamingBehavior });
+			await runWithActivityTimeout(
+				async (activity) => {
+					markActivity = activity;
+					activity();
+					const contextUsage = session.getContextUsage();
+					if (typeof contextUsage?.tokens === "number" && contextUsage.tokens >= AUTO_COMPACT_TOKEN_THRESHOLD) {
+						console.log(
+							`[agent] auto compact start: ${chatGuid} tokens=${contextUsage.tokens} ` +
+								`threshold=${AUTO_COMPACT_TOKEN_THRESHOLD}`
+						);
+						try {
+							const result = await session.compact();
+							console.log(`[agent] auto compact end: ${chatGuid} tokens_before=${result.tokensBefore}`);
+						} catch (error: unknown) {
+							const message = error instanceof Error ? error.message : String(error);
+							const safelySkippable = message.includes("Already compacted") || message.includes("Nothing to compact");
+							if (!safelySkippable) throw error;
+							console.log(`[agent] auto compact skipped: ${chatGuid} ${message}`);
+						}
+					}
+					await session.prompt(promptText, { images, streamingBehavior: options?.streamingBehavior });
+				},
+				(kind) => {
+					const timeoutMs = kind === "idle" ? AGENT_IDLE_TIMEOUT_MS : AGENT_MAX_PROMPT_DURATION_MS;
+					const label = kind === "idle" ? "idle timeout" : "maximum duration exceeded";
+					console.error(
+						`[agent] prompt ${label}: ${chatGuid} after ${timeoutMs}ms — detaching session and aborting in background`
+					);
+					if (sessionMap.get(chatGuid) === entry) sessionMap.delete(chatGuid);
+					void session.abort().catch((error) => {
+						console.error(`[agent] background abort failed: ${chatGuid}`, error);
+					});
+				},
+				AGENT_IDLE_TIMEOUT_MS,
+				AGENT_MAX_PROMPT_DURATION_MS
+			);
 			const sessionEnd = Date.now();
 			await replyChain;
 			const replyEnd = Date.now();
@@ -478,10 +662,10 @@ export async function createAgentManager(config: AgentManagerConfig) {
 					`generation_ms=${assistantDurationMs ?? "n/a"}`
 			);
 		} catch (error) {
-			// Defensively reset SDK state: some error paths leave isProcessing=true,
-			// which would make every subsequent prompt on this session fail with
-			// "already processing". steer("stop") clears that flag.
-			await session.steer("stop").catch(() => {});
+			// Never await cleanup here: the provider's abort path may be the part
+			// that is stuck. A timed-out session is already detached above, so a
+			// retry creates a clean session while this cleanup runs in background.
+			void session.steer("stop").catch(() => {});
 			throw error;
 		} finally {
 			unsubscribe();

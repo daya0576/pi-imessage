@@ -2,7 +2,7 @@
  * Shared types for the iMessage bot pipeline.
  */
 
-import type { ImageContent } from "@mariozechner/pi-ai";
+import type { ImageContent } from "@earendil-works/pi-ai";
 
 /**
  * Message type, derived from service and chatGuid structure:

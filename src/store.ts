@@ -173,7 +173,7 @@ export function createChatStore(config: ChatStoreConfig): ChatStore {
 
 		if (records.length > 0) {
 			const indexPath = join(chatDir(chatGuid), "images", "index.jsonl");
-			await appendFile(indexPath, records.map((record) => JSON.stringify(record)).join("\n") + "\n", "utf-8");
+			await appendFile(indexPath, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`, "utf-8");
 		}
 
 		return records;

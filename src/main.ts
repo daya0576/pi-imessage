@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { createAgentManager } from "./agent.js";
 import { createIMessageBot } from "./imessage.js";
 import { createAppLogger, createDigestLogger } from "./logger.js";
+import { createModelHealthChecker } from "./model-health.js";
 import { createAsyncQueue } from "./queue.js";
 import { createSelfEchoFilter } from "./self-echo.js";
 import { checkEnvironment, createMessageSender } from "./send.js";
@@ -36,12 +37,23 @@ async function main() {
 	const getSettings = (): Settings => readSettings(workingDir);
 	const setSettings = (updated: Settings): void => writeSettings(workingDir, updated);
 	const agent = await createAgentManager({ workingDir });
+	const checkModelHealth = createModelHealthChecker(workingDir);
 	const store = createChatStore({ workingDir });
 	const queue = createAsyncQueue<IncomingMessage>(join(workingDir, "queue.json"));
 	const watcher = createWatcher({ queue });
 	const bot = createIMessageBot({ queue, agent, sender, echoFilter, store, getSettings, digestLogger });
 	const web = webEnabled
-		? createWebServer({ workingDir, host: webHost, port: webPort, getSettings, setSettings, sender, echoFilter, agent })
+		? createWebServer({
+				workingDir,
+				host: webHost,
+				port: webPort,
+				getSettings,
+				setSettings,
+				sender,
+				echoFilter,
+				agent,
+				checkModelHealth,
+			})
 		: null;
 
 	console.log(`[sid] workspace:  ${workingDir}`);
