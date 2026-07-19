@@ -1,10 +1,49 @@
-# Structured memory read/write sequence
+# Structured memory sequence flow
 
-第一版采用 Category 级动态加载：不在 Session 启动时加载全部记忆，也不做关键词路由或单条记录的语义检索。
+整体分为三部分：一次性全量迁移、运行时动态读取、运行时主动写入。
 
-Category 由正在聊天的 Main LLM 根据上下文选择；Memory Tool 只按选择结果读取对应 JSONL。
+## 1. One-time full migration
 
-## Read flow
+```mermaid
+sequenceDiagram
+    autonumber
+    participant O as Legacy MEMORY.md
+    participant V as Existing v1 JSONL
+    participant P as Markdown Block Parser
+    participant L as Migration LLM
+    participant C as Validator
+    participant N as Staging v2 JSONL
+    participant M as Coverage Manifest
+    participant R as Runtime
+
+    O->>P: 读取全部 section、bullet 和多行内容
+    P-->>L: Source blocks<br/>path + line range + source hash
+    V->>L: 补充仅存在于 v1 的 native records
+
+    loop Batch classification and extraction
+        L->>L: 拆分原子事实<br/>namespace + kind + subjects + event_time
+        L->>C: Structured records + block decisions
+        C->>C: Schema、ID、来源、引用和重复校验
+        C->>N: 写入通过校验的 records
+        C->>M: block -> memory IDs 或 skipped_reason
+    end
+
+    C->>M: 检查每个 source block 都有处理结果
+    M-->>C: Coverage = 100%
+    C->>N: 验证 supersedes、active view 和文件完整性
+    C->>R: Atomic cutover to v2
+
+    Note over O,V: 原文件和 v1 保留为只读归档，不直接删除
+```
+
+迁移原则：
+
+- “全量”指每个原文 block 都被处理并可追踪，不代表每一行都必须生成一条记忆。
+- 无法确认事实日期时使用 `event_time: null`，不伪造日期。
+- `namespace` 是运行时加载单元，例如 `health/paipai`、`work/cc`、`project/pi-imessage`。
+- `kind` 描述记录类型，例如 `fact`、`event`、`preference`、`procedure`。
+
+## 2. Runtime read
 
 ```mermaid
 sequenceDiagram
@@ -13,26 +52,26 @@ sequenceDiagram
     participant P as pi-imessage
     participant A as Main LLM
     participant M as Memory Tool
-    participant S as categories/*.jsonl
+    participant S as v2 JSONL
 
     Note over P,A: Session 初始只包含小型 core.md
     U->>P: Incoming message
     P->>A: Current message
-    A->>A: 判断需要哪些 Category<br/>可多选，也可以不选
+    A->>A: 根据对话选择相关 namespace<br/>可多选，也可以不选
 
     opt 需要历史记忆
-        A->>M: load_categories([health, person, ...])
-        M->>S: 读取所选 Category 的全部有效记录
-        S-->>M: Active records
-        M-->>A: 完整 Category memory context
+        A->>M: load_memory(namespaces)
+        M->>S: 读取所选 namespace 的全部 active records
+        S-->>M: Current records
+        M-->>A: 完整 namespace context
     end
 
-    Note over A: LLM 自己从 Category 全集里判断相关事实
+    Note over A: Main LLM 自己判断哪些记录与当前问题相关
     A-->>P: Answer
     P-->>U: iMessage reply
 ```
 
-## Write flow
+## 3. Runtime write
 
 ```mermaid
 sequenceDiagram
@@ -41,19 +80,24 @@ sequenceDiagram
     participant P as pi-imessage
     participant A as Main LLM
     participant M as Memory Tool
-    participant S as categories/*.jsonl
+    participant S as v2 JSONL
 
     U->>P: Incoming message
     P->>P: Append raw event to log.jsonl
     P->>A: Current message
     A->>A: 判断是否值得长期记忆
 
-    alt 不值得记 / 重复 / 不确定
-        A-->>P: 直接回答，不写 memory
+    alt 不值得记、重复或不确定
+        A-->>P: 直接回答
     else 值得记忆
-        A->>A: 生成结构化记录<br/>text, category, subjects, event_time,<br/>source, importance, confidence, supersedes
+        A->>A: 生成结构化记录<br/>text, namespace, kind, subjects,<br/>event_time, source, importance, confidence
+        opt 纠正旧事实
+            A->>M: search_memory(old fact)
+            M-->>A: Old memory ID
+            A->>A: 设置 supersedes_id
+        end
         A->>M: save_memory(structured record)
-        M->>M: Schema 校验、去重、校验 supersedes
+        M->>M: Schema、去重和 supersedes 校验
         M->>S: Append JSONL
         S-->>M: Stored record ID
         M-->>A: Stored / already exists
@@ -63,11 +107,12 @@ sequenceDiagram
     P-->>U: iMessage reply
 ```
 
-## 关键点
+## Responsibility boundaries
 
-- Main LLM 通过 typed tool 自己选择一个或多个 Category，不需要额外的 classifier LLM。
-- Memory Tool 的 Category 参数使用固定 enum，但分类判断来自 LLM，不来自关键词表。
-- `load_categories` 返回所选 Category 下的全部有效记录，不做单条记录筛选。
-- 同一 Session 已加载过的 Category 不重复注入；文件有更新时只补充 delta，避免 context 线性膨胀。
-- JSONL 是 source of truth；`core.md` 只放少量稳定、高频信息；旧 `MEMORY.md` 只读。
+- Main LLM：理解自然语言、选择 namespace、决定是否记忆并生成结构化字段。
+- Memory Tool：只做读取、校验、去重、append 和 supersedes，不用关键词理解自然语言。
+- v2 JSONL：唯一的结构化 memory source of truth。
+- Coverage Manifest：证明旧 MEMORY.md 没有被静默漏迁。
+- `core.md`：只保存少量稳定、高频信息。
+- Legacy MEMORY.md / v1 JSONL：迁移完成后只读归档。
 - 不使用固定关键词分类、Semantic Index、embedding 或 reranker。
