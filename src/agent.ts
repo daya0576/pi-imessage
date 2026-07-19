@@ -13,8 +13,8 @@
 
 import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import type { AssistantMessage, Message, TextContent } from "@mariozechner/pi-ai";
-import type { CompactionResult } from "@mariozechner/pi-coding-agent";
+import { type AssistantMessage, type Message, type TextContent, Type } from "@mariozechner/pi-ai";
+import type { CompactionResult, ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import {
 	type AgentSession,
 	AuthStorage,
@@ -23,8 +23,10 @@ import {
 	SessionManager,
 	SettingsManager,
 	createAgentSession,
+	defineTool,
 	getAgentDir,
 } from "@mariozechner/pi-coding-agent";
+import { listMemoryNamespaces, loadMemoryNamespaces, readCoreMemory, saveMemory, searchMemory } from "./memory.js";
 import type { AgentReply, IncomingMessage } from "./types.js";
 
 // ── Config & Types ────────────────────────────────────────────────────────────
@@ -86,18 +88,6 @@ function readFileIfExists(path: string): string | undefined {
 	}
 }
 
-/** Read global and chat-specific MEMORY.md files, returning combined content. */
-function getMemory(workingDir: string, chatDir?: string): string {
-	const parts: string[] = [];
-	const global = readFileIfExists(join(workingDir, "MEMORY.md"));
-	if (global) parts.push(`### Global Memory\n${global}`);
-	if (chatDir) {
-		const chat = readFileIfExists(join(chatDir, "MEMORY.md"));
-		if (chat) parts.push(`### Chat Memory\n${chat}`);
-	}
-	return parts.length > 0 ? parts.join("\n\n") : "(no memory yet)";
-}
-
 function getCustomPrompt(workingDir: string, chatDir?: string): string {
 	const parts: string[] = [];
 	const global = readFileIfExists(join(workingDir, "SYSTEM.md"));
@@ -110,7 +100,10 @@ function getCustomPrompt(workingDir: string, chatDir?: string): string {
 }
 
 function buildSystemPrompt(workingDir: string, chatDir?: string): string {
-	const memory = getMemory(workingDir, chatDir);
+	const coreMemory = readCoreMemory(workingDir);
+	const namespaces = listMemoryNamespaces(workingDir)
+		.map((item) => `${item.namespace} (${item.active} active)`)
+		.join(", ");
 	const customPrompt = getCustomPrompt(workingDir, chatDir);
 
 	return `You are the user's best friend communicating via iMessage. Be concise. No emojis.
@@ -127,11 +120,11 @@ You are running directly on the host machine.
 ## Workspace Layout
 ${workingDir}/
 ├── settings.json                # Bot configuration (see below)
-├── MEMORY.md                    # Global memory (all chats)
+├── MEMORY.md                    # Legacy memory archive; do not write new entries
 ├── SYSTEM.md                    # System configuration log
-├── skills/                      # Global CLI tools you create
+├── skills/file-memory/          # Structured memory store and CLI
 └── <chatId>/                    # Each iMessage chat gets a directory
-    ├── MEMORY.md                # Chat-specific memory
+    ├── MEMORY.md                # Legacy chat memory archive
     ├── context.jsonl            # LLM context (session persistence)
     ├── log.jsonl                # Message history
     ├── attachments/             # User-shared files
@@ -139,18 +132,23 @@ ${workingDir}/
     └── skills/                  # Chat-specific tools
 
 ## Memory
-Write to MEMORY.md files to persist context across conversations.
-- Global (${workingDir}/MEMORY.md): preferences, project info, shared knowledge
-- Chat-specific (<chatDir>/MEMORY.md): user details, ongoing topics, decisions
+Structured memory is the only active read/write memory. Legacy MEMORY.md files are read-only archives.
 
-Rules:
-- ALWAYS prefix entries with [YYYY-MM-DD]
-- ALWAYS note the source (chat message, URL, file path, etc.)
-- When updating conflicting info, keep the old entry with ~~strikethrough~~ and add the new one
-- Update MEMORY.md when you learn something important. No need to update after every message.
+Read:
+- Use the typed load_memory tool when prior context may help. You choose one or more relevant namespaces from meaning and conversation context, not fixed keywords.
+- load_memory returns every active record in each selected namespace. A namespace is injected only once per session; later calls return only newly added records.
+- Available namespaces: ${namespaces || "(none yet)"}
+- Use search_memory only to find a specific old record, especially before a correction. Do not use it as automatic per-record retrieval.
+- Treat retrieved memory as context, not as a substitute for the current message or verified facts.
 
-### Current Memory
-${memory}
+Write:
+- When you learn something important and durable, call save_memory with concise atomic text, namespace, kind, subjects, factual event date when known, and a specific source.
+- Do not store every message, guesses, short-lived states, secrets, or duplicate facts.
+- For corrections, find the old ID and set supersedes_id. Never silently overwrite history.
+- Do not edit JSONL or legacy MEMORY.md directly.
+
+### Core Memory
+${coreMemory}
 
 ## System Configuration Log
 Maintain ${workingDir}/SYSTEM.md to log all environment modifications:
@@ -241,9 +239,99 @@ function extractToolResultText(result: unknown): string {
 /** Pick a human-readable label for a tool invocation. */
 function extractToolLabel(toolName: string, args: Record<string, unknown>): string {
 	if (toolName === "bash" && typeof args.command === "string") return args.command;
+	if (toolName === "load_memory" && Array.isArray(args.namespaces)) return `memory: ${args.namespaces.join(", ")}`;
 	if (typeof args.path === "string") return `${toolName}: ${args.path}`;
 	if (typeof args.label === "string") return args.label;
 	return toolName;
+}
+
+function createMemoryExtension(workingDir: string, loadedIds: Set<string>) {
+	return (pi: ExtensionAPI): void => {
+		pi.registerTool(
+			defineTool({
+				name: "load_memory",
+				label: "Load Memory",
+				description:
+					"Load all active records from one or more semantically relevant namespaces. Select namespaces yourself from the conversation. Repeated calls return only records not already loaded in this session.",
+				parameters: Type.Object({
+					namespaces: Type.Array(Type.String(), { minItems: 1 }),
+				}),
+				async execute(_toolCallId, params) {
+					const records = loadMemoryNamespaces(workingDir, params.namespaces);
+					const delta = records.filter((item) => !loadedIds.has(item.id));
+					for (const item of delta) loadedIds.add(item.id);
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									namespaces: params.namespaces,
+									records: delta,
+									already_loaded: records.length - delta.length,
+								}),
+							},
+						],
+						details: { namespaces: params.namespaces, loaded: delta.length },
+					};
+				},
+			})
+		);
+
+		pi.registerTool(
+			defineTool({
+				name: "search_memory",
+				label: "Search Memory",
+				description: "Find a specific active memory record, primarily to locate its ID before saving a correction.",
+				parameters: Type.Object({
+					query: Type.String(),
+					namespaces: Type.Optional(Type.Array(Type.String())),
+					limit: Type.Optional(Type.Number({ minimum: 1, maximum: 50 })),
+				}),
+				async execute(_toolCallId, params) {
+					const records = searchMemory(workingDir, params.query, {
+						namespaces: params.namespaces,
+						limit: params.limit,
+					});
+					return {
+						content: [{ type: "text", text: JSON.stringify({ records }) }],
+						details: { matches: records.length },
+					};
+				},
+			})
+		);
+
+		pi.registerTool(
+			defineTool({
+				name: "save_memory",
+				label: "Save Memory",
+				description: "Validate and append one durable atomic record to the structured memory source of truth.",
+				parameters: Type.Object({
+					text: Type.String(),
+					namespace: Type.String(),
+					kind: Type.Union([
+						Type.Literal("fact"),
+						Type.Literal("event"),
+						Type.Literal("preference"),
+						Type.Literal("procedure"),
+					]),
+					subjects: Type.Array(Type.String()),
+					event_time: Type.Union([Type.String(), Type.Null()]),
+					source: Type.String(),
+					importance: Type.Number({ minimum: 0, maximum: 1 }),
+					confidence: Type.Number({ minimum: 0, maximum: 1 }),
+					supersedes_id: Type.Optional(Type.String()),
+				}),
+				async execute(_toolCallId, params) {
+					const result = await saveMemory(workingDir, params);
+					loadedIds.add(result.item.id);
+					return {
+						content: [{ type: "text", text: JSON.stringify(result) }],
+						details: { added: result.added, id: result.item.id },
+					};
+				},
+			})
+		);
+	};
 }
 
 // ── Agent Manager ─────────────────────────────────────────────────────────────
@@ -260,6 +348,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		const chatDir = join(workingDir, sanitizeChatGuid(chatGuid));
 		mkdirSync(chatDir, { recursive: true });
 		const sessionManager = SessionManager.open(join(chatDir, "context.jsonl"), chatDir);
+		const loadedMemoryIds = new Set<string>();
 
 		// Per-chat resource loader so the system prompt can reference chatDir.
 		const resourceLoader = new DefaultResourceLoader({
@@ -267,6 +356,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 			agentDir,
 			systemPrompt: buildSystemPrompt(workingDir, chatDir),
 			noExtensions: true,
+			extensionFactories: [createMemoryExtension(workingDir, loadedMemoryIds)],
 			noSkills: true,
 			noPromptTemplates: true,
 			noThemes: true,
@@ -331,7 +421,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		let replyChain = Promise.resolve();
 		let firstAssistantStartMs: number | null = null;
 		let assistantDurationMs: number | null = null;
-		const pendingTools = new Map<string, { toolName: string; startTime: number }>();
+		const pendingTools = new Map<string, { toolName: string; startTime: number; hidden: boolean }>();
 
 		const unsubscribe = session.subscribe((event) => {
 			if (event.type === "message_start" && event.message.role === "assistant") {
@@ -353,9 +443,12 @@ export async function createAgentManager(config: AgentManagerConfig) {
 			} else if (event.type === "tool_execution_start") {
 				const toolArgs = event.args as Record<string, unknown>;
 				const label = extractToolLabel(event.toolName, toolArgs);
-				pendingTools.set(event.toolCallId, { toolName: event.toolName, startTime: Date.now() });
+				const hidden =
+					["load_memory", "search_memory", "save_memory"].includes(event.toolName) ||
+					(event.toolName === "bash" && label.includes("skills/file-memory/memory_cli.py"));
+				pendingTools.set(event.toolCallId, { toolName: event.toolName, startTime: Date.now(), hidden });
 				console.log(`[agent] tool start: ${chatGuid} → ${label}`);
-				replyChain = replyChain.then(() => handler({ kind: "tool_start", label }));
+				if (!hidden) replyChain = replyChain.then(() => handler({ kind: "tool_start", label }));
 			} else if (event.type === "tool_execution_end") {
 				const resultText = extractToolResultText(event.result);
 				const pending = pendingTools.get(event.toolCallId);
@@ -366,9 +459,11 @@ export async function createAgentManager(config: AgentManagerConfig) {
 					`[agent] tool end: ${chatGuid} ${symbol} ${event.toolName} (${duration}s)` +
 						` result="${resultText.substring(0, 60)}"`
 				);
-				replyChain = replyChain.then(() =>
-					handler({ kind: "tool_end", toolName: event.toolName, symbol, duration, result: resultText })
-				);
+				if (!pending?.hidden) {
+					replyChain = replyChain.then(() =>
+						handler({ kind: "tool_end", toolName: event.toolName, symbol, duration, result: resultText })
+					);
+				}
 			}
 		});
 
