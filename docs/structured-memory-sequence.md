@@ -1,38 +1,28 @@
 # Structured memory read/write sequence
 
-Design goals:
+第一版采用全量加载，不做关键词路由、Semantic Index 或 LLM rerank。
 
-- The LLM understands and classifies natural language; the storage CLI only validates and persists structured records.
-- Category is metadata, not a keyword-based retrieval gate.
-- Category JSONL files are the structured source of truth. Semantic indexes and summaries are derived and rebuildable.
-- Legacy `MEMORY.md` files are read-only migration archives.
+当前约 490 条有效记录，紧凑文本约 5.8 万字符（约 2–3 万 tokens）。只在 session 创建时加载一次，不在每轮消息中重复注入。
 
 ## Read flow
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor U as User / Chat
     participant P as pi-imessage
-    participant R as Memory Reader
-    participant S as JSONL Store
-    participant I as Semantic Index
-    participant L as LLM Reranker
-    participant A as Main LLM
+    participant S as categories/*.jsonl
+    participant A as Main LLM Session
+    actor U as User / Chat
 
+    Note over P,A: Session 创建
+    P->>S: 读取全部当前有效记录
+    S-->>P: 紧凑 memory context
+    P->>A: 创建 Session<br/>system prompt = core.md + 全部 active memory
+
+    Note over U,A: 后续每条消息不再重复注入 memory
     U->>P: Incoming message
-    Note over P: Load small core.md (always-on)
-    P->>R: Query + sender/chat context
-    R->>S: Load active records / resolve supersedes
-    S-->>R: Active memory records
-    R->>I: Semantic top-K recall
-    I-->>R: Candidate memory IDs + scores
-    opt Low-confidence or high-stakes query
-        R->>L: Query + candidate records
-        L-->>R: Relevance-ranked top-N
-    end
-    R-->>P: Compact relevant memory context
-    P->>A: core.md + relevant records + current message
+    P->>A: Current message
+    Note over A: LLM 直接从完整 memory context 判断相关性
     A-->>P: Answer
     P-->>U: iMessage reply
 ```
@@ -44,42 +34,37 @@ sequenceDiagram
     autonumber
     actor U as User / Chat
     participant P as pi-imessage
-    participant A as Main LLM
+    participant A as Main LLM Session
     participant C as Memory CLI
-    participant S as JSONL Store
-    participant I as Semantic Index
+    participant S as categories/*.jsonl
 
     U->>P: Incoming message
     P->>P: Append raw event to log.jsonl
-    P->>A: Current message + retrieved context
-    A->>A: Decide should_remember
-    alt Not durable / duplicate / uncertain
-        A-->>P: Skip memory write
-    else Durable memory
-        A->>A: Produce structured record<br/>text, category, subjects, event_time,<br/>source, importance, confidence, supersedes
+    P->>A: Current message
+    A->>A: 判断是否值得长期记忆
+
+    alt 不值得记 / 重复 / 不确定
+        A-->>P: 直接回答，不写 memory
+    else 值得记忆
+        A->>A: 生成结构化记录<br/>text, category, subjects, event_time,<br/>source, importance, confidence, supersedes
         A->>C: add(structured record)
-        C->>C: Schema validation + ID generation<br/>dedupe + supersedes validation
-        C->>S: Append to categories/*.jsonl
+        C->>C: Schema 校验、去重、校验 supersedes
+        C->>S: Append JSONL
         S-->>C: Stored record ID
-        C-->>I: Async/incremental index refresh
         C-->>A: Stored / already exists
+        Note over A: 当前 Session 已通过 tool call 知道新记录
+        A-->>P: Answer
     end
-    A-->>P: Answer
+
     P-->>U: iMessage reply
+    Note over P,S: 新 Session 会重新加载最新全集
 ```
 
-## Responsibility boundaries
+## 边界
 
-| Component | Responsibility | Must not do |
-| --- | --- | --- |
-| Main LLM | Decide whether a fact is durable; extract atomic text, category, subjects, date, source and correction relationship | Silently overwrite history |
-| Memory CLI | Validate schema, generate deterministic IDs, deduplicate and append/supersede records | Interpret natural language with fixed keyword lists |
-| JSONL store | Preserve auditable structured memory history | Act as a generated cache |
-| Semantic index | Retrieve candidates by meaning | Become a source of truth |
-| LLM reranker | Resolve ambiguous relevance when needed | Run unconditionally if semantic scores are already decisive |
-
-Open review decisions:
-
-1. Use local embeddings or a hosted embedding model for the derived semantic index.
-2. Invoke the LLM reranker only below a confidence threshold, or on every read.
-3. Refresh the semantic index synchronously after a write, or asynchronously in a short debounce window.
+- Main LLM：理解自然语言，决定是否记忆，并生成 Category、Subjects 等结构化字段。
+- Memory CLI：只做确定性的校验、去重和持久化，不用关键词理解自然语言。
+- JSONL：结构化记忆的 source of truth。
+- `core.md`：只放少量稳定且高频的信息。
+- `MEMORY.md`：只读迁移归档。
+- 不使用固定关键词分类、Semantic Index、embedding 或额外 reranker。
