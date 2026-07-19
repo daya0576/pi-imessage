@@ -39,6 +39,21 @@ Available at `http://localhost:7750` (configurable via `WEB_HOST` and `WEB_PORT`
 
 P.S. Disable with `WEB_ENABLED=false` and let the agent build your own web UI
 
+## Structured Memory
+
+Durable memories are stored as namespaced JSONL records under
+`WORKING_DIR/skills/file-memory/namespaces/`. Each record includes a stable ID,
+creation timestamp, factual event date when known, source, kind, subjects,
+importance, confidence, and status. This keeps every memory traceable without
+inventing dates for older facts.
+
+The agent uses typed tools to load complete namespaces, search for specific
+records, and append validated memories. Corrections append a new record that
+supersedes the old ID, preserving an auditable history instead of silently
+rewriting it. Legacy global and per-chat `MEMORY.md` files remain read-only
+archives. See [the structured memory flow](docs/structured-memory-sequence.md)
+for migration, retrieval, and write behavior.
+
 ## API
 
 The agent is aware of these endpoints via its system prompt and can use them as tools (e.g., scheduling a cron job that calls `/prompt`).
