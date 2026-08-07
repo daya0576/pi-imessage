@@ -63,8 +63,21 @@ export interface AgentManagerConfig {
 interface ChatSession {
 	session: AgentSession;
 	chatGuid: string;
-	/** Promise chain serializing prompts/steers for this chat. */
+	/** Promise chain serializing prompts for this chat. */
 	chain: Promise<void>;
+}
+
+/**
+ * Stop model work without injecting a synthetic user message into the transcript.
+ *
+ * AgentSession.steer("stop") is not an abort API: it queues a literal user
+ * message. If the current operation fails before consuming that queue (for
+ * example, compaction fails), the stale "stop" can be delivered with a later
+ * real chat message and misattributed to that sender.
+ */
+export async function clearAndAbortSession(session: Pick<AgentSession, "abort" | "clearQueue">): Promise<void> {
+	session.clearQueue();
+	await session.abort();
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -646,7 +659,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 						`[agent] prompt ${label}: ${chatGuid} after ${timeoutMs}ms — detaching session and aborting in background`
 					);
 					if (sessionMap.get(chatGuid) === entry) sessionMap.delete(chatGuid);
-					void session.abort().catch((error) => {
+					void clearAndAbortSession(session).catch((error) => {
 						console.error(`[agent] background abort failed: ${chatGuid}`, error);
 					});
 				},
@@ -662,10 +675,10 @@ export async function createAgentManager(config: AgentManagerConfig) {
 					`generation_ms=${assistantDurationMs ?? "n/a"}`
 			);
 		} catch (error) {
-			// Never await cleanup here: the provider's abort path may be the part
-			// that is stuck. A timed-out session is already detached above, so a
-			// retry creates a clean session while this cleanup runs in background.
-			void session.steer("stop").catch(() => {});
+			// Never inject a steering message here. steer("stop") queues literal
+			// user text, which can survive a failed compaction and contaminate the
+			// next prompt. Abort and clear pending queues instead.
+			void clearAndAbortSession(session).catch(() => {});
 			throw error;
 		} finally {
 			unsubscribe();
@@ -679,8 +692,8 @@ export async function createAgentManager(config: AgentManagerConfig) {
 			console.log(`[agent] stop: no active session for ${chatGuid}`);
 			return;
 		}
-		await entry.session.steer("stop");
-		console.log(`[agent] stop steered: ${chatGuid}`);
+		await clearAndAbortSession(entry.session);
+		console.log(`[agent] stop aborted: ${chatGuid}`);
 	}
 
 	/** Compact the session context, reducing token usage while preserving a summary. */

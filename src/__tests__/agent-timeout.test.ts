@@ -1,5 +1,26 @@
 import { describe, expect, it, vi } from "vitest";
-import { runWithActivityTimeout, runWithTimeout } from "../agent.js";
+import { clearAndAbortSession, runWithActivityTimeout, runWithTimeout } from "../agent.js";
+
+describe("clearAndAbortSession", () => {
+	it("clears queued steering/follow-up messages before aborting", async () => {
+		const calls: string[] = [];
+		const session = {
+			clearQueue: vi.fn(() => {
+				calls.push("clear");
+				return { steering: ["stop"], followUp: [] };
+			}),
+			abort: vi.fn(async () => {
+				calls.push("abort");
+			}),
+		};
+
+		await clearAndAbortSession(session);
+
+		expect(calls).toEqual(["clear", "abort"]);
+		expect(session.clearQueue).toHaveBeenCalledTimes(1);
+		expect(session.abort).toHaveBeenCalledTimes(1);
+	});
+});
 
 describe("runWithTimeout", () => {
 	it("resolves with the operation's value when it completes before the timeout", async () => {
