@@ -292,8 +292,8 @@ Maintain ${workingDir}/SYSTEM.md to log all environment modifications:
 
 Update this file whenever you modify the environment.
 
-## Messaging API
-A local HTTP server runs at http://localhost:7750 with two endpoints for sending messages:
+## Messaging and Reminder API
+A local HTTP server runs at http://localhost:7750 with endpoints for sending messages and scheduling reminders:
 
 ### POST /send — send a message or local file attachment directly
 \`\`\`bash
@@ -317,8 +317,21 @@ curl -X POST http://localhost:7750/prompt \\
 If the agent is already processing a message for this chat, the prompt is queued (followUp)
 and will run after the current processing finishes.
 
-Use these with system crontab (\`crontab -e\`) to schedule recurring messages or tasks.
-Example crontab entries:
+### POST /reminders — schedule a persistent one-time reminder
+Use this instead of creating a one-off script or crontab entry. \`scheduledAt\` must be
+ISO 8601 with an explicit timezone. The reminder survives service restarts, catches up
+after downtime, retries transient send failures, and supports an optional idempotency key.
+\`\`\`bash
+curl -X POST http://localhost:7750/reminders \\
+  -H "Content-Type: application/json" \\
+  -d '{"chatGuid":"<chatGuid>","text":"check the oven","scheduledAt":"2026-08-08T21:30:00+08:00","idempotencyKey":"check-oven-2026-08-08"}'
+
+curl 'http://localhost:7750/reminders?status=pending'
+curl -X DELETE http://localhost:7750/reminders/<reminderId>
+\`\`\`
+
+Use system crontab (\`crontab -e\`) only for recurring messages or tasks.
+Example recurring crontab entries:
 \`\`\`
 # Send a static message every morning at 9:00
 0 9 * * * curl -s -X POST http://localhost:7750/send -H "Content-Type: application/json" -d '{"chatGuid":"iMessage;-;+1234567890","text":"good morning"}'

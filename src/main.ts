@@ -10,6 +10,7 @@ import { createIMessageBot } from "./imessage.js";
 import { createAppLogger, createDigestLogger } from "./logger.js";
 import { createModelHealthChecker } from "./model-health.js";
 import { createAsyncQueue } from "./queue.js";
+import { createReminderService } from "./reminders.js";
 import { createSelfEchoFilter } from "./self-echo.js";
 import { checkEnvironment, createMessageSender } from "./send.js";
 import { readSettings, writeSettings } from "./settings.js";
@@ -42,6 +43,13 @@ async function main() {
 	const queue = createAsyncQueue<IncomingMessage>(join(workingDir, "queue.json"));
 	const watcher = createWatcher({ queue });
 	const bot = createIMessageBot({ queue, agent, sender, echoFilter, store, getSettings, digestLogger });
+	const reminders = createReminderService({
+		workingDir,
+		deliver: async (reminder) => {
+			echoFilter.remember(reminder.chatGuid, reminder.text);
+			await sender.sendMessage(reminder.chatGuid, reminder.text);
+		},
+	});
 	const web = webEnabled
 		? createWebServer({
 				workingDir,
@@ -53,12 +61,14 @@ async function main() {
 				echoFilter,
 				agent,
 				checkModelHealth,
+				reminders,
 			})
 		: null;
 
 	console.log(`[sid] workspace:  ${workingDir}`);
 	watcher.start();
 	bot.start();
+	reminders.start();
 	if (web) web.start();
 
 	let shuttingDown = false;
@@ -68,6 +78,7 @@ async function main() {
 		console.log("[sid] Shutting down…");
 		watcher.stop();
 		bot.stop();
+		await reminders.stop();
 		await web?.stop();
 		digestLogger.close();
 		appLogger.close();

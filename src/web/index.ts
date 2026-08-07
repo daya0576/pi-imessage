@@ -5,6 +5,7 @@ import { type IncomingMessage, type ServerResponse, createServer } from "node:ht
 import { join } from "node:path";
 import type { AgentManager } from "../agent.js";
 import type { ModelHealthChecker } from "../model-health.js";
+import { REMINDER_STATUSES, type ReminderService, type ReminderStatus } from "../reminders.js";
 import type { SelfEchoFilter } from "../self-echo.js";
 import type { MessageSender } from "../send.js";
 import type { Settings } from "../settings.js";
@@ -22,6 +23,7 @@ export interface WebServerConfig {
 	echoFilter: SelfEchoFilter;
 	agent: AgentManager;
 	checkModelHealth: ModelHealthChecker;
+	reminders: ReminderService;
 }
 
 export interface WebServer {
@@ -76,7 +78,8 @@ function readMemories(workingDir: string): { globalMemory: string; chatMemories:
 }
 
 export function createWebServer(config: WebServerConfig): WebServer {
-	const { workingDir, host, port, getSettings, setSettings, sender, echoFilter, agent, checkModelHealth } = config;
+	const { workingDir, host, port, getSettings, setSettings, sender, echoFilter, agent, checkModelHealth, reminders } =
+		config;
 	const sseClients = new Set<ServerResponse>();
 	let fsWatcher: ReturnType<typeof watch> | null = null;
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -175,6 +178,59 @@ export function createWebServer(config: WebServerConfig): WebServer {
 		if (request.method === "GET" && url.pathname === "/health/model") {
 			const result = await checkModelHealth();
 			jsonResponse(response, result.ok ? 200 : 503, result);
+			return;
+		}
+
+		// GET /reminders — list persisted reminders, optionally filtered by status
+		if (request.method === "GET" && url.pathname === "/reminders") {
+			const statusParam = url.searchParams.get("status");
+			if (statusParam && !REMINDER_STATUSES.includes(statusParam as ReminderStatus)) {
+				jsonResponse(response, 400, { error: `invalid status: ${statusParam}` });
+				return;
+			}
+			const status = (statusParam || undefined) as ReminderStatus | undefined;
+			jsonResponse(response, 200, { reminders: reminders.list(status) });
+			return;
+		}
+
+		// POST /reminders — persist a one-time reminder and deliver it at the requested instant
+		if (request.method === "POST" && url.pathname === "/reminders") {
+			try {
+				const body = await parseJsonBody(request);
+				if (
+					typeof body.chatGuid !== "string" ||
+					typeof body.text !== "string" ||
+					typeof body.scheduledAt !== "string"
+				) {
+					jsonResponse(response, 400, { error: "chatGuid, text, and scheduledAt are required strings" });
+					return;
+				}
+				if (body.idempotencyKey !== undefined && typeof body.idempotencyKey !== "string") {
+					jsonResponse(response, 400, { error: "idempotencyKey must be a string" });
+					return;
+				}
+				const result = reminders.create({
+					chatGuid: body.chatGuid,
+					text: body.text,
+					scheduledAt: body.scheduledAt,
+					idempotencyKey: body.idempotencyKey,
+				});
+				jsonResponse(response, result.created ? 201 : 200, { ok: true, ...result });
+			} catch (error) {
+				jsonResponse(response, 400, { error: error instanceof Error ? error.message : String(error) });
+			}
+			return;
+		}
+
+		// DELETE /reminders/:id — cancel a pending reminder
+		const reminderMatch = url.pathname.match(/^\/reminders\/([^/]+)$/);
+		if (request.method === "DELETE" && reminderMatch) {
+			const reminder = reminders.cancel(decodeURIComponent(reminderMatch[1]));
+			if (!reminder) {
+				jsonResponse(response, 404, { error: "pending reminder not found" });
+				return;
+			}
+			jsonResponse(response, 200, { ok: true, reminder });
 			return;
 		}
 

@@ -9,6 +9,7 @@ A minimal and self-managing iMessage bot — powered by [pi](https://github.com/
 - **Self-managing**: Turn the agent into whatever you need. He builds his own tools without pre-built assumptions
 - **Transparent**: tool calls and reasoning are sent to your iMessage chat, so you can see exactly what it's doing and why
 - **iMessage Integration**: Responds to DMs, SMS, and group chats; identifies who sent each message; understands quoted/reply-to messages
+- **Persistent Reminders**: Schedule one-time messages without per-reminder cron jobs; reminders survive restarts and retry transient failures
 - **Web UI**: browse chat history, toggle replies on/off per chat, live updates — disable with WEB_ENABLED=false and let the agent build your own web UI
 
 # Get Started
@@ -62,6 +63,9 @@ The agent is aware of these endpoints via its system prompt and can use them as 
 |---|---|---|
 | `POST /send` | Send text and/or a local file attachment to a chat (bypasses the agent) | `curl -X POST localhost:7750/send -d '{"chatGuid": "iMessage;-;+11234567890", "text": "hello"}'`<br>→ `{"ok": true}` |
 | `POST /prompt` | Feed a prompt to the agent asynchronously; replies are sent to the chat when ready | `curl -X POST localhost:7750/prompt -d '{"chatGuid": "iMessage;-;+11234567890", "prompt": "say hello"}'`<br>→ `{"ok": true}` |
+| `POST /reminders` | Schedule a persistent one-time reminder; `scheduledAt` requires an explicit timezone | `curl -X POST localhost:7750/reminders -d '{"chatGuid":"iMessage;-;+11234567890","text":"check the oven","scheduledAt":"2026-08-08T21:30:00+08:00"}'` |
+| `GET /reminders` | List reminders; optionally filter with `?status=pending` | `curl 'localhost:7750/reminders?status=pending'` |
+| `DELETE /reminders/:id` | Cancel a pending reminder | `curl -X DELETE localhost:7750/reminders/<id>` |
 | `GET /health/model` | Make a live request to the configured default AI model; returns HTTP 200 when healthy or 503 on failure | `curl localhost:7750/health/model`<br>→ `{"ok":true,"model":"openai/gpt-5","latencyMs":842,"checkedAt":"..."}` |
 
 ## Commands
