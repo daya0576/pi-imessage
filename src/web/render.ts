@@ -3,6 +3,8 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Eta } from "eta";
+import type { CronJobView, CronRun } from "../cron.js";
+import type { Reminder } from "../reminders.js";
 import { isReplyEnabled } from "../settings.js";
 import type { Settings } from "../settings.js";
 import { firstLinePreview, senderLabel } from "../store.js";
@@ -75,6 +77,17 @@ export function renderPage(blocks: ChatBlock[], settings: Settings): string {
 
 export function renderLogsPage(appLog: string, digestLog: string): string {
 	return eta.render("logs", { appLog, digestLog });
+}
+
+export interface ScheduledPageData {
+	jobs: CronJobView[];
+	runs: CronRun[];
+	reminders: Reminder[];
+	configPath: string;
+}
+
+export function renderScheduledPage(data: ScheduledPageData): string {
+	return eta.render("scheduled", data);
 }
 
 export interface ChatMemory {
