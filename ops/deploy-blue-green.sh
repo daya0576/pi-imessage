@@ -152,12 +152,18 @@ except FileNotFoundError:
     print(0); raise SystemExit
 for line in lines:
     line = line.lstrip("\x00")
-    start = re.match(r"^\[[^]]+\] \[agent\] prompt start: (.+?) model=", line)
-    end = re.match(r"^\[[^]]+\] \[agent\] prompt end: (.+?) total_ms=", line)
-    if start: state[start.group(1)] = True
-    elif end: state[end.group(1)] = False
-    elif re.match(r"^\[[^]]+\] \[sid\] Shutting down", line): state.clear()
-print(sum(state.values()))
+    start = re.match(r"^\[([^]]+)\] \[agent\] prompt start: (.+?) model=", line)
+    end = re.match(r"^\[([^]]+)\] \[agent\] prompt end: (.+?) total_ms=", line)
+    event = start or end
+    if event:
+        timestamp, chat = event.group(1), event.group(2)
+        # Tool output can quote older log lines. Only accept chronological state
+        # changes for each chat so quoted history cannot fake a prompt end.
+        if chat not in state or timestamp >= state[chat][0]:
+            state[chat] = (timestamp, bool(start))
+    elif re.match(r"^\[[^]]+\] \[sid\] Shutting down", line):
+        state.clear()
+print(sum(active for _, active in state.values()))
 PY
 }
 
