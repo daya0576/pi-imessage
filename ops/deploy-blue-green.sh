@@ -71,7 +71,9 @@ check_model() {
 }
 
 atomic_link() {
-  local target="$1" link="$2" temp="${link}.new.$$"
+  local target="$1"
+  local link="$2"
+  local temp="${link}.new.$$"
   rm -f "${temp}"
   ln -s "${target}" "${temp}"
   /bin/mv -fh "${temp}" "${link}"
@@ -135,7 +137,7 @@ kill -TERM "${GREEN_PID}"
 wait "${GREEN_PID}"
 GREEN_PID=""
 log "Green validation passed"
-send_progress "pi-imessage green 已通过测试和真实 LLM 健康检查，等待 active prompt 排空。"
+send_progress "pi-imessage 新版本已通过测试和真实 LLM 健康检查；等当前回复处理完后再切换。"
 
 # Never kill a live prompt. This also means an agent must launch this script in
 # detached mode after sending its reply, rather than synchronously as a tool.
