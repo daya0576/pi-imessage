@@ -46,7 +46,8 @@ cleanup() {
   fi
   rmdir "${LOCK_DIR}" 2>/dev/null || true
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT TERM
 
 json_field() {
   /usr/bin/python3 -c 'import json,sys; data=json.load(sys.stdin); value=data'"$1"'; print(str(value).lower() if isinstance(value,bool) else value)'
@@ -139,22 +140,23 @@ send_progress "pi-imessage green 已通过测试和真实 LLM 健康检查，等
 # Never kill a live prompt. This also means an agent must launch this script in
 # detached mode after sending its reply, rather than synchronously as a tool.
 legacy_active_prompts() {
-  /usr/bin/python3 - "${IMESSAGE_DIR}/app.log" <<'PY'
+  /usr/bin/python3 - "${IMESSAGE_DIR}/logs/stdout.log" <<'PY'
 import re, sys
 state = {}
 try:
     with open(sys.argv[1], "rb") as handle:
         handle.seek(0, 2)
-        handle.seek(max(0, handle.tell() - 500_000))
+        handle.seek(max(0, handle.tell() - 20_000_000))
         lines = handle.read().decode("utf-8", "replace").splitlines()
 except FileNotFoundError:
     print(0); raise SystemExit
 for line in lines:
+    line = line.lstrip("\x00")
     start = re.match(r"^\[[^]]+\] \[agent\] prompt start: (.+?) model=", line)
     end = re.match(r"^\[[^]]+\] \[agent\] prompt end: (.+?) total_ms=", line)
     if start: state[start.group(1)] = True
     elif end: state[end.group(1)] = False
-    elif "[sid] Shutting down" in line: state.clear()
+    elif re.match(r"^\[[^]]+\] \[sid\] Shutting down", line): state.clear()
 print(sum(state.values()))
 PY
 }
@@ -162,11 +164,13 @@ PY
 DEADLINE=$((SECONDS + DRAIN_TIMEOUT_SECONDS))
 while (( SECONDS < DEADLINE )); do
   RUNTIME="$(/usr/bin/curl -fsS --max-time 5 "${ACTIVE_URL}/health/runtime" 2>/dev/null || true)"
+  ACTIVE=""
   if [[ -n "${RUNTIME}" ]]; then
-    ACTIVE="$(printf '%s' "${RUNTIME}" | json_field '["activePrompts"]' 2>/dev/null || echo 1)"
-  else
-    ACTIVE="$(legacy_active_prompts)"
+    ACTIVE="$(printf '%s' "${RUNTIME}" | json_field '["activePrompts"]' 2>/dev/null || true)"
   fi
+  # Legacy releases return the HTML dashboard for unknown routes. Fall back to
+  # reconstructing active prompt state from the service log during the first migration.
+  if [[ ! "${ACTIVE}" =~ ^[0-9]+$ ]]; then ACTIVE="$(legacy_active_prompts)"; fi
   [[ "${ACTIVE}" == "0" ]] && break
   sleep 2
 done
