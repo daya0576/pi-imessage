@@ -1,5 +1,24 @@
 import { describe, expect, it, vi } from "vitest";
-import { clearAndAbortSession, runWithActivityTimeout, runWithTimeout } from "../agent.js";
+import {
+	clearAndAbortSession,
+	getAutoCompactTokenThreshold,
+	runWithActivityTimeout,
+	runWithTimeout,
+} from "../agent.js";
+
+describe("getAutoCompactTokenThreshold", () => {
+	it("defaults to 70% of the selected model context window", () => {
+		expect(getAutoCompactTokenThreshold(272_000, "")).toBe(190_400);
+	});
+
+	it("preserves the explicit token override", () => {
+		expect(getAutoCompactTokenThreshold(272_000, "225000")).toBe(225_000);
+	});
+
+	it("uses a conservative fallback when the model has no context metadata", () => {
+		expect(getAutoCompactTokenThreshold(undefined, "")).toBe(100_000);
+	});
+});
 
 describe("clearAndAbortSession", () => {
 	it("clears queued steering/follow-up messages before aborting", async () => {

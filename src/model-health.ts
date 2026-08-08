@@ -1,8 +1,7 @@
 /** Lightweight live check for the currently configured default AI model. */
 
 import type { UserMessage } from "@earendil-works/pi-ai";
-import { complete } from "@earendil-works/pi-ai/compat";
-import { AuthStorage, ModelRegistry, SettingsManager, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, SettingsManager, getAgentDir } from "@earendil-works/pi-coding-agent";
 
 const CHECK_TIMEOUT_MS = 30_000;
 
@@ -18,25 +17,26 @@ export type ModelHealthChecker = () => Promise<ModelHealthResult>;
 
 export function createModelHealthChecker(workingDir: string): ModelHealthChecker {
 	const agentDir = getAgentDir();
-	const modelRegistry = ModelRegistry.create(AuthStorage.create());
+	const modelRuntimePromise = ModelRuntime.create({
+		authPath: `${agentDir}/auth.json`,
+		modelsPath: `${agentDir}/models.json`,
+	});
 
 	return async (): Promise<ModelHealthResult> => {
 		const startedAt = Date.now();
 		let modelLabel: string | null = null;
 
 		try {
-			modelRegistry.refresh();
+			const modelRuntime = await modelRuntimePromise;
+			await modelRuntime.refresh();
 			const settings = SettingsManager.create(workingDir, agentDir);
 			const provider = settings.getDefaultProvider();
 			const modelId = settings.getDefaultModel();
 			if (!provider || !modelId) throw new Error("No default model configured");
 
-			const model = modelRegistry.find(provider, modelId);
+			const model = modelRuntime.getModel(provider, modelId);
 			modelLabel = `${provider}/${modelId}`;
 			if (!model) throw new Error(`Default model not found: ${modelLabel}`);
-
-			const auth = await modelRegistry.getApiKeyAndHeaders(model);
-			if (!auth.ok) throw new Error(auth.error);
 
 			console.log(`[health] model check start: ${modelLabel}`);
 			const message: UserMessage = {
@@ -44,12 +44,10 @@ export function createModelHealthChecker(workingDir: string): ModelHealthChecker
 				content: "Reply with exactly OK.",
 				timestamp: Date.now(),
 			};
-			const response = await complete(
+			const response = await modelRuntime.complete(
 				model,
 				{ messages: [message] },
 				{
-					apiKey: auth.apiKey,
-					headers: auth.headers,
 					maxTokens: 64,
 					maxRetries: 0,
 					timeoutMs: CHECK_TIMEOUT_MS,
@@ -59,8 +57,12 @@ export function createModelHealthChecker(workingDir: string): ModelHealthChecker
 			if (response.stopReason === "error" || response.stopReason === "aborted") {
 				throw new Error(response.errorMessage || `Model stopped with reason: ${response.stopReason}`);
 			}
-			const hasText = response.content.some((part) => part.type === "text" && part.text.trim().length > 0);
-			if (!hasText) throw new Error("Model returned no text");
+			const text = response.content
+				.filter((part): part is Extract<(typeof response.content)[number], { type: "text" }> => part.type === "text")
+				.map((part) => part.text)
+				.join("")
+				.trim();
+			if (text !== "OK") throw new Error(`Model health probe expected OK, received ${JSON.stringify(text)}`);
 
 			const result: ModelHealthResult = {
 				ok: true,

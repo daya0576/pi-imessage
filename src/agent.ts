@@ -17,9 +17,8 @@ import { type AssistantMessage, type Message, type TextContent, Type } from "@ea
 import type { CompactionResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	type AgentSession,
-	AuthStorage,
 	DefaultResourceLoader,
-	ModelRegistry,
+	ModelRuntime,
 	SessionManager,
 	SettingsManager,
 	createAgentSession,
@@ -39,7 +38,29 @@ export const AGENT_IDLE_TIMEOUT_MS = Number.parseInt(process.env.AGENT_IDLE_TIME
 
 /** Absolute safety ceiling that activity cannot extend. */
 export const AGENT_MAX_PROMPT_DURATION_MS = Number.parseInt(process.env.AGENT_MAX_PROMPT_DURATION_MS || "1800000", 10);
-export const AUTO_COMPACT_TOKEN_THRESHOLD = Number.parseInt(process.env.AGENT_AUTO_COMPACT_TOKENS || "100000", 10);
+export const AGENT_COMPACT_TIMEOUT_MS = Number.parseInt(process.env.AGENT_COMPACT_TIMEOUT_MS || "60000", 10);
+export const AUTO_COMPACT_CONTEXT_RATIO = Number.parseFloat(process.env.AGENT_AUTO_COMPACT_RATIO || "0.7");
+export const AUTO_COMPACT_FALLBACK_TOKENS = 100_000;
+
+/**
+ * Compact relative to the selected model's context window instead of using a
+ * fixed low threshold. AGENT_AUTO_COMPACT_TOKENS remains an explicit override.
+ */
+export function getAutoCompactTokenThreshold(
+	contextWindow?: number,
+	explicitTokens = process.env.AGENT_AUTO_COMPACT_TOKENS || ""
+): number {
+	const explicit = Number.parseInt(explicitTokens, 10);
+	if (Number.isFinite(explicit) && explicit > 0) return explicit;
+	if (typeof contextWindow !== "number" || !Number.isFinite(contextWindow) || contextWindow <= 0) {
+		return AUTO_COMPACT_FALLBACK_TOKENS;
+	}
+	const ratio =
+		Number.isFinite(AUTO_COMPACT_CONTEXT_RATIO) && AUTO_COMPACT_CONTEXT_RATIO > 0 && AUTO_COMPACT_CONTEXT_RATIO < 1
+			? AUTO_COMPACT_CONTEXT_RATIO
+			: 0.7;
+	return Math.floor(contextWindow * ratio);
+}
 
 const FAST_OPENAI_CODEX_MODELS = /^gpt-5\.6-(?:sol|terra|luna)$/;
 
@@ -489,9 +510,14 @@ function createMemoryExtension(workingDir: string, loadedIds: Set<string>) {
 export async function createAgentManager(config: AgentManagerConfig) {
 	const { workingDir } = config;
 	const sessionMap = new Map<string, ChatSession>();
+	let activePrompts = 0;
+	let lastAgentActivityAt: number | null = null;
 	const agentDir = getAgentDir();
 
-	const modelRegistry = ModelRegistry.create(AuthStorage.create());
+	const modelRuntime = await ModelRuntime.create({
+		authPath: join(agentDir, "auth.json"),
+		modelsPath: join(agentDir, "models.json"),
+	});
 
 	/** Create a new AgentSession for a chat, persisted to context.jsonl. */
 	async function createSession(chatGuid: string): Promise<ChatSession> {
@@ -531,7 +557,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		const { session } = await createAgentSession({
 			cwd: workingDir,
 			agentDir,
-			modelRegistry,
+			modelRuntime,
 			sessionManager,
 			settingsManager,
 			resourceLoader,
@@ -582,6 +608,8 @@ export async function createAgentManager(config: AgentManagerConfig) {
 			`[agent] prompt start: ${chatGuid} model=${modelLabel} queue_ms=${queueWaitMs} ` +
 				`chars=${promptText.length} images=${msg.images.length} "${promptText.substring(0, 60)}"`
 		);
+		activePrompts += 1;
+		lastAgentActivityAt = Date.now();
 
 		// Subscribe for this prompt's lifetime, routing events through handler
 		let replyChain = Promise.resolve();
@@ -600,6 +628,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		const unsubscribe = session.subscribe((event) => {
 			// Every session event proves the run is alive. This includes streamed
 			// message updates as well as tool lifecycle events.
+			lastAgentActivityAt = Date.now();
 			markActivity();
 			if (event.type === "message_start" && event.message.role === "assistant") {
 				firstAssistantStartMs ??= Date.now() - promptStart;
@@ -647,22 +676,6 @@ export async function createAgentManager(config: AgentManagerConfig) {
 				async (activity) => {
 					markActivity = activity;
 					activity();
-					const contextUsage = session.getContextUsage();
-					if (typeof contextUsage?.tokens === "number" && contextUsage.tokens >= AUTO_COMPACT_TOKEN_THRESHOLD) {
-						console.log(
-							`[agent] auto compact start: ${chatGuid} tokens=${contextUsage.tokens} ` +
-								`threshold=${AUTO_COMPACT_TOKEN_THRESHOLD}`
-						);
-						try {
-							const result = await session.compact();
-							console.log(`[agent] auto compact end: ${chatGuid} tokens_before=${result.tokensBefore}`);
-						} catch (error: unknown) {
-							const message = error instanceof Error ? error.message : String(error);
-							const safelySkippable = message.includes("Already compacted") || message.includes("Nothing to compact");
-							if (!safelySkippable) throw error;
-							console.log(`[agent] auto compact skipped: ${chatGuid} ${message}`);
-						}
-					}
 					await session.prompt(promptText, { images, streamingBehavior: options?.streamingBehavior });
 				},
 				(kind) => {
@@ -687,6 +700,33 @@ export async function createAgentManager(config: AgentManagerConfig) {
 					`handler_ms=${replyEnd - sessionEnd} first_token_ms=${firstAssistantStartMs ?? "n/a"} ` +
 					`generation_ms=${assistantDurationMs ?? "n/a"}`
 			);
+
+			// Never make the current user wait for preventive compaction. Reply
+			// first, mark the prompt complete, then compact before the next queued
+			// prompt only when the model-relative threshold has been crossed.
+			const contextUsage = session.getContextUsage();
+			const threshold = getAutoCompactTokenThreshold(session.model?.contextWindow);
+			if (typeof contextUsage?.tokens === "number" && contextUsage.tokens >= threshold) {
+				console.log(
+					`[agent] post-reply compact start: ${chatGuid} tokens=${contextUsage.tokens} threshold=${threshold} ` +
+						`context_window=${session.model?.contextWindow ?? "unknown"}`
+				);
+				try {
+					const result = await runWithTimeout(
+						() => session.compact(),
+						() => {
+							console.error(`[agent] post-reply compact timeout: ${chatGuid} after ${AGENT_COMPACT_TIMEOUT_MS}ms`);
+							if (sessionMap.get(chatGuid) === entry) sessionMap.delete(chatGuid);
+							void clearAndAbortSession(session).catch(() => {});
+						},
+						AGENT_COMPACT_TIMEOUT_MS
+					);
+					console.log(`[agent] post-reply compact end: ${chatGuid} tokens_before=${result.tokensBefore}`);
+				} catch (error: unknown) {
+					const message = error instanceof Error ? error.message : String(error);
+					console.log(`[agent] post-reply compact skipped: ${chatGuid} ${message}`);
+				}
+			}
 		} catch (error) {
 			// Never inject a steering message here. steer("stop") queues literal
 			// user text, which can survive a failed compaction and contaminate the
@@ -695,6 +735,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 			throw error;
 		} finally {
 			unsubscribe();
+			activePrompts = Math.max(0, activePrompts - 1);
 		}
 	}
 
@@ -781,7 +822,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 	 * Switch the requesting session to the current default model from settings.
 	 *
 	 * Mirrors pi TUI's /model command flow:
-	 *   1. modelRegistry.refresh() — reload models from disk
+	 *   1. modelRuntime.refresh() — reload models from disk
 	 *   2. Resolve model from settings (TUI uses manual selection instead)
 	 *   3. session.setModel() — updates agent + context.jsonl + settings.json
 	 *
@@ -789,11 +830,11 @@ export async function createAgentManager(config: AgentManagerConfig) {
 	 *   handleModelCommand() → getModelCandidates() → session.setModel()
 	 */
 	async function reload(chatGuid: string): Promise<void> {
-		modelRegistry.refresh();
+		await modelRuntime.refresh();
 		const settings = SettingsManager.create(workingDir, agentDir);
 		const provider = settings.getDefaultProvider();
 		const modelId = settings.getDefaultModel();
-		const newModel = provider && modelId ? modelRegistry.find(provider, modelId) : undefined;
+		const newModel = provider && modelId ? modelRuntime.getModel(provider, modelId) : undefined;
 
 		if (!newModel) {
 			console.log("[agent] reload: no default model in settings");
@@ -815,7 +856,15 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		);
 	}
 
-	return { processMessage, newSession, getSessionStatus, reload, stop, compact };
+	function getRuntimeStatus() {
+		return {
+			activePrompts,
+			sessions: sessionMap.size,
+			lastAgentActivityAt: lastAgentActivityAt === null ? null : new Date(lastAgentActivityAt).toISOString(),
+		};
+	}
+
+	return { processMessage, newSession, getSessionStatus, getRuntimeStatus, reload, stop, compact };
 }
 
 /** Format a token count as a compact string: 0, 1.2k, 5.9k, 12k, 1.8M, etc. */
@@ -827,7 +876,9 @@ function formatTokenCount(tokens: number): string {
 	return `${(tokens / 1_000_000).toFixed(1)}M`;
 }
 
+type CreatedAgentManager = Awaited<ReturnType<typeof createAgentManager>>;
 export type AgentManager = Pick<
-	Awaited<ReturnType<typeof createAgentManager>>,
+	CreatedAgentManager,
 	"processMessage" | "newSession" | "getSessionStatus" | "reload" | "stop" | "compact"
->;
+> &
+	Partial<Pick<CreatedAgentManager, "getRuntimeStatus">>;

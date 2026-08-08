@@ -22,6 +22,7 @@ import { createWebServer } from "./web/index.js";
 
 async function main() {
 	const webEnabled = process.env.WEB_ENABLED !== "false";
+	const workerEnabled = process.env.WORKER_ENABLED !== "false";
 	const webHost = process.env.WEB_HOST || "localhost";
 	const webPort = Number.parseInt(process.env.WEB_PORT || "7750", 10);
 	const workingDir = process.env.WORKING_DIR || join(homedir(), ".pi", "imessage");
@@ -66,9 +67,12 @@ async function main() {
 		: null;
 
 	console.log(`[sid] workspace:  ${workingDir}`);
-	watcher.start();
-	bot.start();
-	reminders.start();
+	console.log(`[sid] worker:     ${workerEnabled ? "active" : "shadow"}`);
+	if (workerEnabled) {
+		watcher.start();
+		bot.start();
+		reminders.start();
+	}
 	if (web) web.start();
 
 	let shuttingDown = false;
@@ -76,9 +80,11 @@ async function main() {
 		if (shuttingDown) return;
 		shuttingDown = true;
 		console.log("[sid] Shutting down…");
-		watcher.stop();
-		bot.stop();
-		await reminders.stop();
+		if (workerEnabled) {
+			watcher.stop();
+			bot.stop();
+			await reminders.stop();
+		}
 		await web?.stop();
 		digestLogger.close();
 		appLogger.close();

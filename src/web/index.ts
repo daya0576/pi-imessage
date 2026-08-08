@@ -174,6 +174,13 @@ export function createWebServer(config: WebServerConfig): WebServer {
 			return;
 		}
 
+		// GET /health/runtime — lightweight readiness/drain state for deployment.
+		if (request.method === "GET" && url.pathname === "/health/runtime") {
+			const runtime = agent.getRuntimeStatus?.() ?? { activePrompts: 0, sessions: 0, lastAgentActivityAt: null };
+			jsonResponse(response, 200, { ok: true, ...runtime });
+			return;
+		}
+
 		// GET /health/model — make a live request to the configured default AI model
 		if (request.method === "GET" && url.pathname === "/health/model") {
 			const result = await checkModelHealth();
