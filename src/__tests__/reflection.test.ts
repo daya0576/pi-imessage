@@ -18,6 +18,20 @@ function workspace(): string {
 	return mkdtempSync(join(tmpdir(), "pi-reflection-"));
 }
 
+function writeReflectionSettings(root: string): void {
+	writeFileSync(
+		join(root, "settings.json"),
+		`${JSON.stringify({
+			reflection: {
+				enabled: true,
+				hour: 3,
+				blogUrl: "https://example.test/atom.xml",
+				githubUser: "example-user",
+			},
+		})}\n`
+	);
+}
+
 function writeLog(root: string, chatGuid: string, messages: Array<Partial<Message>>): void {
 	mkdirSync(join(root, chatGuid), { recursive: true });
 	const lines = messages.map((message, index) =>
@@ -65,6 +79,7 @@ describe("parseReflectionProposal", () => {
 describe("runReflection", () => {
 	it("initializes a checkpoint when nothing is in the bootstrap window", async () => {
 		const root = workspace();
+		writeReflectionSettings(root);
 		writeLog(root, "iMessage;-;+1", [{ date: "2026-07-01T00:00:00.000Z", text: "ancient" }]);
 		let llmCalls = 0;
 		const result = await runReflection(root, {
@@ -85,6 +100,7 @@ describe("runReflection", () => {
 
 	it("does not advance the checkpoint when the llm fails", async () => {
 		const root = workspace();
+		writeReflectionSettings(root);
 		writeLog(root, "iMessage;-;+1", [{ date: "2026-08-09T10:00:00.000Z", text: "hello" }]);
 		await runReflection(root, {
 			now: new Date("2026-08-09T12:00:00.000Z"),
@@ -101,6 +117,7 @@ describe("runReflection", () => {
 
 	it("writes memory, a SYSTEM.md note, a skill, and a snapshot from mixed sources", async () => {
 		const root = workspace();
+		writeReflectionSettings(root);
 		writeLog(root, "iMessage;-;+1", [{ date: "2026-08-09T10:00:00.000Z", text: "派派不能在雷雨天出门" }]);
 		const result = await runReflection(root, {
 			now: new Date("2026-08-09T12:00:00.000Z"),
@@ -119,7 +136,7 @@ describe("runReflection", () => {
 						id: "9",
 						type: "PushEvent",
 						created_at: "2026-08-09T08:00:00Z",
-						repo: { name: "daya0576/pi-imessage" },
+						repo: { name: "example-user/pi-imessage" },
 						payload: { ref: "refs/heads/main", commits: [{ message: "add reflection" }] },
 					},
 				],

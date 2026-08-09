@@ -485,8 +485,8 @@ function reflectionSettings(workingDir: string): ReflectionSettings {
 		readSettings(workingDir).reflection ?? {
 			enabled: true,
 			hour: 3,
-			blogUrl: "https://changchen.me/atom.xml",
-			githubUser: "daya0576",
+			blogUrl: "",
+			githubUser: "",
 		}
 	);
 }

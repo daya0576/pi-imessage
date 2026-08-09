@@ -115,8 +115,8 @@ sequenceDiagram
     participant C as Nightly scheduler
     participant K as harness/checkpoint.json
     participant Chat as chat/*/log.jsonl
-    participant Blog as changchen.me/atom.xml
-    participant GH as GitHub daya0576 events
+    participant Blog as settings.reflection.blogUrl
+    participant GH as settings.reflection.githubUser
     participant R as Reflection LLM
     participant H as harness/snapshots/
     participant M as save_memory
@@ -157,7 +157,7 @@ sequenceDiagram
 
 Reflection rules:
 
-- Inputs are chat logs, blog Atom (`https://changchen.me/atom.xml`), and GitHub public events (`daya0576`). Each source has its own checkpoint.
+- Inputs are chat logs plus optional blog Atom/RSS (`settings.reflection.blogUrl`) and GitHub public events (`settings.reflection.githubUser`). Empty URL/user skips that source. Each source has its own checkpoint.
 - First-seen chats and first GitHub pass only review the last 48 hours; older items are marked seen without reflecting.
 - Empty blog checkpoint ingests every post currently in the Atom/RSS feed (full available history), then advances `seenGuids`.
 - Runtime writes capture facts promptly; nightly reflection catches omissions across chats and external activity.

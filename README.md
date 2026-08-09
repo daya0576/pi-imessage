@@ -60,10 +60,11 @@ for migration, retrieval, and write behavior.
 Each night (local 03:00 by default) the bot reviews new signals from:
 
 - chat `log.jsonl` files
-- blog Atom feed (`https://changchen.me/atom.xml`)
-- GitHub public events (`daya0576`)
+- optional blog Atom/RSS feed (`settings.reflection.blogUrl`)
+- optional GitHub public events (`settings.reflection.githubUser`)
 
-It applies small evidence-backed updates:
+Empty `blogUrl` / `githubUser` skips that source. It applies small evidence-backed
+updates:
 
 - durable facts → structured memory (`save_memory`)
 - standing instructions → `# Prompt Notes` in `SYSTEM.md`
@@ -122,8 +123,8 @@ All fields are optional.
   "reflection": {
     "enabled": true,
     "hour": 3,
-    "blogUrl": "https://changchen.me/atom.xml",
-    "githubUser": "daya0576"
+    "blogUrl": "https://example.com/atom.xml",
+    "githubUser": "your-github-username"
   }
 }
 ```
@@ -132,7 +133,7 @@ All fields are optional.
 
 **Rich text** is optional and disabled by default. When enabled, pi-imessage uses a UI automation fallback to open the target conversation, paste an RTF payload, and send it. Currently this is intended for direct-message iMessage chats. With `markdown: true`, pi-imessage interprets `**bold**` spans and renders them as actual bold text in Messages.
 
-**Reflection** runs nightly at the local `hour` (0–23, default 3). Set `enabled` to `false` to pause it.
+**Reflection** runs nightly at the local `hour` (0–23, default 3). Set `enabled` to `false` to pause it. Set `blogUrl` to an Atom/RSS URL and/or `githubUser` to a GitHub login to include those sources; omit or leave them empty to skip.
 
 ## Environment Variables
 

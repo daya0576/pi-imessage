@@ -54,8 +54,8 @@ const DEFAULT_RICH_TEXT: RichTextSettings = { enabled: false, markdown: true };
 const DEFAULT_REFLECTION: ReflectionSettings = {
 	enabled: true,
 	hour: 3,
-	blogUrl: "https://changchen.me/atom.xml",
-	githubUser: "daya0576",
+	blogUrl: "",
+	githubUser: "",
 };
 const DEFAULT_SETTINGS: Settings = {
 	chatAllowlist: DEFAULT_CHAT_ALLOWLIST,
@@ -110,12 +110,9 @@ export function readSettings(workingDir: string): Settings {
 			reflection: {
 				enabled: typeof reflectionRaw.enabled === "boolean" ? reflectionRaw.enabled : DEFAULT_REFLECTION.enabled,
 				hour: Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : DEFAULT_REFLECTION.hour,
-				blogUrl:
-					typeof reflectionRaw.blogUrl === "string" && reflectionRaw.blogUrl.trim()
-						? reflectionRaw.blogUrl.trim()
-						: DEFAULT_REFLECTION.blogUrl,
+				blogUrl: typeof reflectionRaw.blogUrl === "string" ? reflectionRaw.blogUrl.trim() : DEFAULT_REFLECTION.blogUrl,
 				githubUser:
-					typeof reflectionRaw.githubUser === "string" && reflectionRaw.githubUser.trim()
+					typeof reflectionRaw.githubUser === "string"
 						? reflectionRaw.githubUser.trim()
 						: DEFAULT_REFLECTION.githubUser,
 			},
