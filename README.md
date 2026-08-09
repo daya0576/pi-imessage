@@ -123,8 +123,8 @@ All fields are optional.
   "reflection": {
     "enabled": true,
     "hour": 3,
-    "blogUrl": "https://example.com/atom.xml",
-    "githubUser": "your-github-username"
+    "blogUrl": "",
+    "githubUser": ""
   }
 }
 ```
@@ -133,7 +133,7 @@ All fields are optional.
 
 **Rich text** is optional and disabled by default. When enabled, pi-imessage uses a UI automation fallback to open the target conversation, paste an RTF payload, and send it. Currently this is intended for direct-message iMessage chats. With `markdown: true`, pi-imessage interprets `**bold**` spans and renders them as actual bold text in Messages.
 
-**Reflection** runs nightly at the local `hour` (0–23, default 3). Set `enabled` to `false` to pause it. Set `blogUrl` to an Atom/RSS URL and/or `githubUser` to a GitHub login to include those sources; omit or leave them empty to skip.
+**Reflection** runs nightly at the local `hour` (0–23, default 3). Set `enabled` to `false` to pause it. Set `blogUrl` (Atom/RSS URL) and/or `githubUser` (GitHub login) in settings to enable those sources; leave empty to skip.
 
 ## Environment Variables
 
