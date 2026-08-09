@@ -115,7 +115,7 @@ sequenceDiagram
     participant C as Nightly scheduler
     participant K as harness/checkpoint.json
     participant Chat as chat/*/log.jsonl
-    participant Blog as settings.reflection.blogUrl
+    participant Atom as settings.reflection.atomFeeds
     participant GH as settings.reflection.githubUser
     participant R as Reflection LLM
     participant H as harness/snapshots/
@@ -125,11 +125,11 @@ sequenceDiagram
 
     C->>K: Read per-source checkpoints
     C->>Chat: Unprocessed lines (48h bootstrap on first seen chat)
-    Note over Blog: Empty blog checkpoint ingests full feed history
-    C->>Blog: Unseen feed guids
+    Note over Atom: New feed checkpoint ingests full feed history
+    C->>Atom: Unseen feed guids (per URL)
     C->>GH: Unseen public event ids
     Chat-->>R: chat signals
-    Blog-->>R: blog signals
+    Atom-->>R: atom signals
     GH-->>R: github signals
     Note over R: Also receives current memory, notes, skills
 
@@ -157,9 +157,9 @@ sequenceDiagram
 
 Reflection rules:
 
-- Inputs are chat logs plus optional blog Atom/RSS (`settings.reflection.blogUrl`) and GitHub public events (`settings.reflection.githubUser`). Empty URL/user skips that source. Each source has its own checkpoint.
+- Inputs are chat logs plus optional Atom/RSS feeds (`settings.reflection.atomFeeds`, a URL list) and GitHub public events (`settings.reflection.githubUser`). Empty list/user skips that source. Each source has its own checkpoint.
 - First-seen chats and first GitHub pass only review the last 48 hours; older items are marked seen without reflecting.
-- Empty blog checkpoint ingests every post currently in the Atom/RSS feed (full available history), then advances `seenGuids`.
+- A new Atom feed with no checkpoint ingests every entry currently in that feed, then advances per-feed `seenGuids`.
 - Runtime writes capture facts promptly; nightly reflection catches omissions across chats and external activity.
 - Do not advance the checkpoint after a failed run.
 - Reflection and runtime writes share `save_memory`. Neither writes directly to JSONL or legacy `MEMORY.md`.
@@ -171,7 +171,7 @@ Reflection rules:
 ## Responsibility boundaries
 
 - Main LLM: understand natural language, select namespaces, decide whether to remember, and produce structured fields.
-- Reflection LLM: inspect unprocessed chats / blog / GitHub signals, catch omissions, deduplicate, and propose small skill / `SYSTEM.md` note updates.
+- Reflection LLM: inspect unprocessed chats / atom / GitHub signals, catch omissions, deduplicate, and propose small skill / `SYSTEM.md` note updates.
 - Memory Tool: read, validate, deduplicate, append, and apply superseding corrections without interpreting natural language through keyword lists.
 - v2 JSONL: the sole structured-memory source of truth.
 - Coverage Manifest: proves that no legacy `MEMORY.md` source block was silently skipped.

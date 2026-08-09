@@ -60,10 +60,10 @@ for migration, retrieval, and write behavior.
 Each night (local 03:00 by default) the bot reviews new signals from:
 
 - chat `log.jsonl` files
-- optional blog Atom/RSS feed (`settings.reflection.blogUrl`)
+- optional Atom/RSS feeds (`settings.reflection.atomFeeds`)
 - optional GitHub public events (`settings.reflection.githubUser`)
 
-Empty `blogUrl` / `githubUser` skips that source. It applies small evidence-backed
+Empty `atomFeeds` / `githubUser` skips that source. It applies small evidence-backed
 updates:
 
 - durable facts → structured memory (`save_memory`)
@@ -72,8 +72,8 @@ updates:
 
 Each source has its own checkpoint under `WORKING_DIR/harness/`. Note/skill
 edits are snapshotted and can be rolled back. First pass for chats and GitHub
-only reviews the last 48 hours; an empty blog checkpoint ingests the full
-Atom/RSS history currently in the feed.
+only reviews the last 48 hours; a new Atom feed with no checkpoint ingests the
+full history currently in that feed.
 
 Trigger manually with `/reflect`, `pi-imessage reflect`, or `POST /reflect`.
 
@@ -104,7 +104,7 @@ Send these as iMessage to interact with the bot:
 | `/compact` | Compress session context to free up token space | `✓ Compacted: 15.2k → 2.1k tokens` |
 | `/stop` | Steer the agent to stop after current tool calls finish, then process the next queued message | |
 | `/reload` | Reload models and clear all sessions | `✓ Models reloaded` |
-| `/reflect` | Run nightly reflection now | `✓ Reflection: chat 12, blog 1, github 3` |
+| `/reflect` | Run nightly reflection now | `✓ Reflection: chat 12, atom 1, github 3` |
 
 ## Settings (`WORKING_DIR/settings.json`)
 
@@ -123,7 +123,7 @@ All fields are optional.
   "reflection": {
     "enabled": true,
     "hour": 3,
-    "blogUrl": "",
+    "atomFeeds": [],
     "githubUser": ""
   }
 }
@@ -133,7 +133,7 @@ All fields are optional.
 
 **Rich text** is optional and disabled by default. When enabled, pi-imessage uses a UI automation fallback to open the target conversation, paste an RTF payload, and send it. Currently this is intended for direct-message iMessage chats. With `markdown: true`, pi-imessage interprets `**bold**` spans and renders them as actual bold text in Messages.
 
-**Reflection** runs nightly at the local `hour` (0–23, default 3). Set `enabled` to `false` to pause it. Set `blogUrl` (Atom/RSS URL) and/or `githubUser` (GitHub login) in settings to enable those sources; leave empty to skip.
+**Reflection** runs nightly at the local `hour` (0–23, default 3). Set `enabled` to `false` to pause it. Set `atomFeeds` to a list of Atom/RSS URLs and/or `githubUser` to a GitHub login to include those sources; leave empty to skip.
 
 ## Environment Variables
 

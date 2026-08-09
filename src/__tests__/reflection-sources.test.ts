@@ -34,16 +34,16 @@ describe("parseRssOrAtomItems", () => {
 		const xml = `<?xml version="1.0"?>
 <rss><channel>
 <item>
-  <title>派派成长日记</title>
-  <link>https://changchen.me/blog/a/</link>
-  <guid>https://changchen.me/blog/a/</guid>
+  <title>成长日记</title>
+  <link>https://example.test/a/</link>
+  <guid>https://example.test/a/</guid>
   <pubDate>Sun, 19 Jul 2026 08:50:17 +0800</pubDate>
   <description><![CDATA[<p>hello world</p>]]></description>
 </item>
 </channel></rss>`;
 		const items = parseRssOrAtomItems(xml);
 		expect(items).toHaveLength(1);
-		expect(items[0]?.title).toBe("派派成长日记");
+		expect(items[0]?.title).toBe("成长日记");
 		expect(items[0]?.description).toContain("hello world");
 	});
 });
@@ -54,19 +54,19 @@ describe("summarizeGithubEvent", () => {
 			id: "1",
 			type: "PushEvent",
 			created_at: "2026-08-09T08:00:00Z",
-			repo: { name: "daya0576/beaverhabits" },
+			repo: { name: "example-user/repo" },
 			payload: {
 				ref: "refs/heads/main",
 				commits: [{ message: "fix landing" }, { message: "tweak copy" }],
 			},
 		});
-		expect(item?.label).toContain("beaverhabits");
+		expect(item?.label).toContain("repo");
 		expect(item?.text).toContain("fix landing");
 	});
 });
 
 describe("collectReflectionSources", () => {
-	it("collects chat, blog, and github increments with independent checkpoints", async () => {
+	it("collects chat, atom feeds, and github increments with independent checkpoints", async () => {
 		const root = workspace();
 		const now = new Date("2026-08-09T12:00:00.000Z");
 		writeLog(root, "iMessage;-;+1", [
@@ -77,11 +77,13 @@ describe("collectReflectionSources", () => {
 		const first = await collectReflectionSources({
 			workingDir: root,
 			checkpoint: emptySourceCheckpoints(),
-			blogUrl: "https://example.test/atom.xml",
-			githubUser: "daya0576",
+			atomFeeds: ["https://example.test/a.xml", "https://example.test/b.xml"],
+			githubUser: "example-user",
 			now,
 			fetchers: {
-				fetchBlogFeed: async () => `<?xml version="1.0"?>
+				fetchAtomFeed: async (url) => {
+					if (url.endsWith("a.xml")) {
+						return `<?xml version="1.0"?>
 <rss><channel>
 <item>
   <title>Old post</title>
@@ -93,22 +95,33 @@ describe("collectReflectionSources", () => {
   <title>New post</title>
   <guid>new-post</guid>
   <pubDate>Sat, 08 Aug 2026 20:00:00 +0800</pubDate>
-  <description>fresh blog</description>
+  <description>fresh</description>
 </item>
-</channel></rss>`,
+</channel></rss>`;
+					}
+					return `<?xml version="1.0"?>
+<rss><channel>
+<item>
+  <title>Other feed</title>
+  <guid>other-1</guid>
+  <pubDate>Fri, 07 Aug 2026 12:00:00 +0800</pubDate>
+  <description>second feed</description>
+</item>
+</channel></rss>`;
+				},
 				fetchGithubEvents: async () => [
 					{
 						id: "100",
 						type: "PushEvent",
 						created_at: "2026-06-01T00:00:00Z",
-						repo: { name: "daya0576/old" },
+						repo: { name: "example-user/old" },
 						payload: { ref: "refs/heads/main", commits: [{ message: "old" }] },
 					},
 					{
 						id: "200",
 						type: "PushEvent",
 						created_at: "2026-08-09T08:00:00Z",
-						repo: { name: "daya0576/beaverhabits" },
+						repo: { name: "example-user/repo" },
 						payload: { ref: "refs/heads/main", commits: [{ message: "ship it" }] },
 					},
 				],
@@ -118,32 +131,43 @@ describe("collectReflectionSources", () => {
 		expect(first.items.some((item) => item.text.includes("recent chat"))).toBe(true);
 		expect(
 			first.items
-				.filter((item) => item.source === "blog")
+				.filter((item) => item.source === "atom")
 				.map((item) => item.id)
 				.sort()
-		).toEqual(["new-post", "old-post"]);
+		).toEqual(["new-post", "old-post", "other-1"]);
 		expect(first.items.some((item) => item.id === "200")).toBe(true);
-		expect(first.next.blog.seenGuids).toEqual(expect.arrayContaining(["old-post", "new-post"]));
+		expect(first.next.atom["https://example.test/a.xml"]?.seenGuids).toEqual(
+			expect.arrayContaining(["old-post", "new-post"])
+		);
+		expect(first.next.atom["https://example.test/b.xml"]?.seenGuids).toContain("other-1");
 		expect(first.next.github.seenIds).toContain("100");
-		expect(first.bootstrapped.blog).toBe(true);
+		expect(first.bootstrapped.atom).toBe(true);
 
 		const second = await collectReflectionSources({
 			workingDir: root,
 			checkpoint: first.next,
-			blogUrl: "https://example.test/atom.xml",
-			githubUser: "daya0576",
+			atomFeeds: ["https://example.test/a.xml", "https://example.test/b.xml"],
+			githubUser: "example-user",
 			now: new Date("2026-08-09T13:00:00.000Z"),
 			fetchers: {
-				fetchBlogFeed: async () => `<?xml version="1.0"?>
+				fetchAtomFeed: async (url) => {
+					if (url.endsWith("a.xml")) {
+						return `<?xml version="1.0"?>
 <rss><channel>
-<item><title>New post</title><guid>new-post</guid><pubDate>Sat, 08 Aug 2026 20:00:00 +0800</pubDate><description>fresh blog</description></item>
-</channel></rss>`,
+<item><title>New post</title><guid>new-post</guid><pubDate>Sat, 08 Aug 2026 20:00:00 +0800</pubDate><description>fresh</description></item>
+</channel></rss>`;
+					}
+					return `<?xml version="1.0"?>
+<rss><channel>
+<item><title>Other feed</title><guid>other-1</guid><pubDate>Fri, 07 Aug 2026 12:00:00 +0800</pubDate><description>second feed</description></item>
+</channel></rss>`;
+				},
 				fetchGithubEvents: async () => [
 					{
 						id: "200",
 						type: "PushEvent",
 						created_at: "2026-08-09T08:00:00Z",
-						repo: { name: "daya0576/beaverhabits" },
+						repo: { name: "example-user/repo" },
 						payload: { ref: "refs/heads/main", commits: [{ message: "ship it" }] },
 					},
 				],

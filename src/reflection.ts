@@ -1,5 +1,5 @@
 /**
- * Nightly reflection over chat logs, blog Atom, and GitHub events.
+ * Nightly reflection over chat logs, Atom feeds, and GitHub events.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -93,7 +93,7 @@ export interface ReflectionResult {
 	skillsChanged: number;
 	chats: number;
 	chatMessages: number;
-	blog: number;
+	atom: number;
 	github: number;
 	error?: string;
 }
@@ -105,7 +105,7 @@ export interface ReflectionPromptInput {
 	memories: Array<{ id: string; namespace: string; kind: string; text: string; event_time: string | null }>;
 	skills: string;
 	notes: string;
-	sources: { blogUrl: string; githubUser: string };
+	sources: { atomFeeds: string[]; githubUser: string };
 }
 
 export function checkpointPath(workingDir: string): string {
@@ -137,7 +137,7 @@ export function readCheckpoint(workingDir: string): ReflectionCheckpoint {
 			lastSnapshotId: parsed.lastSnapshotId ?? null,
 			lastSummary: parsed.lastSummary ?? null,
 			chats: parsed.chats ?? {},
-			blog: { seenGuids: Array.isArray(parsed.blog?.seenGuids) ? parsed.blog.seenGuids : [] },
+			atom: readAtomCheckpoint(parsed.atom),
 			github: { seenIds: Array.isArray(parsed.github?.seenIds) ? parsed.github.seenIds : [] },
 		};
 	} catch (error) {
@@ -149,10 +149,10 @@ export function readCheckpoint(workingDir: string): ReflectionCheckpoint {
 export function formatReflectionSummary(result: ReflectionResult): string {
 	if (!result.ok) return `✗ Reflection failed: ${result.error ?? "unknown error"}`;
 	if (result.initialized) return "✓ Reflection checkpoint initialized — new signals will be reviewed tonight";
-	if (result.skipped) return "✓ Reflection: no new chat / blog / GitHub signals";
+	if (result.skipped) return "✓ Reflection: no new chat / atom / GitHub signals";
 	const snapshot = result.snapshotId ? `\nsnapshot ${result.snapshotId}` : "";
 	return (
-		`✓ Reflection: chat ${result.chatMessages}, blog ${result.blog}, github ${result.github}\n` +
+		`✓ Reflection: chat ${result.chatMessages}, atom ${result.atom}, github ${result.github}\n` +
 		`memories +${result.memoriesAdded}, notes ${result.notesChanged}, skills ${result.skillsChanged}${snapshot}`
 	);
 }
@@ -196,7 +196,7 @@ export async function runReflection(
 			collected = await collectReflectionSources({
 				workingDir,
 				checkpoint,
-				blogUrl: settings.blogUrl,
+				atomFeeds: settings.atomFeeds,
 				githubUser: settings.githubUser,
 				now,
 				fetchers: options.fetchers,
@@ -212,7 +212,7 @@ export async function runReflection(
 		const initializing =
 			!hadCheckpointFile &&
 			checkpoint.lastRunAt === null &&
-			(bootstrapped.chats || bootstrapped.blog || bootstrapped.github);
+			(bootstrapped.chats || bootstrapped.atom || bootstrapped.github);
 
 		if (items.length === 0) {
 			const updated = { ...checkpoint, ...next, lastRunAt: now.toISOString() };
@@ -230,13 +230,13 @@ export async function runReflection(
 				skillsChanged: 0,
 				chats: stats.chats,
 				chatMessages: 0,
-				blog: 0,
+				atom: 0,
 				github: 0,
 			};
 		}
 
 		console.log(
-			`[reflection] start: chats=${stats.chats} chat_messages=${stats.chatMessages} blog=${stats.blog} github=${stats.github} trigger=${trigger}`
+			`[reflection] start: chats=${stats.chats} chat_messages=${stats.chatMessages} atom=${stats.atom} github=${stats.github} trigger=${trigger}`
 		);
 
 		let proposal: ReflectionProposal;
@@ -247,7 +247,7 @@ export async function runReflection(
 				memories: memorySummaries(workingDir),
 				skills: formatSkillCatalog(listSkillCatalog(workingDir)),
 				notes: formatNotesForPrompt(workingDir, Object.keys(next.chats)),
-				sources: { blogUrl: settings.blogUrl, githubUser: settings.githubUser },
+				sources: { atomFeeds: settings.atomFeeds, githubUser: settings.githubUser },
 			});
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -257,7 +257,7 @@ export async function runReflection(
 				...failureResult(message),
 				chats: stats.chats,
 				chatMessages: stats.chatMessages,
-				blog: stats.blog,
+				atom: stats.atom,
 				github: stats.github,
 			};
 		}
@@ -330,7 +330,7 @@ export async function runReflection(
 				skillsChanged,
 				chats: stats.chats,
 				chatMessages: stats.chatMessages,
-				blog: stats.blog,
+				atom: stats.atom,
 				github: stats.github,
 			};
 		} catch (error) {
@@ -355,7 +355,7 @@ export async function runReflection(
 				snapshotId,
 				chats: stats.chats,
 				chatMessages: stats.chatMessages,
-				blog: stats.blog,
+				atom: stats.atom,
 				github: stats.github,
 			};
 		}
@@ -441,11 +441,11 @@ export function buildReflectionPrompt(input: ReflectionPromptInput): string {
 					.join("\n");
 
 	return `You are the nightly reflection refiner for an iMessage agent.
-Read new signals from chat logs, the blog feed, and GitHub activity. Propose the smallest evidence-backed harness updates.
+Read new signals from chat logs, Atom/RSS feeds, and GitHub activity. Propose the smallest evidence-backed harness updates.
 
 Configured external sources:
-- blog: ${input.sources.blogUrl}
-- github: ${input.sources.githubUser}
+- atomFeeds: ${input.sources.atomFeeds.length ? input.sources.atomFeeds.join(", ") : "(none)"}
+- github: ${input.sources.githubUser || "(none)"}
 
 Return ONLY JSON with this shape:
 {
@@ -459,7 +459,7 @@ Rules:
 - Do not store a daily summary. Store only durable atomic facts.
 - Facts, events, preferences → memories. Reusable multi-step workflows → skills, not procedure memories.
 - Standing behavioral instructions → prompt notes. Keep notes short. Update or delete instead of duplicating.
-- Blog posts and GitHub activity are first-class evidence, same as chats.
+- Atom/RSS entries and GitHub activity are first-class evidence, same as chats.
 - Smallest edit. Empty arrays are fine if nothing durable appeared.
 - event_time must be YYYY-MM-DD or null. Never invent a date.
 - Skill names are lowercase kebab-case. Never touch file-memory. Write SKILL.md instructions only, no scripts.
@@ -485,7 +485,7 @@ function reflectionSettings(workingDir: string): ReflectionSettings {
 		readSettings(workingDir).reflection ?? {
 			enabled: true,
 			hour: 3,
-			blogUrl: "",
+			atomFeeds: [],
 			githubUser: "",
 		}
 	);
@@ -762,8 +762,21 @@ function failureResult(message: string): ReflectionResult {
 		skillsChanged: 0,
 		chats: 0,
 		chatMessages: 0,
-		blog: 0,
+		atom: 0,
 		github: 0,
 		error: message,
 	};
+}
+
+function readAtomCheckpoint(raw: unknown): Record<string, { seenGuids: string[] }> {
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+	const atom: Record<string, { seenGuids: string[] }> = {};
+	for (const [feedUrl, state] of Object.entries(raw as Record<string, unknown>)) {
+		if (!feedUrl.trim() || !state || typeof state !== "object") continue;
+		const seenGuids = (state as { seenGuids?: unknown }).seenGuids;
+		atom[feedUrl] = {
+			seenGuids: Array.isArray(seenGuids) ? seenGuids.filter((id): id is string => typeof id === "string") : [],
+		};
+	}
+	return atom;
 }

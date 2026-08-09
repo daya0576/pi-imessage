@@ -27,7 +27,7 @@
 
 ## Memory
 - [x] Structured memory v2
-- [x] Nightly reflection over chat logs + blog Atom + GitHub events
+- [x] Nightly reflection over chat logs + Atom feeds + GitHub events
 - [x] `SYSTEM.md` prompt notes + harness snapshots
 
 ## Sandbox

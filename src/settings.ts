@@ -39,7 +39,8 @@ export interface ReflectionSettings {
 	enabled: boolean;
 	/** Local hour (0-23) when nightly reflection runs. */
 	hour: number;
-	blogUrl: string;
+	/** Atom/RSS feed URLs to ingest. Empty list skips Atom sources. */
+	atomFeeds: string[];
 	githubUser: string;
 }
 
@@ -54,7 +55,7 @@ const DEFAULT_RICH_TEXT: RichTextSettings = { enabled: false, markdown: true };
 const DEFAULT_REFLECTION: ReflectionSettings = {
 	enabled: true,
 	hour: 3,
-	blogUrl: "",
+	atomFeeds: [],
 	githubUser: "",
 };
 const DEFAULT_SETTINGS: Settings = {
@@ -91,8 +92,9 @@ export function readSettings(workingDir: string): Settings {
 		const chatAllowlistRaw = (raw.chatAllowlist ?? {}) as Partial<ChatAllowlist>;
 
 		const richTextRaw = (raw.richText ?? {}) as Partial<RichTextSettings>;
-		const reflectionRaw = (raw.reflection ?? {}) as Partial<ReflectionSettings>;
+		const reflectionRaw = (raw.reflection ?? {}) as Record<string, unknown>;
 		const hour = typeof reflectionRaw.hour === "number" ? reflectionRaw.hour : DEFAULT_REFLECTION.hour;
+		const atomFeeds = readStringList(reflectionRaw.atomFeeds) ?? DEFAULT_REFLECTION.atomFeeds;
 
 		return {
 			chatAllowlist: {
@@ -110,7 +112,7 @@ export function readSettings(workingDir: string): Settings {
 			reflection: {
 				enabled: typeof reflectionRaw.enabled === "boolean" ? reflectionRaw.enabled : DEFAULT_REFLECTION.enabled,
 				hour: Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : DEFAULT_REFLECTION.hour,
-				blogUrl: typeof reflectionRaw.blogUrl === "string" ? reflectionRaw.blogUrl.trim() : DEFAULT_REFLECTION.blogUrl,
+				atomFeeds,
 				githubUser:
 					typeof reflectionRaw.githubUser === "string"
 						? reflectionRaw.githubUser.trim()
@@ -124,4 +126,12 @@ export function readSettings(workingDir: string): Settings {
 
 export function writeSettings(workingDir: string, settings: Settings): void {
 	writeFileSync(settingsPath(workingDir), `${JSON.stringify(settings, null, 2)}\n`, "utf-8");
+}
+
+function readStringList(value: unknown): string[] | null {
+	if (!Array.isArray(value)) return null;
+	return value
+		.filter((item): item is string => typeof item === "string")
+		.map((item) => item.trim())
+		.filter(Boolean);
 }

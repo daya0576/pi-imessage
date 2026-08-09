@@ -1,18 +1,18 @@
 /**
  * Incremental collectors for nightly reflection inputs:
- * chat logs, blog Atom/RSS, GitHub public events.
+ * chat logs, Atom/RSS feeds, GitHub public events.
  */
 
 import { type Message, listChatGuids, readChatLog } from "./store.js";
 
 export const BOOTSTRAP_MS = 48 * 60 * 60 * 1000;
 export const MAX_CHAT_MESSAGES = 40;
-export const MAX_BLOG_ITEMS = 20;
+export const MAX_ATOM_ITEMS = 20;
 export const MAX_GITHUB_EVENTS = 30;
 export const MAX_MESSAGE_CHARS = 500;
-export const MAX_BLOG_CHARS = 1200;
+export const MAX_ATOM_CHARS = 1200;
 
-export type ReflectionSourceKind = "chat" | "blog" | "github";
+export type ReflectionSourceKind = "chat" | "atom" | "github";
 
 export interface ReflectionSourceItem {
 	source: ReflectionSourceKind;
@@ -24,52 +24,55 @@ export interface ReflectionSourceItem {
 
 export interface SourceCheckpoints {
 	chats: Record<string, { processedLines: number }>;
-	blog: { seenGuids: string[] };
+	/** Per Atom feed URL → seen entry ids. */
+	atom: Record<string, { seenGuids: string[] }>;
 	github: { seenIds: string[] };
 }
 
 export interface CollectedSources {
 	items: ReflectionSourceItem[];
 	next: SourceCheckpoints;
-	stats: { chats: number; chatMessages: number; blog: number; github: number };
-	bootstrapped: { chats: boolean; blog: boolean; github: boolean };
+	stats: { chats: number; chatMessages: number; atom: number; github: number };
+	bootstrapped: { chats: boolean; atom: boolean; github: boolean };
 }
 
 export interface SourceFetchers {
-	fetchBlogFeed?: (url: string) => Promise<string>;
+	fetchAtomFeed?: (url: string) => Promise<string>;
 	fetchGithubEvents?: (user: string) => Promise<unknown>;
 }
 
 export interface CollectSourcesInput {
 	workingDir: string;
 	checkpoint: SourceCheckpoints;
-	blogUrl: string;
+	atomFeeds: string[];
 	githubUser: string;
 	now?: Date;
 	fetchers?: SourceFetchers;
 }
 
 export function emptySourceCheckpoints(): SourceCheckpoints {
-	return { chats: {}, blog: { seenGuids: [] }, github: { seenIds: [] } };
+	return { chats: {}, atom: {}, github: { seenIds: [] } };
 }
 
 export async function collectReflectionSources(input: CollectSourcesInput): Promise<CollectedSources> {
 	const now = input.now ?? new Date();
 	const next: SourceCheckpoints = {
 		chats: { ...input.checkpoint.chats },
-		blog: { seenGuids: [...input.checkpoint.blog.seenGuids] },
+		atom: Object.fromEntries(
+			Object.entries(input.checkpoint.atom).map(([feedUrl, state]) => [feedUrl, { seenGuids: [...state.seenGuids] }])
+		),
 		github: { seenIds: [...input.checkpoint.github.seenIds] },
 	};
 	const items: ReflectionSourceItem[] = [];
-	const bootstrapped = { chats: false, blog: false, github: false };
+	const bootstrapped = { chats: false, atom: false, github: false };
 
 	const chat = collectChatSources(input.workingDir, next, now);
 	items.push(...chat.items);
 	bootstrapped.chats = chat.bootstrapped;
 
-	const blog = await collectBlogSources(input.blogUrl, next, now, input.fetchers?.fetchBlogFeed);
-	items.push(...blog.items);
-	bootstrapped.blog = blog.bootstrapped;
+	const atom = await collectAtomSources(input.atomFeeds, next, now, input.fetchers?.fetchAtomFeed);
+	items.push(...atom.items);
+	bootstrapped.atom = atom.bootstrapped;
 
 	const github = await collectGithubSources(input.githubUser, next, now, input.fetchers?.fetchGithubEvents);
 	items.push(...github.items);
@@ -82,7 +85,7 @@ export async function collectReflectionSources(input: CollectSourcesInput): Prom
 		stats: {
 			chats: chat.chatCount,
 			chatMessages: chat.items.length,
-			blog: blog.items.length,
+			atom: atom.items.length,
 			github: github.items.length,
 		},
 		bootstrapped,
@@ -93,7 +96,7 @@ export function formatSourceItemsForPrompt(items: ReflectionSourceItem[]): strin
 	if (items.length === 0) return "(none)";
 	return items
 		.map((item) => {
-			const body = item.text.slice(0, item.source === "blog" ? MAX_BLOG_CHARS : MAX_MESSAGE_CHARS);
+			const body = item.text.slice(0, item.source === "atom" ? MAX_ATOM_CHARS : MAX_MESSAGE_CHARS);
 			return `### [${item.source}] ${item.label}\nid: ${item.id}\nat: ${item.at}\n${body}`;
 		})
 		.join("\n\n");
@@ -203,40 +206,56 @@ function collectChatSources(
 	return { items, chatCount: guids.length, bootstrapped };
 }
 
-async function collectBlogSources(
-	blogUrl: string,
+async function collectAtomSources(
+	atomFeeds: string[],
 	next: SourceCheckpoints,
 	now: Date,
-	fetchBlogFeed?: (url: string) => Promise<string>
+	fetchAtomFeed?: (url: string) => Promise<string>
 ): Promise<{ items: ReflectionSourceItem[]; bootstrapped: boolean }> {
-	if (!blogUrl.trim()) return { items: [], bootstrapped: false };
-	const xml = await (fetchBlogFeed ?? defaultFetchText)(blogUrl);
+	const items: ReflectionSourceItem[] = [];
+	let bootstrapped = false;
+	for (const feedUrl of atomFeeds) {
+		const result = await collectOneAtomFeed(feedUrl, next, now, fetchAtomFeed);
+		items.push(...result.items);
+		if (result.bootstrapped) bootstrapped = true;
+	}
+	return { items, bootstrapped };
+}
+
+async function collectOneAtomFeed(
+	feedUrl: string,
+	next: SourceCheckpoints,
+	now: Date,
+	fetchAtomFeed?: (url: string) => Promise<string>
+): Promise<{ items: ReflectionSourceItem[]; bootstrapped: boolean }> {
+	if (!feedUrl.trim()) return { items: [], bootstrapped: false };
+	const xml = await (fetchAtomFeed ?? defaultFetchText)(feedUrl);
 	const parsed = parseRssOrAtomItems(xml);
-	const seen = new Set(next.blog.seenGuids);
-	const firstRun = seen.size === 0;
+	const firstRun = !(feedUrl in next.atom);
+	const seen = new Set(next.atom[feedUrl]?.seenGuids ?? []);
 	const fresh: ReflectionSourceItem[] = [];
 
 	for (const item of parsed) {
 		if (seen.has(item.guid)) continue;
 		const at = toIsoDate(item.pubDate) ?? now.toISOString();
 		fresh.push({
-			source: "blog",
+			source: "atom",
 			id: item.guid,
 			at,
 			label: item.title || item.link || item.guid,
-			text: [item.title, item.link, item.description].filter(Boolean).join("\n"),
+			text: [item.title, item.link, feedUrl, item.description].filter(Boolean).join("\n"),
 		});
 	}
 
-	// Empty blog checkpoint: ingest every post currently in the feed (full history available via Atom/RSS).
+	// Empty per-feed checkpoint: ingest every entry currently in the feed.
 	// Later runs keep a batch cap; only mark returned items seen so overflow can retry next run.
-	const items = firstRun ? fresh : fresh.slice(0, MAX_BLOG_ITEMS);
+	const items = firstRun ? fresh : fresh.slice(0, MAX_ATOM_ITEMS);
 	for (const item of items) {
 		seen.add(item.id);
 	}
-	next.blog.seenGuids = trimSeen([...seen], 500);
+	next.atom[feedUrl] = { seenGuids: trimSeen([...seen], 500) };
 	if (firstRun) {
-		console.log(`[reflection] blog first run: ingesting ${items.length} historical posts from feed`);
+		console.log(`[reflection] atom first run: feed=${feedUrl} ingesting ${items.length} historical entries`);
 	}
 	return { items, bootstrapped: firstRun };
 }

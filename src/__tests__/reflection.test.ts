@@ -25,7 +25,7 @@ function writeReflectionSettings(root: string): void {
 			reflection: {
 				enabled: true,
 				hour: 3,
-				blogUrl: "https://example.test/atom.xml",
+				atomFeeds: ["https://example.test/atom.xml"],
 				githubUser: "example-user",
 			},
 		})}\n`
@@ -85,7 +85,7 @@ describe("runReflection", () => {
 		const result = await runReflection(root, {
 			now: new Date("2026-08-09T12:00:00.000Z"),
 			fetchers: {
-				fetchBlogFeed: async () => emptyFeed,
+				fetchAtomFeed: async () => emptyFeed,
 				fetchGithubEvents: async () => [],
 			},
 			llm: async () => {
@@ -105,7 +105,7 @@ describe("runReflection", () => {
 		await runReflection(root, {
 			now: new Date("2026-08-09T12:00:00.000Z"),
 			fetchers: {
-				fetchBlogFeed: async () => emptyFeed,
+				fetchAtomFeed: async () => emptyFeed,
 				fetchGithubEvents: async () => [],
 			},
 			llm: async () => {
@@ -122,11 +122,11 @@ describe("runReflection", () => {
 		const result = await runReflection(root, {
 			now: new Date("2026-08-09T12:00:00.000Z"),
 			fetchers: {
-				fetchBlogFeed: async () => `<?xml version="1.0"?>
+				fetchAtomFeed: async () => `<?xml version="1.0"?>
 <rss><channel>
 <item>
   <title>派派成长日记</title>
-  <guid>blog-1</guid>
+  <guid>atom-1</guid>
   <pubDate>Sat, 08 Aug 2026 20:00:00 +0800</pubDate>
   <description>雷雨天不要出门</description>
 </item>
@@ -143,7 +143,7 @@ describe("runReflection", () => {
 			},
 			llm: async (input) => {
 				expect(input.items.some((item) => item.source === "chat")).toBe(true);
-				expect(input.items.some((item) => item.source === "blog")).toBe(true);
+				expect(input.items.some((item) => item.source === "atom")).toBe(true);
 				expect(input.items.some((item) => item.source === "github")).toBe(true);
 				return {
 					summary: "remember thunderstorm rule",
@@ -184,7 +184,7 @@ describe("runReflection", () => {
 			"Never suggest taking 派派 out in thunderstorms.",
 		]);
 		expect(listSkillCatalog(root).map((entry) => entry.name)).toEqual(["pudong-weather"]);
-		expect(readCheckpoint(root).blog.seenGuids).toContain("blog-1");
+		expect(readCheckpoint(root).atom["https://example.test/atom.xml"]?.seenGuids).toContain("atom-1");
 		expect(readCheckpoint(root).github.seenIds).toContain("9");
 	});
 });
