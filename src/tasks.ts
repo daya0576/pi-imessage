@@ -50,15 +50,19 @@ function formatIncomingTarget(chat: ChatContext, incoming: IncomingMessage): str
 	return chat.messageType === "group" ? `${chat.groupName}|${incoming.sender}` : incoming.sender;
 }
 
-const HELP_TEXT = [
-	"Commands:",
-	"/help — list commands",
-	"/new — reset this chat session",
-	"/status — show session stats",
-	"/compact [instructions] — compress session context",
-	"/stop — stop the current agent run",
-	"/reload — reload models and clear sessions",
-].join("\n");
+function helpText(includeReflect: boolean): string {
+	const lines = [
+		"Commands:",
+		"/help — list commands",
+		"/new — reset this chat session",
+		"/status — show session stats",
+		"/compact [instructions] — compress session context",
+		"/stop — stop the current agent run",
+		"/reload — reload models and clear sessions",
+	];
+	if (includeReflect) lines.push("/reflect — run nightly reflection now");
+	return lines.join("\n");
+}
 
 // ── before tasks ──────────────────────────────────────────────────────────────
 
@@ -280,14 +284,15 @@ async function normalizeImageForModel(image: ImageContent): Promise<ImageContent
  *   /compact [text]  — compact context with optional custom instructions.
  *   /stop            — stop the current agent run (handled before the per-chat queue).
  *   /reload          — reload models and clear all sessions.
+ *   /reflect         — run nightly reflection now (optional).
  */
-export function createCommandHandlerTask(agent: AgentManager): StartTask {
+export function createCommandHandlerTask(agent: AgentManager, reflect?: () => Promise<string>): StartTask {
 	return async (chat, incoming, outgoing, emit) => {
 		const text = incoming.text?.trim();
 
 		if (text === "/help") {
 			console.log(`[sid] /help command: ${chat.chatGuid} → listed commands`);
-			emit({ ...outgoing, reply: { type: "message", text: HELP_TEXT } });
+			emit({ ...outgoing, reply: { type: "message", text: helpText(Boolean(reflect)) } });
 			outgoing.shouldContinue = false;
 			return;
 		}
@@ -333,6 +338,14 @@ export function createCommandHandlerTask(agent: AgentManager): StartTask {
 			emit({ ...outgoing, reply: { type: "message", text: replyText } });
 			outgoing.shouldContinue = false;
 			return;
+		}
+
+		if (text === "/reflect" && reflect) {
+			console.log(`[sid] /reflect command: ${chat.chatGuid}`);
+			const replyText = await reflect();
+			console.log(`[sid] /reflect result: ${chat.chatGuid} → ${replyText.replaceAll("\n", " / ")}`);
+			emit({ ...outgoing, reply: { type: "message", text: replyText } });
+			outgoing.shouldContinue = false;
 		}
 	};
 }

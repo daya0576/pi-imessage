@@ -35,14 +35,33 @@ export interface RichTextSettings {
 	markdown: boolean;
 }
 
+export interface ReflectionSettings {
+	enabled: boolean;
+	/** Local hour (0-23) when nightly reflection runs. */
+	hour: number;
+	blogUrl: string;
+	githubUser: string;
+}
+
 export interface Settings {
 	chatAllowlist: ChatAllowlist;
 	richText?: RichTextSettings;
+	reflection?: ReflectionSettings;
 }
 
 const DEFAULT_CHAT_ALLOWLIST: ChatAllowlist = { whitelist: [], blacklist: ["*"] };
 const DEFAULT_RICH_TEXT: RichTextSettings = { enabled: false, markdown: true };
-const DEFAULT_SETTINGS: Settings = { chatAllowlist: DEFAULT_CHAT_ALLOWLIST, richText: DEFAULT_RICH_TEXT };
+const DEFAULT_REFLECTION: ReflectionSettings = {
+	enabled: true,
+	hour: 3,
+	blogUrl: "https://changchen.me/atom.xml",
+	githubUser: "daya0576",
+};
+const DEFAULT_SETTINGS: Settings = {
+	chatAllowlist: DEFAULT_CHAT_ALLOWLIST,
+	richText: DEFAULT_RICH_TEXT,
+	reflection: DEFAULT_REFLECTION,
+};
 
 /**
  * Determine whether the bot should reply to a given chatGuid.
@@ -72,6 +91,8 @@ export function readSettings(workingDir: string): Settings {
 		const chatAllowlistRaw = (raw.chatAllowlist ?? {}) as Partial<ChatAllowlist>;
 
 		const richTextRaw = (raw.richText ?? {}) as Partial<RichTextSettings>;
+		const reflectionRaw = (raw.reflection ?? {}) as Partial<ReflectionSettings>;
+		const hour = typeof reflectionRaw.hour === "number" ? reflectionRaw.hour : DEFAULT_REFLECTION.hour;
 
 		return {
 			chatAllowlist: {
@@ -85,6 +106,18 @@ export function readSettings(workingDir: string): Settings {
 			richText: {
 				enabled: typeof richTextRaw.enabled === "boolean" ? richTextRaw.enabled : DEFAULT_RICH_TEXT.enabled,
 				markdown: typeof richTextRaw.markdown === "boolean" ? richTextRaw.markdown : DEFAULT_RICH_TEXT.markdown,
+			},
+			reflection: {
+				enabled: typeof reflectionRaw.enabled === "boolean" ? reflectionRaw.enabled : DEFAULT_REFLECTION.enabled,
+				hour: Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : DEFAULT_REFLECTION.hour,
+				blogUrl:
+					typeof reflectionRaw.blogUrl === "string" && reflectionRaw.blogUrl.trim()
+						? reflectionRaw.blogUrl.trim()
+						: DEFAULT_REFLECTION.blogUrl,
+				githubUser:
+					typeof reflectionRaw.githubUser === "string" && reflectionRaw.githubUser.trim()
+						? reflectionRaw.githubUser.trim()
+						: DEFAULT_REFLECTION.githubUser,
 			},
 		};
 	} catch {

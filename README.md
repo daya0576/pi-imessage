@@ -55,6 +55,27 @@ rewriting it. Legacy global and per-chat `MEMORY.md` files remain read-only
 archives. See [the structured memory flow](docs/structured-memory-sequence.md)
 for migration, retrieval, and write behavior.
 
+## Nightly Reflection
+
+Each night (local 03:00 by default) the bot reviews new signals from:
+
+- chat `log.jsonl` files
+- blog Atom feed (`https://changchen.me/atom.xml`)
+- GitHub public events (`daya0576`)
+
+It applies small evidence-backed updates:
+
+- durable facts → structured memory (`save_memory`)
+- standing instructions → `# Prompt Notes` in `SYSTEM.md`
+- reusable workflows → `skills/<name>/SKILL.md`
+
+Each source has its own checkpoint under `WORKING_DIR/harness/`. Note/skill
+edits are snapshotted and can be rolled back. First pass for chats and GitHub
+only reviews the last 48 hours; an empty blog checkpoint ingests the full
+Atom/RSS history currently in the feed.
+
+Trigger manually with `/reflect`, `pi-imessage reflect`, or `POST /reflect`.
+
 ## API
 
 The agent is aware of these endpoints via its system prompt and can use them as tools (e.g., scheduling a cron job that calls `/prompt`).
@@ -67,6 +88,8 @@ The agent is aware of these endpoints via its system prompt and can use them as 
 | `GET /reminders` | List reminders; optionally filter with `?status=pending` | `curl 'localhost:7750/reminders?status=pending'` |
 | `DELETE /reminders/:id` | Cancel a pending reminder | `curl -X DELETE localhost:7750/reminders/<id>` |
 | `GET /health/model` | Make a live request to the configured default AI model; returns HTTP 200 when healthy or 503 on failure | `curl localhost:7750/health/model`<br>→ `{"ok":true,"model":"openai/gpt-5","latencyMs":842,"checkedAt":"..."}` |
+| `POST /reflect` | Run nightly reflection now | `curl -X POST localhost:7750/reflect` |
+| `POST /reflect/rollback` | Restore `SYSTEM.md` notes and skills from a snapshot | `curl -X POST localhost:7750/reflect/rollback -d '{"snapshotId":"snap_..."}'` |
 
 ## Commands
 
@@ -80,6 +103,7 @@ Send these as iMessage to interact with the bot:
 | `/compact` | Compress session context to free up token space | `✓ Compacted: 15.2k → 2.1k tokens` |
 | `/stop` | Steer the agent to stop after current tool calls finish, then process the next queued message | |
 | `/reload` | Reload models and clear all sessions | `✓ Models reloaded` |
+| `/reflect` | Run nightly reflection now | `✓ Reflection: chat 12, blog 1, github 3` |
 
 ## Settings (`WORKING_DIR/settings.json`)
 
@@ -94,6 +118,12 @@ All fields are optional.
   "richText": {
     "enabled": false,
     "markdown": true
+  },
+  "reflection": {
+    "enabled": true,
+    "hour": 3,
+    "blogUrl": "https://changchen.me/atom.xml",
+    "githubUser": "daya0576"
   }
 }
 ```
@@ -101,6 +131,8 @@ All fields are optional.
 **Chat allowlist** controls which chats receive replies (messages are always logged). By default, replies are **off** for all chats (`blacklist: ["*"]`) — opt in specific chats via the web UI or by adding their guid to `whitelist`. Resolution priority: `blacklist[guid]` > `whitelist[guid]` > `blacklist["*"]` > `whitelist["*"]`.
 
 **Rich text** is optional and disabled by default. When enabled, pi-imessage uses a UI automation fallback to open the target conversation, paste an RTF payload, and send it. Currently this is intended for direct-message iMessage chats. With `markdown: true`, pi-imessage interprets `**bold**` spans and renders them as actual bold text in Messages.
+
+**Reflection** runs nightly at the local `hour` (0–23, default 3). Set `enabled` to `false` to pause it.
 
 ## Environment Variables
 

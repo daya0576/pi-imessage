@@ -44,10 +44,11 @@ export interface IMessageBotConfig {
 	store: ChatStore;
 	getSettings: () => Settings;
 	digestLogger: DigestLogger;
+	reflect?: () => Promise<string>;
 }
 
 export function createIMessageBot(config: IMessageBotConfig) {
-	const { queue, agent, sender, echoFilter, store, getSettings, digestLogger } = config;
+	const { queue, agent, sender, echoFilter, store, getSettings, digestLogger, reflect } = config;
 	const pipeline = createMessagePipeline();
 
 	// ── Pipeline tasks ─────────────────────────────────────────────────────────
@@ -66,7 +67,7 @@ export function createIMessageBot(config: IMessageBotConfig) {
 	pipeline.before(createResizeImagesTask());
 
 	// start
-	pipeline.start(createCommandHandlerTask(agent));
+	pipeline.start(createCommandHandlerTask(agent, reflect));
 	pipeline.start(createCallAgentTask(agent));
 
 	// end

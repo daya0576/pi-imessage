@@ -25,6 +25,7 @@ import {
 	defineTool,
 	getAgentDir,
 } from "@earendil-works/pi-coding-agent";
+import { formatSkillCatalog, listSkillCatalog } from "./harness.js";
 import { listMemoryNamespaces, loadMemoryNamespaces, readCoreMemory, saveMemory, searchMemory } from "./memory.js";
 import type { AgentReply, IncomingMessage } from "./types.js";
 
@@ -253,12 +254,13 @@ function getCustomPrompt(workingDir: string, chatDir?: string): string {
 	return parts.join("\n\n");
 }
 
-function buildSystemPrompt(workingDir: string, chatDir?: string): string {
+function buildSystemPrompt(workingDir: string, chatGuid?: string, chatDir?: string): string {
 	const coreMemory = readCoreMemory(workingDir);
 	const namespaces = listMemoryNamespaces(workingDir)
 		.map((item) => `${item.namespace} (${item.active} active)`)
 		.join(", ");
 	const customPrompt = getCustomPrompt(workingDir, chatDir);
+	const skills = formatSkillCatalog(listSkillCatalog(workingDir, chatGuid));
 
 	return `You are the user's best friend communicating via iMessage. Be concise. No emojis.
 
@@ -275,7 +277,8 @@ You are running directly on the host machine.
 ${workingDir}/
 ├── settings.json                # Bot configuration (see below)
 ├── MEMORY.md                    # Legacy memory archive; do not write new entries
-├── SYSTEM.md                    # System configuration log
+├── SYSTEM.md                    # Env log + Prompt Notes (notes are reflection-managed)
+├── harness/                     # Reflection checkpoint, snapshots, history
 ├── skills/file-memory/          # Structured memory store and CLI
 └── <chatId>/                    # Each iMessage chat gets a directory
     ├── MEMORY.md                # Legacy chat memory archive
@@ -312,6 +315,7 @@ Maintain ${workingDir}/SYSTEM.md to log all environment modifications:
 - Skill dependencies installed
 
 Update this file whenever you modify the environment.
+Do not edit the \`# Prompt Notes\` section or \`<!-- id: note_... -->\` blocks; nightly reflection owns those.
 
 ## Messaging and Reminder API
 A local HTTP server runs at http://localhost:7750 with endpoints for sending messages and scheduling reminders:
@@ -361,6 +365,9 @@ Example recurring crontab entries:
 \`\`\`
 
 ## Skills (Custom CLI Tools)
+Available skills (read SKILL.md for details, then run the CLI if present):
+${skills}
+
 You can create reusable CLI tools for recurring tasks (email, APIs, data processing, etc.).
 
 ### Creating Skills
@@ -536,7 +543,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 			cwd: workingDir,
 			agentDir,
 			settingsManager,
-			systemPrompt: buildSystemPrompt(workingDir, chatDir),
+			systemPrompt: buildSystemPrompt(workingDir, sanitizeChatGuid(chatGuid), chatDir),
 			// Keep extension discovery disabled, but install this one controlled
 			// inline hook so Codex 5.6 fast mode still applies to iMessage.
 			extensionFactories: [
@@ -864,7 +871,23 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		};
 	}
 
-	return { processMessage, newSession, getSessionStatus, getRuntimeStatus, reload, stop, compact };
+	/** Drop in-memory sessions so the next prompt reloads SYSTEM.md notes and skills. */
+	function invalidateSessions(): void {
+		const count = sessionMap.size;
+		sessionMap.clear();
+		console.log(`[agent] invalidated ${count} in-memory session(s) to reload system prompt`);
+	}
+
+	return {
+		processMessage,
+		newSession,
+		getSessionStatus,
+		getRuntimeStatus,
+		reload,
+		stop,
+		compact,
+		invalidateSessions,
+	};
 }
 
 /** Format a token count as a compact string: 0, 1.2k, 5.9k, 12k, 1.8M, etc. */
@@ -879,6 +902,6 @@ function formatTokenCount(tokens: number): string {
 type CreatedAgentManager = Awaited<ReturnType<typeof createAgentManager>>;
 export type AgentManager = Pick<
 	CreatedAgentManager,
-	"processMessage" | "newSession" | "getSessionStatus" | "reload" | "stop" | "compact"
+	"processMessage" | "newSession" | "getSessionStatus" | "reload" | "stop" | "compact" | "invalidateSessions"
 > &
 	Partial<Pick<CreatedAgentManager, "getRuntimeStatus">>;

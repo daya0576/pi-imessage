@@ -115,6 +115,7 @@ describe("createCommandHandlerTask", () => {
 			reload: vi.fn(async () => {}),
 			stop: vi.fn(async () => {}),
 			compact: vi.fn(async () => "compacted"),
+			invalidateSessions: vi.fn(),
 		};
 		const task = createCommandHandlerTask(agent);
 		const outgoing = makeOutgoing();
@@ -144,6 +145,7 @@ describe("createCallAgentTask", () => {
 			reload: vi.fn(async () => {}),
 			stop: vi.fn(async () => {}),
 			compact: vi.fn(async () => "compacted"),
+			invalidateSessions: vi.fn(),
 		};
 		const task = createCallAgentTask(agent);
 		const dispatched: OutgoingMessage[] = [];
@@ -166,6 +168,7 @@ describe("createCallAgentTask", () => {
 			reload: vi.fn(async () => {}),
 			stop: vi.fn(async () => {}),
 			compact: vi.fn(async () => "compacted"),
+			invalidateSessions: vi.fn(),
 		};
 		const task = createCallAgentTask(agent);
 		const dispatch = vi.fn();

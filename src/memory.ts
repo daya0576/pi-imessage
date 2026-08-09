@@ -180,6 +180,7 @@ function stableKey(input: Omit<SaveMemoryInput, "source" | "importance" | "confi
 
 async function withWriteLock<T>(workingDir: string, operation: () => Promise<T>): Promise<T> {
 	const lockPath = join(memoryRoot(workingDir), ".write-lock");
+	await mkdir(memoryRoot(workingDir), { recursive: true });
 	const deadline = Date.now() + 5_000;
 	while (true) {
 		try {
