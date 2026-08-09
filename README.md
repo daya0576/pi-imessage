@@ -36,7 +36,7 @@ Available at `http://localhost:7750` (configurable via `WEB_HOST` and `WEB_PORT`
 
 - Chat history with live updates
 - Logs (tail -f style)
-- Memory (global & per-chat)
+- Memory tab: personality, system prompt, structured memory, skills
 
 P.S. Disable with `WEB_ENABLED=false` and let the agent build your own web UI
 
@@ -55,6 +55,26 @@ rewriting it. Legacy global and per-chat `MEMORY.md` files remain read-only
 archives. See [the structured memory flow](docs/structured-memory-sequence.md)
 for migration, retrieval, and write behavior.
 
+## Nightly Reflection
+
+Each night (local 03:00 by default) the bot reviews new signals from:
+
+- chat `log.jsonl` files
+- optional Atom/RSS feeds (`settings.reflection.atomFeeds`)
+- optional GitHub public events (`settings.reflection.githubUser`)
+
+Empty `atomFeeds` / `githubUser` skips that source. It applies small evidence-backed
+updates:
+
+- durable facts → structured memory (`save_memory`)
+- standing instructions → `# Prompt Notes` in `SYSTEM.md`
+- reusable workflows → `skills/<name>/SKILL.md`
+
+Each source has its own checkpoint under `WORKING_DIR/harness/`. Note/skill
+edits are snapshotted and can be rolled back. First pass for chats and GitHub
+only reviews the last 48 hours; a new Atom feed with no checkpoint ingests the
+full history currently in that feed.
+
 ## API
 
 The agent is aware of these endpoints via its system prompt and can use them as tools (e.g., scheduling a cron job that calls `/prompt`).
@@ -67,6 +87,7 @@ The agent is aware of these endpoints via its system prompt and can use them as 
 | `GET /reminders` | List reminders; optionally filter with `?status=pending` | `curl 'localhost:7750/reminders?status=pending'` |
 | `DELETE /reminders/:id` | Cancel a pending reminder | `curl -X DELETE localhost:7750/reminders/<id>` |
 | `GET /health/model` | Make a live request to the configured default AI model; returns HTTP 200 when healthy or 503 on failure | `curl localhost:7750/health/model`<br>→ `{"ok":true,"model":"openai/gpt-5","latencyMs":842,"checkedAt":"..."}` |
+| `POST /reflect/rollback` | Restore `SYSTEM.md` notes and skills from a snapshot | `curl -X POST localhost:7750/reflect/rollback -d '{"snapshotId":"snap_..."}'` |
 
 ## Commands
 
@@ -94,6 +115,12 @@ All fields are optional.
   "richText": {
     "enabled": false,
     "markdown": true
+  },
+  "reflection": {
+    "enabled": true,
+    "hour": 3,
+    "atomFeeds": [],
+    "githubUser": ""
   }
 }
 ```
@@ -101,6 +128,8 @@ All fields are optional.
 **Chat allowlist** controls which chats receive replies (messages are always logged). By default, replies are **off** for all chats (`blacklist: ["*"]`) — opt in specific chats via the web UI or by adding their guid to `whitelist`. Resolution priority: `blacklist[guid]` > `whitelist[guid]` > `blacklist["*"]` > `whitelist["*"]`.
 
 **Rich text** is optional and disabled by default. When enabled, pi-imessage uses a UI automation fallback to open the target conversation, paste an RTF payload, and send it. Currently this is intended for direct-message iMessage chats. With `markdown: true`, pi-imessage interprets `**bold**` spans and renders them as actual bold text in Messages.
+
+**Reflection** runs nightly at the local `hour` (0–23, default 3). Set `enabled` to `false` to pause it. Set `atomFeeds` to a list of Atom/RSS URLs and/or `githubUser` to a GitHub login to include those sources; leave empty to skip.
 
 ## Environment Variables
 

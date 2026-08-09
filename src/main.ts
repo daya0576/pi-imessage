@@ -10,6 +10,7 @@ import { createIMessageBot } from "./imessage.js";
 import { createAppLogger, createDigestLogger } from "./logger.js";
 import { createModelHealthChecker } from "./model-health.js";
 import { createAsyncQueue } from "./queue.js";
+import { startReflectionScheduler } from "./reflection.js";
 import { createReminderService } from "./reminders.js";
 import { createSelfEchoFilter } from "./self-echo.js";
 import { checkEnvironment, createMessageSender } from "./send.js";
@@ -43,6 +44,11 @@ async function main() {
 	const store = createChatStore({ workingDir });
 	const queue = createAsyncQueue<IncomingMessage>(join(workingDir, "queue.json"));
 	const watcher = createWatcher({ queue });
+	const reflectionScheduler = workerEnabled
+		? startReflectionScheduler(workingDir, {
+				onSuccess: () => agent.invalidateSessions(),
+			})
+		: null;
 	const bot = createIMessageBot({ queue, agent, sender, echoFilter, store, getSettings, digestLogger });
 	const reminders = createReminderService({
 		workingDir,
@@ -84,6 +90,7 @@ async function main() {
 			watcher.stop();
 			bot.stop();
 			await reminders.stop();
+			reflectionScheduler?.stop();
 		}
 		await web?.stop();
 		digestLogger.close();

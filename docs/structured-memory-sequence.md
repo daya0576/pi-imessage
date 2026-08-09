@@ -112,55 +112,71 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant C as Nightly Cron
-    participant K as Reflection Checkpoint
-    participant G as Chat log.jsonl
+    participant C as Nightly scheduler
+    participant K as harness/checkpoint.json
+    participant Chat as chat/*/log.jsonl
+    participant Atom as settings.reflection.atomFeeds
+    participant GH as settings.reflection.githubUser
     participant R as Reflection LLM
-    participant M as Memory Tool
-    participant S as v2 JSONL
+    participant H as harness/snapshots/
+    participant M as save_memory
+    participant N as SYSTEM.md notes
+    participant S as skills/*/SKILL.md
 
-    C->>K: Read the last successful processing position
-    K-->>C: Last processed message IDs / timestamps
-    C->>G: Read unprocessed messages from every chat
-    G-->>R: Provide raw messages in conversation windows
+    C->>K: Read per-source checkpoints
+    C->>Chat: Unprocessed lines (48h bootstrap on first seen chat)
+    Note over Atom: New feed checkpoint ingests full feed history
+    C->>Atom: Unseen feed guids (per URL)
+    C->>GH: Unseen public event ids
+    Chat-->>R: chat signals
+    Atom-->>R: atom signals
+    GH-->>R: github signals
+    Note over R: Also receives current memory, notes, skills
 
-    R->>R: Reflect on missed durable facts,<br/>preferences, corrections, and relationship changes
-    R->>M: load_memory(relevant namespaces)
-    M->>S: Read relevant active records
-    S-->>M: Existing memory
-    M-->>R: Context for deduplication and correction detection
+    R-->>C: Smallest CRUD proposal
 
-    loop Each durable memory candidate
-        R->>M: save_memory(structured record)
-        M->>M: Validate schema, deduplication, and supersedes
-        M->>S: Append JSONL
-        S-->>M: Stored / already exists
-        M-->>R: Result
+    alt note or skill files change
+        C->>H: Snapshot paths
     end
 
-    alt Entire batch succeeds
-        R->>K: Commit the new checkpoint
-        R-->>C: Reflection summary
-    else Processing fails
-        R-->>C: Report failure without advancing the checkpoint
+    loop memories
+        C->>M: save_memory
+    end
+    loop notes / skills
+        C->>N: create / update / delete
+        C->>S: create / update / delete
+    end
+
+    alt success
+        C->>K: Advance all source checkpoints
+    else apply fails
+        C->>H: Rollback snapshot
+        Note over K: Checkpoint not advanced
     end
 ```
 
 Reflection rules:
 
-- Runtime writes capture facts promptly; nightly reflection catches omissions, deduplicates, and identifies facts that emerge across multiple messages.
-- Use a checkpoint instead of blindly rescanning a fixed 48-hour window. Do not advance it after a failed run, so retries remain safe.
-- Reflection and runtime writes share the same `save_memory` path. Neither writes directly to JSONL or legacy `MEMORY.md` files.
-- Do not store a whole daily chat summary as memory. Store only durable atomic facts.
+- Inputs are chat logs plus optional Atom/RSS feeds (`settings.reflection.atomFeeds`, a URL list) and GitHub public events (`settings.reflection.githubUser`). Empty list/user skips that source. Each source has its own checkpoint.
+- First-seen chats and first GitHub pass only review the last 48 hours; older items are marked seen without reflecting.
+- A new Atom feed with no checkpoint ingests every entry currently in that feed, then advances per-feed `seenGuids`.
+- Runtime writes capture facts promptly; nightly reflection catches omissions across chats and external activity.
+- Do not advance the checkpoint after a failed run.
+- Reflection and runtime writes share `save_memory`. Neither writes directly to JSONL or legacy `MEMORY.md`.
+- Do not store a whole daily summary. Store only durable atomic facts.
+- Facts / events / preferences → memory. Reusable multi-step workflows → skills (`SKILL.md` only). Standing behavioral instructions → `SYSTEM.md` `# Prompt Notes`.
+- Snapshot before note/skill edits. Rollback restores those files; memory stays append-only via `supersedes`.
+- Default schedule: local hour 3 (`settings.json` `reflection`). Scheduler only — no manual trigger.
 
 ## Responsibility boundaries
 
 - Main LLM: understand natural language, select namespaces, decide whether to remember, and produce structured fields.
-- Reflection LLM: inspect unprocessed conversations nightly, catch omissions, deduplicate, and identify facts that emerge across messages.
+- Reflection LLM: inspect unprocessed chats / atom / GitHub signals, catch omissions, deduplicate, and propose small skill / `SYSTEM.md` note updates.
 - Memory Tool: read, validate, deduplicate, append, and apply superseding corrections without interpreting natural language through keyword lists.
 - v2 JSONL: the sole structured-memory source of truth.
 - Coverage Manifest: proves that no legacy `MEMORY.md` source block was silently skipped.
-- Reflection Checkpoint: makes nightly processing retryable and prevents silent message loss.
+- Reflection Checkpoint: makes nightly processing retryable and prevents silent signal loss across sources.
+- Harness snapshots: restore `SYSTEM.md` notes and skills if a reflection apply fails or is rolled back.
 - `core.md`: contains only a small set of stable, frequently needed facts.
 - Legacy `MEMORY.md` and v1 JSONL: read-only archives after migration.
 - No fixed keyword classifier, semantic index, embedding store, or reranker is used.

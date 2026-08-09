@@ -1,17 +1,20 @@
 /** Web server: serves the chat log UI, logs page, and API endpoints. */
 
-import { existsSync, readFileSync, readdirSync, watch } from "node:fs";
+import { existsSync, readFileSync, watch } from "node:fs";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
 import { join } from "node:path";
-import type { AgentManager } from "../agent.js";
+import { type AgentManager, BASE_PERSONALITY, buildSystemPrompt } from "../agent.js";
+import { listSkillCatalog } from "../harness.js";
+import { activeMemoryItems, listMemoryNamespaces, loadAllMemoryItems, readCoreMemory } from "../memory.js";
 import type { ModelHealthChecker } from "../model-health.js";
+import { rollbackSnapshot } from "../reflection.js";
 import { REMINDER_STATUSES, type ReminderService, type ReminderStatus } from "../reminders.js";
 import type { SelfEchoFilter } from "../self-echo.js";
 import type { MessageSender } from "../send.js";
 import type { Settings } from "../settings.js";
 import type { AgentReply } from "../types.js";
 import { getChatBlocks } from "./data.js";
-import { type ChatMemory, renderLogsPage, renderMemoryPage, renderPage } from "./render.js";
+import { type MemoryPageData, renderLogsPage, renderMemoryPage, renderPage } from "./render.js";
 
 export interface WebServerConfig {
 	workingDir: string;
@@ -59,22 +62,54 @@ function parseJsonBody(request: IncomingMessage): Promise<Record<string, unknown
 	});
 }
 
-/** Read global and per-chat MEMORY.md files. */
-function readMemories(workingDir: string): { globalMemory: string; chatMemories: ChatMemory[] } {
-	const globalMemoryPath = join(workingDir, "MEMORY.md");
-	const globalMemory = existsSync(globalMemoryPath) ? readFileSync(globalMemoryPath, "utf-8").trim() : "";
-	const chatMemories: ChatMemory[] = [];
-	if (existsSync(workingDir)) {
-		for (const entry of readdirSync(workingDir, { withFileTypes: true })) {
-			if (!entry.isDirectory()) continue;
-			const memPath = join(workingDir, entry.name, "MEMORY.md");
-			if (existsSync(memPath)) {
-				const content = readFileSync(memPath, "utf-8").trim();
-				if (content) chatMemories.push({ name: entry.name, content });
-			}
-		}
+/** Read harness view for the Memory tab: personality, prompt, memory, skills. */
+function readMemories(workingDir: string): MemoryPageData {
+	const activeByNamespace = new Map<string, ReturnType<typeof activeMemoryItems>>();
+	for (const item of activeMemoryItems(loadAllMemoryItems(workingDir))) {
+		const list = activeByNamespace.get(item.namespace) ?? [];
+		list.push(item);
+		activeByNamespace.set(item.namespace, list);
 	}
-	return { globalMemory, chatMemories };
+
+	const namespaces = listMemoryNamespaces(workingDir).map((entry) => {
+		const items = (activeByNamespace.get(entry.namespace) ?? [])
+			.slice()
+			.sort(
+				(a, b) => (b.event_time ?? "").localeCompare(a.event_time ?? "") || b.created_at.localeCompare(a.created_at)
+			)
+			.map((item) => ({
+				id: item.id,
+				kind: item.kind,
+				text: item.text,
+				subjects: item.subjects,
+				event_time: item.event_time,
+				created_at: item.created_at,
+				importance: item.importance,
+				confidence: item.confidence,
+			}));
+		return {
+			namespace: entry.namespace,
+			active: entry.active,
+			total: entry.total,
+			items,
+		};
+	});
+
+	const skills = listSkillCatalog(workingDir).map((skill) => ({
+		name: skill.name,
+		description: skill.description,
+		scope: skill.scope,
+		chatGuid: skill.chatGuid,
+		instructions: skill.instructions,
+	}));
+
+	return {
+		personality: BASE_PERSONALITY,
+		prompt: buildSystemPrompt(workingDir),
+		core: readCoreMemory(workingDir),
+		namespaces,
+		skills,
+	};
 }
 
 export function createWebServer(config: WebServerConfig): WebServer {
@@ -98,8 +133,16 @@ export function createWebServer(config: WebServerConfig): WebServer {
 		if (!existsSync(workingDir)) return;
 		try {
 			fsWatcher = watch(workingDir, { recursive: true }, (_event, filename) => {
-				if (filename?.endsWith("log.jsonl") || filename?.endsWith(".log") || filename?.endsWith("MEMORY.md"))
+				if (
+					filename?.endsWith("log.jsonl") ||
+					filename?.endsWith(".log") ||
+					filename?.endsWith("core.md") ||
+					filename?.endsWith("SYSTEM.md") ||
+					filename?.endsWith("SKILL.md") ||
+					(filename?.includes("file-memory") && filename.endsWith(".jsonl"))
+				) {
 					broadcast();
+				}
 			});
 			fsWatcher.on("error", () => {});
 		} catch {
@@ -143,8 +186,7 @@ export function createWebServer(config: WebServerConfig): WebServer {
 
 		// Memory page
 		if (url.pathname === "/memory" && request.method === "GET") {
-			const { globalMemory, chatMemories } = readMemories(workingDir);
-			const html = renderMemoryPage(globalMemory, chatMemories);
+			const html = renderMemoryPage(readMemories(workingDir));
 			response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
 			response.end(html);
 			return;
@@ -185,6 +227,27 @@ export function createWebServer(config: WebServerConfig): WebServer {
 		if (request.method === "GET" && url.pathname === "/health/model") {
 			const result = await checkModelHealth();
 			jsonResponse(response, result.ok ? 200 : 503, result);
+			return;
+		}
+
+		// POST /reflect/rollback — restore SYSTEM.md notes and skills from a snapshot
+		if (request.method === "POST" && url.pathname === "/reflect/rollback") {
+			try {
+				const body = await parseJsonBody(request);
+				const snapshotId = body.snapshotId as string;
+				if (!snapshotId) {
+					jsonResponse(response, 400, { error: "snapshotId required" });
+					return;
+				}
+				console.log(`[web] /reflect/rollback start: ${snapshotId}`);
+				const manifest = await rollbackSnapshot(workingDir, snapshotId);
+				agent.invalidateSessions();
+				console.log(`[web] /reflect/rollback done: ${snapshotId} files=${manifest.files.length}`);
+				jsonResponse(response, 200, { ok: true, snapshotId, files: manifest.files.length });
+			} catch (error) {
+				console.error("[web] /reflect/rollback error:", error);
+				jsonResponse(response, 500, { error: String(error) });
+			}
 			return;
 		}
 

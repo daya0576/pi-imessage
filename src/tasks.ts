@@ -50,15 +50,17 @@ function formatIncomingTarget(chat: ChatContext, incoming: IncomingMessage): str
 	return chat.messageType === "group" ? `${chat.groupName}|${incoming.sender}` : incoming.sender;
 }
 
-const HELP_TEXT = [
-	"Commands:",
-	"/help — list commands",
-	"/new — reset this chat session",
-	"/status — show session stats",
-	"/compact [instructions] — compress session context",
-	"/stop — stop the current agent run",
-	"/reload — reload models and clear sessions",
-].join("\n");
+function helpText(): string {
+	return [
+		"Commands:",
+		"/help — list commands",
+		"/new — reset this chat session",
+		"/status — show session stats",
+		"/compact [instructions] — compress session context",
+		"/stop — stop the current agent run",
+		"/reload — reload models and clear sessions",
+	].join("\n");
+}
 
 // ── before tasks ──────────────────────────────────────────────────────────────
 
@@ -287,7 +289,7 @@ export function createCommandHandlerTask(agent: AgentManager): StartTask {
 
 		if (text === "/help") {
 			console.log(`[sid] /help command: ${chat.chatGuid} → listed commands`);
-			emit({ ...outgoing, reply: { type: "message", text: HELP_TEXT } });
+			emit({ ...outgoing, reply: { type: "message", text: helpText() } });
 			outgoing.shouldContinue = false;
 			return;
 		}
@@ -332,7 +334,6 @@ export function createCommandHandlerTask(agent: AgentManager): StartTask {
 			console.log(`[sid] /reload command: ${chat.chatGuid} → ${replyText}`);
 			emit({ ...outgoing, reply: { type: "message", text: replyText } });
 			outgoing.shouldContinue = false;
-			return;
 		}
 	};
 }

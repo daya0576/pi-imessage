@@ -35,14 +35,34 @@ export interface RichTextSettings {
 	markdown: boolean;
 }
 
+export interface ReflectionSettings {
+	enabled: boolean;
+	/** Local hour (0-23) when nightly reflection runs. */
+	hour: number;
+	/** Atom/RSS feed URLs to ingest. Empty list skips Atom sources. */
+	atomFeeds: string[];
+	githubUser: string;
+}
+
 export interface Settings {
 	chatAllowlist: ChatAllowlist;
 	richText?: RichTextSettings;
+	reflection?: ReflectionSettings;
 }
 
 const DEFAULT_CHAT_ALLOWLIST: ChatAllowlist = { whitelist: [], blacklist: ["*"] };
 const DEFAULT_RICH_TEXT: RichTextSettings = { enabled: false, markdown: true };
-const DEFAULT_SETTINGS: Settings = { chatAllowlist: DEFAULT_CHAT_ALLOWLIST, richText: DEFAULT_RICH_TEXT };
+const DEFAULT_REFLECTION: ReflectionSettings = {
+	enabled: true,
+	hour: 3,
+	atomFeeds: [],
+	githubUser: "",
+};
+const DEFAULT_SETTINGS: Settings = {
+	chatAllowlist: DEFAULT_CHAT_ALLOWLIST,
+	richText: DEFAULT_RICH_TEXT,
+	reflection: DEFAULT_REFLECTION,
+};
 
 /**
  * Determine whether the bot should reply to a given chatGuid.
@@ -72,6 +92,9 @@ export function readSettings(workingDir: string): Settings {
 		const chatAllowlistRaw = (raw.chatAllowlist ?? {}) as Partial<ChatAllowlist>;
 
 		const richTextRaw = (raw.richText ?? {}) as Partial<RichTextSettings>;
+		const reflectionRaw = (raw.reflection ?? {}) as Record<string, unknown>;
+		const hour = typeof reflectionRaw.hour === "number" ? reflectionRaw.hour : DEFAULT_REFLECTION.hour;
+		const atomFeeds = readStringList(reflectionRaw.atomFeeds) ?? DEFAULT_REFLECTION.atomFeeds;
 
 		return {
 			chatAllowlist: {
@@ -86,6 +109,15 @@ export function readSettings(workingDir: string): Settings {
 				enabled: typeof richTextRaw.enabled === "boolean" ? richTextRaw.enabled : DEFAULT_RICH_TEXT.enabled,
 				markdown: typeof richTextRaw.markdown === "boolean" ? richTextRaw.markdown : DEFAULT_RICH_TEXT.markdown,
 			},
+			reflection: {
+				enabled: typeof reflectionRaw.enabled === "boolean" ? reflectionRaw.enabled : DEFAULT_REFLECTION.enabled,
+				hour: Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : DEFAULT_REFLECTION.hour,
+				atomFeeds,
+				githubUser:
+					typeof reflectionRaw.githubUser === "string"
+						? reflectionRaw.githubUser.trim()
+						: DEFAULT_REFLECTION.githubUser,
+			},
 		};
 	} catch {
 		return { ...DEFAULT_SETTINGS };
@@ -94,4 +126,12 @@ export function readSettings(workingDir: string): Settings {
 
 export function writeSettings(workingDir: string, settings: Settings): void {
 	writeFileSync(settingsPath(workingDir), `${JSON.stringify(settings, null, 2)}\n`, "utf-8");
+}
+
+function readStringList(value: unknown): string[] | null {
+	if (!Array.isArray(value)) return null;
+	return value
+		.filter((item): item is string => typeof item === "string")
+		.map((item) => item.trim())
+		.filter(Boolean);
 }
