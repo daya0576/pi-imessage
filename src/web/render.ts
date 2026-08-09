@@ -103,3 +103,32 @@ export interface MemoryPageData {
 export function renderMemoryPage(data: MemoryPageData): string {
 	return eta.render("memory", data);
 }
+
+export interface DocumentSection {
+	header: string;
+	body: string;
+}
+
+export interface DocumentPageData {
+	title: string;
+	active: "memory" | "personality" | "prompt" | "skills";
+	dataUrl: string;
+	note?: string;
+	sections: DocumentSection[];
+}
+
+export function renderDocumentPage(data: DocumentPageData): string {
+	return eta.render("document", data);
+}
+
+export interface SkillPageEntry {
+	name: string;
+	description: string;
+	scope: "global" | "chat";
+	chatGuid?: string;
+	instructions: string;
+}
+
+export function renderSkillsPage(skills: SkillPageEntry[]): string {
+	return eta.render("skills", { skills });
+}

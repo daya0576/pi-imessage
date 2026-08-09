@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>blue — skills</title>
+<style>
+* { margin: 0; padding: 0 }
+body { background: #111; color: #ccc; font: 13px/1.6 monospace; display: flex; height: 100vh; overflow: hidden }
+::-webkit-scrollbar { width: 8px; height: 8px }
+::-webkit-scrollbar-track { background: transparent }
+::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 0 }
+::-webkit-scrollbar-thumb:hover { background: #3a3a3a }
+* { scrollbar-width: thin; scrollbar-color: #2a2a2a transparent }
+nav { width: 120px; flex-shrink: 0; padding: 40px 16px; border-right: 1px solid #1a1a1a; overflow-y: auto }
+nav a { display: block; color: inherit; text-decoration: none; line-height: 2.4; opacity: .35 }
+nav a:hover, nav a.active { opacity: 1 }
+.content { flex: 1; padding: 40px; overflow-y: auto }
+.sidebar { width: 220px; flex-shrink: 0; padding: 40px 16px; border-left: 1px solid #1a1a1a; overflow-y: auto }
+.sidebar a { display: block; color: inherit; text-decoration: none; line-height: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .55 }
+.sidebar a:hover { opacity: 1 }
+.card { background: #1a1a1a; margin-bottom: 24px; scroll-margin-top: 40px }
+.card-header { padding: 8px 16px; opacity: .4; border-bottom: 1px solid #252525 }
+.card-body { padding: 12px 16px; max-height: 480px; overflow-y: auto }
+.meta { opacity: .4; margin-bottom: 8px }
+pre { white-space: pre-wrap; word-break: break-word; opacity: .7; margin: 0 }
+.empty { opacity: .3 }
+</style></head><body>
+
+<nav>
+  <a href="/">Recent Chats</a>
+  <a href="/logs">Logs</a>
+  <a href="/memory">Memory</a>
+  <a href="/personality">Personality</a>
+  <a href="/prompt">Prompt</a>
+  <a href="/skills" class="active">Skills</a>
+</nav>
+
+<div class="content" id="content">
+<% if (it.skills.length === 0) { %>
+  <p class="empty">no skills yet</p>
+<% } %>
+<% it.skills.forEach(function(skill) { %>
+  <div class="card" id="skill-<%= skill.scope %>-<%= skill.name %><% if (skill.chatGuid) { %>-<%= skill.chatGuid.replace(/[^a-zA-Z0-9]/g, '_') %><% } %>">
+    <div class="card-header"><%= skill.name %>  <%= skill.scope %><% if (skill.chatGuid) { %>  <%= skill.chatGuid %><% } %></div>
+    <div class="card-body">
+      <div class="meta"><%= skill.description %></div>
+<% if (skill.instructions) { %>
+      <pre><%= skill.instructions %></pre>
+<% } else { %>
+      <p class="empty">(no instructions)</p>
+<% } %>
+    </div>
+  </div>
+<% }) %>
+</div>
+
+<div class="sidebar" id="sidebar">
+<% it.skills.forEach(function(skill) { %>
+  <a href="#skill-<%= skill.scope %>-<%= skill.name %><% if (skill.chatGuid) { %>-<%= skill.chatGuid.replace(/[^a-zA-Z0-9]/g, '_') %><% } %>"><%= skill.name %></a>
+<% }) %>
+</div>
+
+<script>
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function skillAnchor(skill) {
+  let id = 'skill-' + skill.scope + '-' + skill.name;
+  if (skill.chatGuid) id += '-' + skill.chatGuid.replace(/[^a-zA-Z0-9]/g, '_');
+  return id;
+}
+
+function renderSkills(data) {
+  const content = document.getElementById('content');
+  const sidebar = document.getElementById('sidebar');
+  if (!data.skills.length) {
+    content.innerHTML = '<p class="empty">no skills yet</p>';
+    sidebar.innerHTML = '';
+    return;
+  }
+  let html = '';
+  let side = '';
+  for (const skill of data.skills) {
+    const id = skillAnchor(skill);
+    html += '<div class="card" id="' + id + '"><div class="card-header">'
+      + escapeHtml(skill.name) + '  ' + escapeHtml(skill.scope);
+    if (skill.chatGuid) html += '  ' + escapeHtml(skill.chatGuid);
+    html += '</div><div class="card-body"><div class="meta">'
+      + escapeHtml(skill.description) + '</div>';
+    html += skill.instructions
+      ? '<pre>' + escapeHtml(skill.instructions) + '</pre>'
+      : '<p class="empty">(no instructions)</p>';
+    html += '</div></div>';
+    side += '<a href="#' + id + '">' + escapeHtml(skill.name) + '</a>';
+  }
+  content.innerHTML = html;
+  sidebar.innerHTML = side;
+}
+
+async function refresh() {
+  try {
+    const resp = await fetch('/skills/data');
+    renderSkills(await resp.json());
+  } catch {}
+}
+
+const es = new EventSource('/events');
+es.addEventListener('update', refresh);
+</script>
+</body></html>

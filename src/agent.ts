@@ -254,7 +254,14 @@ function getCustomPrompt(workingDir: string, chatDir?: string): string {
 	return parts.join("\n\n");
 }
 
-function buildSystemPrompt(workingDir: string, chatGuid?: string, chatDir?: string): string {
+/** Base voice / personality locked in code (not editable via reflection notes). */
+export const BASE_PERSONALITY = `You are the user's best friend communicating via iMessage. Be concise. No emojis.
+
+## Context
+- Plain text only. Do not use Markdown formatting, double asterisks (**like this**), or [markdown](links).
+- Reply in the same language the user is writing in.`;
+
+export function buildSystemPrompt(workingDir: string, chatGuid?: string, chatDir?: string): string {
 	const coreMemory = readCoreMemory(workingDir);
 	const namespaces = listMemoryNamespaces(workingDir)
 		.map((item) => `${item.namespace} (${item.active} active)`)
@@ -262,11 +269,7 @@ function buildSystemPrompt(workingDir: string, chatGuid?: string, chatDir?: stri
 	const customPrompt = getCustomPrompt(workingDir, chatDir);
 	const skills = formatSkillCatalog(listSkillCatalog(workingDir, chatGuid));
 
-	return `You are the user's best friend communicating via iMessage. Be concise. No emojis.
-
-## Context
-- Plain text only. Do not use Markdown formatting, double asterisks (**like this**), or [markdown](links).
-- Reply in the same language the user is writing in.
+	return `${BASE_PERSONALITY}
 
 ## Environment
 You are running directly on the host machine.

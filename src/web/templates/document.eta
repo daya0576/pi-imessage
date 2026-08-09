@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>blue — <%= it.title %></title>
+<style>
+* { margin: 0; padding: 0 }
+body { background: #111; color: #ccc; font: 13px/1.6 monospace; display: flex; height: 100vh; overflow: hidden }
+::-webkit-scrollbar { width: 8px; height: 8px }
+::-webkit-scrollbar-track { background: transparent }
+::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 0 }
+::-webkit-scrollbar-thumb:hover { background: #3a3a3a }
+* { scrollbar-width: thin; scrollbar-color: #2a2a2a transparent }
+nav { width: 120px; flex-shrink: 0; padding: 40px 16px; border-right: 1px solid #1a1a1a; overflow-y: auto }
+nav a { display: block; color: inherit; text-decoration: none; line-height: 2.4; opacity: .35 }
+nav a:hover, nav a.active { opacity: 1 }
+.content { flex: 1; padding: 40px; overflow-y: auto }
+.card { background: #1a1a1a; margin-bottom: 24px }
+.card-header { padding: 8px 16px; opacity: .4; border-bottom: 1px solid #252525 }
+.card-body { padding: 12px 16px; overflow-y: auto }
+pre { white-space: pre-wrap; word-break: break-word; opacity: .7; margin: 0 }
+.empty { opacity: .3 }
+.note { opacity: .4; margin-bottom: 16px }
+</style></head><body>
+
+<nav>
+  <a href="/">Recent Chats</a>
+  <a href="/logs">Logs</a>
+  <a href="/memory" class="<%= it.active === 'memory' ? 'active' : '' %>">Memory</a>
+  <a href="/personality" class="<%= it.active === 'personality' ? 'active' : '' %>">Personality</a>
+  <a href="/prompt" class="<%= it.active === 'prompt' ? 'active' : '' %>">Prompt</a>
+  <a href="/skills" class="<%= it.active === 'skills' ? 'active' : '' %>">Skills</a>
+</nav>
+
+<div class="content" id="content">
+<% if (it.note) { %>
+  <p class="note"><%= it.note %></p>
+<% } %>
+<% it.sections.forEach(function(section) { %>
+  <div class="card">
+    <div class="card-header"><%= section.header %></div>
+    <div class="card-body">
+<% if (section.body) { %>
+      <pre><%= section.body %></pre>
+<% } else { %>
+      <p class="empty">(empty)</p>
+<% } %>
+    </div>
+  </div>
+<% }) %>
+</div>
+
+<script>
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function renderDocument(data) {
+  const content = document.getElementById('content');
+  let html = '';
+  if (data.note) html += '<p class="note">' + escapeHtml(data.note) + '</p>';
+  for (const section of data.sections) {
+    html += '<div class="card"><div class="card-header">' + escapeHtml(section.header)
+      + '</div><div class="card-body">';
+    html += section.body
+      ? '<pre>' + escapeHtml(section.body) + '</pre>'
+      : '<p class="empty">(empty)</p>';
+    html += '</div></div>';
+  }
+  content.innerHTML = html;
+}
+
+async function refresh() {
+  try {
+    const resp = await fetch(<%= JSON.stringify(it.dataUrl) %>);
+    const data = await resp.json();
+    renderDocument(data);
+  } catch {}
+}
+
+const es = new EventSource('/events');
+es.addEventListener('update', refresh);
+</script>
+</body></html>
