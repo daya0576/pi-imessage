@@ -10,7 +10,7 @@ import { createIMessageBot } from "./imessage.js";
 import { createAppLogger, createDigestLogger } from "./logger.js";
 import { createModelHealthChecker } from "./model-health.js";
 import { createAsyncQueue } from "./queue.js";
-import { formatReflectionSummary, runReflection, startReflectionScheduler } from "./reflection.js";
+import { startReflectionScheduler } from "./reflection.js";
 import { createReminderService } from "./reminders.js";
 import { createSelfEchoFilter } from "./self-echo.js";
 import { checkEnvironment, createMessageSender } from "./send.js";
@@ -44,17 +44,12 @@ async function main() {
 	const store = createChatStore({ workingDir });
 	const queue = createAsyncQueue<IncomingMessage>(join(workingDir, "queue.json"));
 	const watcher = createWatcher({ queue });
-	async function reflect(): Promise<string> {
-		const result = await runReflection(workingDir, { trigger: "manual" });
-		if (result.ok && !result.skipped && !result.initialized) agent.invalidateSessions();
-		return formatReflectionSummary(result);
-	}
 	const reflectionScheduler = workerEnabled
 		? startReflectionScheduler(workingDir, {
 				onSuccess: () => agent.invalidateSessions(),
 			})
 		: null;
-	const bot = createIMessageBot({ queue, agent, sender, echoFilter, store, getSettings, digestLogger, reflect });
+	const bot = createIMessageBot({ queue, agent, sender, echoFilter, store, getSettings, digestLogger });
 	const reminders = createReminderService({
 		workingDir,
 		deliver: async (reminder) => {
@@ -74,7 +69,6 @@ async function main() {
 				agent,
 				checkModelHealth,
 				reminders,
-				reflect,
 			})
 		: null;
 

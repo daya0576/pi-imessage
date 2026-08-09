@@ -166,7 +166,7 @@ Reflection rules:
 - Do not store a whole daily summary. Store only durable atomic facts.
 - Facts / events / preferences → memory. Reusable multi-step workflows → skills (`SKILL.md` only). Standing behavioral instructions → `SYSTEM.md` `# Prompt Notes`.
 - Snapshot before note/skill edits. Rollback restores those files; memory stays append-only via `supersedes`.
-- Default schedule: local hour 3 (`settings.json` `reflection`). Manual: `/reflect`, `POST /reflect`, `pi-imessage reflect`.
+- Default schedule: local hour 3 (`settings.json` `reflection`). Scheduler only — no manual trigger.
 
 ## Responsibility boundaries
 

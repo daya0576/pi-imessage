@@ -75,8 +75,6 @@ edits are snapshotted and can be rolled back. First pass for chats and GitHub
 only reviews the last 48 hours; a new Atom feed with no checkpoint ingests the
 full history currently in that feed.
 
-Trigger manually with `/reflect`, `pi-imessage reflect`, or `POST /reflect`.
-
 ## API
 
 The agent is aware of these endpoints via its system prompt and can use them as tools (e.g., scheduling a cron job that calls `/prompt`).
@@ -89,7 +87,6 @@ The agent is aware of these endpoints via its system prompt and can use them as 
 | `GET /reminders` | List reminders; optionally filter with `?status=pending` | `curl 'localhost:7750/reminders?status=pending'` |
 | `DELETE /reminders/:id` | Cancel a pending reminder | `curl -X DELETE localhost:7750/reminders/<id>` |
 | `GET /health/model` | Make a live request to the configured default AI model; returns HTTP 200 when healthy or 503 on failure | `curl localhost:7750/health/model`<br>→ `{"ok":true,"model":"openai/gpt-5","latencyMs":842,"checkedAt":"..."}` |
-| `POST /reflect` | Run nightly reflection now | `curl -X POST localhost:7750/reflect` |
 | `POST /reflect/rollback` | Restore `SYSTEM.md` notes and skills from a snapshot | `curl -X POST localhost:7750/reflect/rollback -d '{"snapshotId":"snap_..."}'` |
 
 ## Commands
@@ -104,7 +101,6 @@ Send these as iMessage to interact with the bot:
 | `/compact` | Compress session context to free up token space | `✓ Compacted: 15.2k → 2.1k tokens` |
 | `/stop` | Steer the agent to stop after current tool calls finish, then process the next queued message | |
 | `/reload` | Reload models and clear all sessions | `✓ Models reloaded` |
-| `/reflect` | Run nightly reflection now | `✓ Reflection: chat 12, atom 1, github 3` |
 
 ## Settings (`WORKING_DIR/settings.json`)
 

@@ -10,7 +10,6 @@
  *   pi-imessage stop         Stop the service
  *   pi-imessage restart      Restart the service
  *   pi-imessage logs         Tail service logs
- *   pi-imessage reflect      Run nightly reflection via the running service
  */
 
 import { execSync, fork } from "node:child_process";
@@ -145,16 +144,6 @@ function restart(): void {
 	console.log("[pi-imessage] Service restarted");
 }
 
-function reflect(): void {
-	const url = `http://${WEB_HOST}:${WEB_PORT}/reflect`;
-	try {
-		execSync(`curl -sS -X POST ${url}`, { stdio: "inherit" });
-	} catch {
-		console.error(`[pi-imessage] Reflection failed. Is the service running at ${url}?`);
-		process.exit(1);
-	}
-}
-
 function logs(): void {
 	const stdoutLog = join(LOG_DIR, "stdout.log");
 	const stderrLog = join(LOG_DIR, "stderr.log");
@@ -188,7 +177,6 @@ Commands:
   stop         Stop the service
   restart      Restart the service
   logs         Tail service logs
-  reflect      Run nightly reflection via the running service
   help         Show this help message`);
 }
 
@@ -212,9 +200,6 @@ switch (command) {
 		break;
 	case "logs":
 		logs();
-		break;
-	case "reflect":
-		reflect();
 		break;
 	case "help":
 	case "--help":

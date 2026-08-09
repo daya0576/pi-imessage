@@ -25,7 +25,6 @@ export interface WebServerConfig {
 	agent: AgentManager;
 	checkModelHealth: ModelHealthChecker;
 	reminders: ReminderService;
-	reflect: () => Promise<string>;
 }
 
 export interface WebServer {
@@ -80,19 +79,8 @@ function readMemories(workingDir: string): { globalMemory: string; chatMemories:
 }
 
 export function createWebServer(config: WebServerConfig): WebServer {
-	const {
-		workingDir,
-		host,
-		port,
-		getSettings,
-		setSettings,
-		sender,
-		echoFilter,
-		agent,
-		checkModelHealth,
-		reminders,
-		reflect,
-	} = config;
+	const { workingDir, host, port, getSettings, setSettings, sender, echoFilter, agent, checkModelHealth, reminders } =
+		config;
 	const sseClients = new Set<ServerResponse>();
 	let fsWatcher: ReturnType<typeof watch> | null = null;
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -198,20 +186,6 @@ export function createWebServer(config: WebServerConfig): WebServer {
 		if (request.method === "GET" && url.pathname === "/health/model") {
 			const result = await checkModelHealth();
 			jsonResponse(response, result.ok ? 200 : 503, result);
-			return;
-		}
-
-		// POST /reflect — run nightly reflection now
-		if (request.method === "POST" && url.pathname === "/reflect") {
-			try {
-				console.log("[web] /reflect start");
-				const summary = await reflect();
-				console.log(`[web] /reflect done: ${summary.replaceAll("\n", " / ")}`);
-				jsonResponse(response, 200, { ok: true, summary });
-			} catch (error) {
-				console.error("[web] /reflect error:", error);
-				jsonResponse(response, 500, { error: String(error) });
-			}
 			return;
 		}
 
