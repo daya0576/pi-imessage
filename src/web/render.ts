@@ -77,11 +77,29 @@ export function renderLogsPage(appLog: string, digestLog: string): string {
 	return eta.render("logs", { appLog, digestLog });
 }
 
-export interface ChatMemory {
-	name: string;
-	content: string;
+export interface MemoryItemView {
+	id: string;
+	kind: string;
+	text: string;
+	subjects: string[];
+	event_time: string | null;
+	created_at: string;
+	importance: number;
+	confidence: number;
 }
 
-export function renderMemoryPage(globalMemory: string, chatMemories: ChatMemory[]): string {
-	return eta.render("memory", { globalMemory, chatMemories });
+export interface MemoryNamespaceView {
+	namespace: string;
+	active: number;
+	total: number;
+	items: MemoryItemView[];
+}
+
+export interface MemoryPageData {
+	core: string;
+	namespaces: MemoryNamespaceView[];
+}
+
+export function renderMemoryPage(data: MemoryPageData): string {
+	return eta.render("memory", data);
 }

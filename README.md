@@ -36,7 +36,7 @@ Available at `http://localhost:7750` (configurable via `WEB_HOST` and `WEB_PORT`
 
 - Chat history with live updates
 - Logs (tail -f style)
-- Memory (global & per-chat)
+- Memory (structured namespaces + core)
 
 P.S. Disable with `WEB_ENABLED=false` and let the agent build your own web UI
 

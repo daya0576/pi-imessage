@@ -12,14 +12,18 @@ nav { width: 100px; flex-shrink: 0; padding: 40px 16px; border-right: 1px solid 
 nav a { display: block; color: inherit; text-decoration: none; line-height: 2.4; opacity: .35 }
 nav a:hover, nav a.active { opacity: 1 }
 .content { flex: 1; padding: 40px; overflow-y: auto }
-.sidebar { width: 200px; flex-shrink: 0; padding: 40px 16px; border-left: 1px solid #1a1a1a; overflow-y: auto }
+.sidebar { width: 220px; flex-shrink: 0; padding: 40px 16px; border-left: 1px solid #1a1a1a; overflow-y: auto }
 .sidebar a { display: block; color: inherit; text-decoration: none; line-height: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .55 }
 .sidebar a:hover { opacity: 1 }
 .card { background: #1a1a1a; margin-bottom: 24px; scroll-margin-top: 40px }
 .card-header { padding: 8px 16px; opacity: .4; border-bottom: 1px solid #252525 }
 .card-body { padding: 12px 16px; max-height: 400px; overflow-y: auto }
+.item { margin-bottom: 14px; opacity: .75 }
+.item:last-child { margin-bottom: 0 }
+.meta { opacity: .4 }
+.text { white-space: pre-wrap; word-break: break-word }
 pre { white-space: pre-wrap; word-break: break-word; opacity: .7; margin: 0 }
-.empty { opacity: .3; font-style: italic }
+.empty { opacity: .3 }
 </style></head><body>
 
 <nav>
@@ -29,60 +33,103 @@ pre { white-space: pre-wrap; word-break: break-word; opacity: .7; margin: 0 }
 </nav>
 
 <div class="content" id="content">
-  <div class="card">
-    <div class="card-header">MEMORY.md (global)</div>
+  <div class="card" id="mem-core">
+    <div class="card-header">core.md</div>
     <div class="card-body">
-<% if (it.globalMemory) { %>
-      <pre><%= it.globalMemory %></pre>
+<% if (it.core && it.core !== "(no core memory yet)" && it.core !== "(core memory unavailable)") { %>
+      <pre><%= it.core %></pre>
 <% } else { %>
       <p class="empty">(empty)</p>
 <% } %>
     </div>
   </div>
 
-<% it.chatMemories.forEach(function(chat) { %>
-  <div class="card" id="mem-<%= chat.name %>">
-    <div class="card-header"><%= chat.name %>/MEMORY.md</div>
+<% if (it.namespaces.length === 0) { %>
+  <p class="empty">no namespaces yet</p>
+<% } %>
+
+<% it.namespaces.forEach(function(ns) { %>
+  <div class="card" id="mem-<%= ns.namespace.replace(/\//g, '_') %>">
+    <div class="card-header"><%= ns.namespace %>  <%= ns.active %>/<%= ns.total %> active</div>
     <div class="card-body">
-      <pre><%= chat.content %></pre>
+<% if (ns.items.length === 0) { %>
+      <p class="empty">(no active items)</p>
+<% } else { %>
+<% ns.items.forEach(function(item) { %>
+      <div class="item">
+        <div class="meta">[<%= item.kind %>] <%= item.id %><% if (item.event_time) { %>  event <%= item.event_time %><% } %>  <%= item.created_at %><% if (item.subjects.length) { %>  subjects <%= item.subjects.join(", ") %><% } %></div>
+        <div class="text"><%= item.text %></div>
+      </div>
+<% }) %>
+<% } %>
     </div>
   </div>
 <% }) %>
 </div>
 
-<div class="sidebar">
-  <a href="#" style="opacity:.4">global</a>
-<% it.chatMemories.forEach(function(chat) { %>
-  <a href="#mem-<%= chat.name %>"><%= chat.name %></a>
+<div class="sidebar" id="sidebar">
+  <a href="#mem-core">core</a>
+<% it.namespaces.forEach(function(ns) { %>
+  <a href="#mem-<%= ns.namespace.replace(/\//g, '_') %>"><%= ns.namespace %> (<%= ns.active %>)</a>
 <% }) %>
 </div>
 
 <script>
-async function refreshMemory() {
-  try {
-    const resp = await fetch('/memory/data');
-    const data = await resp.json();
-    const content = document.getElementById('content');
-    let html = '<div class="card"><div class="card-header">MEMORY.md (global)</div><div class="card-body">';
-    if (data.globalMemory) {
-      html += '<pre>' + escapeHtml(data.globalMemory) + '</pre>';
-    } else {
-      html += '<p class="empty">(empty)</p>';
-    }
-    html += '</div></div>';
-    for (const chat of data.chatMemories) {
-      html += '<div class="card" id="mem-' + chat.name + '"><div class="card-header">'
-        + escapeHtml(chat.name) + '/MEMORY.md</div><div class="card-body"><pre>'
-        + escapeHtml(chat.content) + '</pre></div></div>';
-    }
-    content.innerHTML = html;
-  } catch {}
-}
-
 function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+function namespaceAnchor(namespace) {
+  return 'mem-' + namespace.replace(/\//g, '_');
+}
+
+function renderMemory(data) {
+  const content = document.getElementById('content');
+  const sidebar = document.getElementById('sidebar');
+  const coreEmpty = !data.core || data.core === '(no core memory yet)' || data.core === '(core memory unavailable)';
+  let html = '<div class="card" id="mem-core"><div class="card-header">core.md</div><div class="card-body">';
+  html += coreEmpty ? '<p class="empty">(empty)</p>' : '<pre>' + escapeHtml(data.core) + '</pre>';
+  html += '</div></div>';
+  if (!data.namespaces.length) {
+    html += '<p class="empty">no namespaces yet</p>';
+  }
+  for (const ns of data.namespaces) {
+    html += '<div class="card" id="' + namespaceAnchor(ns.namespace) + '"><div class="card-header">'
+      + escapeHtml(ns.namespace) + '  ' + ns.active + '/' + ns.total + ' active</div><div class="card-body">';
+    if (!ns.items.length) {
+      html += '<p class="empty">(no active items)</p>';
+    } else {
+      for (const item of ns.items) {
+        html += '<div class="item"><div class="meta">[' + escapeHtml(item.kind) + '] '
+          + escapeHtml(item.id);
+        if (item.event_time) html += '  event ' + escapeHtml(item.event_time);
+        html += '  ' + escapeHtml(item.created_at);
+        if (item.subjects && item.subjects.length) {
+          html += '  subjects ' + escapeHtml(item.subjects.join(', '));
+        }
+        html += '</div><div class="text">' + escapeHtml(item.text) + '</div></div>';
+      }
+    }
+    html += '</div></div>';
+  }
+  content.innerHTML = html;
+
+  let side = '<a href="#mem-core">core</a>';
+  for (const ns of data.namespaces) {
+    side += '<a href="#' + namespaceAnchor(ns.namespace) + '">'
+      + escapeHtml(ns.namespace) + ' (' + ns.active + ')</a>';
+  }
+  sidebar.innerHTML = side;
+}
+
+async function refreshMemory() {
+  try {
+    const resp = await fetch('/memory/data');
+    const data = await resp.json();
+    renderMemory(data);
+  } catch {}
 }
 
 const es = new EventSource('/events');
