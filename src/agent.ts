@@ -351,14 +351,10 @@ curl 'http://localhost:7750/reminders?status=pending'
 curl -X DELETE http://localhost:7750/reminders/<reminderId>
 \`\`\`
 
-Use system crontab (\`crontab -e\`) only for recurring messages or tasks.
-Example recurring crontab entries:
-\`\`\`
-# Send a static message every morning at 9:00
-0 9 * * * curl -s -X POST http://localhost:7750/send -H "Content-Type: application/json" -d '{"chatGuid":"iMessage;-;+1234567890","text":"good morning"}'
-# Generate and send a daily summary every evening at 21:00
-0 21 * * * curl -s -X POST http://localhost:7750/prompt -H "Content-Type: application/json" -d '{"chatGuid":"iMessage;-;+1234567890","prompt":"generate a daily summary and send it"}'
-\`\`\`
+Use the workspace cron scheduler for recurring messages or tasks. Its reviewed configuration lives at
+\`${workingDir}/cron/jobs.json\`; recurring jobs are visible in the Scheduled Tasks web tab. Prefer \`send\`
+or \`prompt\` actions. Local \`exec\` actions must use an absolute executable plus argv and never a shell command.
+Use system crontab only for bootstrap or host-level maintenance that cannot run inside pi-imessage.
 
 ## Skills (Custom CLI Tools)
 You can create reusable CLI tools for recurring tasks (email, APIs, data processing, etc.).
