@@ -95,33 +95,7 @@ export interface MemoryNamespaceView {
 	items: MemoryItemView[];
 }
 
-export interface MemoryPageData {
-	core: string;
-	namespaces: MemoryNamespaceView[];
-}
-
-export function renderMemoryPage(data: MemoryPageData): string {
-	return eta.render("memory", data);
-}
-
-export interface DocumentSection {
-	header: string;
-	body: string;
-}
-
-export interface DocumentPageData {
-	title: string;
-	active: "memory" | "personality" | "prompt" | "skills";
-	dataUrl: string;
-	note?: string;
-	sections: DocumentSection[];
-}
-
-export function renderDocumentPage(data: DocumentPageData): string {
-	return eta.render("document", data);
-}
-
-export interface SkillPageEntry {
+export interface SkillView {
 	name: string;
 	description: string;
 	scope: "global" | "chat";
@@ -129,6 +103,14 @@ export interface SkillPageEntry {
 	instructions: string;
 }
 
-export function renderSkillsPage(skills: SkillPageEntry[]): string {
-	return eta.render("skills", { skills });
+export interface MemoryPageData {
+	personality: string;
+	prompt: string;
+	core: string;
+	namespaces: MemoryNamespaceView[];
+	skills: SkillView[];
+}
+
+export function renderMemoryPage(data: MemoryPageData): string {
+	return eta.render("memory", data);
 }

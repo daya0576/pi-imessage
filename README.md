@@ -36,10 +36,7 @@ Available at `http://localhost:7750` (configurable via `WEB_HOST` and `WEB_PORT`
 
 - Chat history with live updates
 - Logs (tail -f style)
-- Memory (structured namespaces + core)
-- Personality (code-locked base voice)
-- Prompt (assembled global system prompt)
-- Skills (`SKILL.md` catalog)
+- Memory tab: personality, system prompt, structured memory, skills
 
 P.S. Disable with `WEB_ENABLED=false` and let the agent build your own web UI
 

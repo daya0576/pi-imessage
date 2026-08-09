@@ -14,15 +14,7 @@ import type { MessageSender } from "../send.js";
 import type { Settings } from "../settings.js";
 import type { AgentReply } from "../types.js";
 import { getChatBlocks } from "./data.js";
-import {
-	type DocumentPageData,
-	type MemoryPageData,
-	renderDocumentPage,
-	renderLogsPage,
-	renderMemoryPage,
-	renderPage,
-	renderSkillsPage,
-} from "./render.js";
+import { type MemoryPageData, renderLogsPage, renderMemoryPage, renderPage } from "./render.js";
 
 export interface WebServerConfig {
 	workingDir: string;
@@ -70,7 +62,7 @@ function parseJsonBody(request: IncomingMessage): Promise<Record<string, unknown
 	});
 }
 
-/** Read structured memory for the web UI (core.md + active namespace items). */
+/** Read harness view for the Memory tab: personality, prompt, memory, skills. */
 function readMemories(workingDir: string): MemoryPageData {
 	const activeByNamespace = new Map<string, ReturnType<typeof activeMemoryItems>>();
 	for (const item of activeMemoryItems(loadAllMemoryItems(workingDir))) {
@@ -103,38 +95,20 @@ function readMemories(workingDir: string): MemoryPageData {
 		};
 	});
 
-	return { core: readCoreMemory(workingDir), namespaces };
-}
+	const skills = listSkillCatalog(workingDir).map((skill) => ({
+		name: skill.name,
+		description: skill.description,
+		scope: skill.scope,
+		chatGuid: skill.chatGuid,
+		instructions: skill.instructions,
+	}));
 
-function readPersonalityPage(): DocumentPageData {
 	return {
-		title: "personality",
-		active: "personality",
-		dataUrl: "/personality/data",
-		note: "Locked in code. Nightly reflection cannot change this.",
-		sections: [{ header: "BASE_PERSONALITY", body: BASE_PERSONALITY }],
-	};
-}
-
-function readPromptPage(workingDir: string): DocumentPageData {
-	return {
-		title: "prompt",
-		active: "prompt",
-		dataUrl: "/prompt/data",
-		note: "Assembled global system prompt (chat-specific SYSTEM.md / skills omitted).",
-		sections: [{ header: "system prompt", body: buildSystemPrompt(workingDir) }],
-	};
-}
-
-function readSkillsPage(workingDir: string) {
-	return {
-		skills: listSkillCatalog(workingDir).map((skill) => ({
-			name: skill.name,
-			description: skill.description,
-			scope: skill.scope,
-			chatGuid: skill.chatGuid,
-			instructions: skill.instructions,
-		})),
+		personality: BASE_PERSONALITY,
+		prompt: buildSystemPrompt(workingDir),
+		core: readCoreMemory(workingDir),
+		namespaces,
+		skills,
 	};
 }
 
@@ -221,42 +195,6 @@ export function createWebServer(config: WebServerConfig): WebServer {
 		// Memory data API (JSON)
 		if (url.pathname === "/memory/data" && request.method === "GET") {
 			jsonResponse(response, 200, readMemories(workingDir));
-			return;
-		}
-
-		// Personality page
-		if (url.pathname === "/personality" && request.method === "GET") {
-			const html = renderDocumentPage(readPersonalityPage());
-			response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-			response.end(html);
-			return;
-		}
-		if (url.pathname === "/personality/data" && request.method === "GET") {
-			jsonResponse(response, 200, readPersonalityPage());
-			return;
-		}
-
-		// Assembled system prompt page
-		if (url.pathname === "/prompt" && request.method === "GET") {
-			const html = renderDocumentPage(readPromptPage(workingDir));
-			response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-			response.end(html);
-			return;
-		}
-		if (url.pathname === "/prompt/data" && request.method === "GET") {
-			jsonResponse(response, 200, readPromptPage(workingDir));
-			return;
-		}
-
-		// Skills page
-		if (url.pathname === "/skills" && request.method === "GET") {
-			const html = renderSkillsPage(readSkillsPage(workingDir).skills);
-			response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-			response.end(html);
-			return;
-		}
-		if (url.pathname === "/skills/data" && request.method === "GET") {
-			jsonResponse(response, 200, readSkillsPage(workingDir));
 			return;
 		}
 
