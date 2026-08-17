@@ -34,3 +34,12 @@
 - When writing tests, run them, identify issues in either the test or implementation, and iterate until fixed.
 - NEVER commit unless user asks
 
+## Cursor Cloud specific instructions
+
+The Cloud VM is Linux; this is a **macOS-only** iMessage bot. Key implications for developing here:
+
+- The full bot cannot boot on Linux. `src/main.ts` calls `checkEnvironment()` (`src/send.ts`) unconditionally at startup, which requires a running `Messages.app` (`pgrep -x Messages`), read access to `~/Library/Messages/chat.db`, and `osascript`. So `npm start` / `npm run dev` will exit immediately here. The iMessage watcher (`src/watch.ts`) and sender (`src/send.ts`) are macOS-only and cannot be exercised in this environment.
+- What is fully runnable/verifiable on Linux: typecheck + lint via `npm run check`, and the test suite via `vitest` (70 tests pass). Note the repo command rules above say not to run `npm test` during normal coding; it is only run for environment verification.
+- The **structured memory** subsystem (`src/memory.ts`) and the web **Memory** tab (`src/web/render.ts` + `src/web/templates/memory.eta`) are platform-independent — no `chat.db`, `osascript`, or model/API keys required. They read/write JSONL under `WORKING_DIR/skills/file-memory/namespaces/`. To exercise the web Memory tab standalone without the macOS bot, seed a temp `WORKING_DIR` via `saveMemory()` and render with `renderMemoryPage()` (importing `src/agent.ts` pulls in `@earendil-works/pi-ai` at runtime, so avoid it if you only need the memory view).
+- A user's real pi-imessage **memory lives on their Mac** at `~/.pi/imessage/skills/file-memory/` (default `WORKING_DIR`). It is NOT present in a fresh Cloud VM; the VM only has whatever memory you seed locally.
+
