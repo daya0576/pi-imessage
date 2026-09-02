@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, readdirSync, watch } from "node:fs";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
 import { join } from "node:path";
-import type { AgentManager } from "../agent.js";
+import { type AgentManager, resolveSessionStorage } from "../agent.js";
 import type { CronService } from "../cron.js";
 import type { ModelHealthChecker } from "../model-health.js";
 import { REMINDER_STATUSES, type ReminderService, type ReminderStatus } from "../reminders.js";
@@ -336,11 +336,21 @@ export function createWebServer(config: WebServerConfig): WebServer {
 				const body = await parseJsonBody(request);
 				const chatGuid = body.chatGuid as string;
 				const prompt = body.prompt as string;
+				const sessionKey = typeof body.sessionKey === "string" ? body.sessionKey : undefined;
+				const ephemeral = body.ephemeral === true;
 				if (!chatGuid || !prompt) {
 					jsonResponse(response, 400, { error: "chatGuid and prompt required" });
 					return;
 				}
-				console.log(`[web] /prompt: ${chatGuid} "${prompt.substring(0, 60)}"`);
+				try {
+					resolveSessionStorage(workingDir, chatGuid, { sessionKey, ephemeral });
+				} catch (error) {
+					jsonResponse(response, 400, { error: String(error) });
+					return;
+				}
+				console.log(
+					`[web] /prompt: ${chatGuid} session=${sessionKey ?? chatGuid} ephemeral=${ephemeral} "${prompt.substring(0, 60)}"`
+				);
 				jsonResponse(response, 200, { ok: true });
 				// Process asynchronously — agent replies are sent to the chat when ready
 				agent
@@ -361,7 +371,7 @@ export function createWebServer(config: WebServerConfig): WebServer {
 								await sender.sendMessage(chatGuid, agentReply.text);
 							}
 						},
-						{ streamingBehavior: "followUp" }
+						{ streamingBehavior: "followUp", sessionKey, ephemeral }
 					)
 					.then(() => {
 						console.log(`[web] /prompt done: ${chatGuid}`);

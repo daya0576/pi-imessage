@@ -11,7 +11,7 @@
  * Model: uses ~/.pi/agent/ defaults (via createAgentSession).
  */
 
-import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { type AssistantMessage, type Message, type TextContent, Type } from "@earendil-works/pi-ai";
 import type { CompactionResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -84,8 +84,46 @@ export interface AgentManagerConfig {
 interface ChatSession {
 	session: AgentSession;
 	chatGuid: string;
-	/** Promise chain serializing prompts for this chat. */
+	sessionMapKey: string;
+	sessionDir: string;
+	/** Promise chain serializing prompts for this chat or isolated task session. */
 	chain: Promise<void>;
+}
+
+export interface ProcessMessageOptions {
+	streamingBehavior?: "steer" | "followUp";
+	/** Separate model context from the destination chat while still delivering replies there. */
+	sessionKey?: string;
+	/** Remove the isolated session after all prompts queued on it have completed. */
+	ephemeral?: boolean;
+}
+
+const SESSION_KEY_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+
+export function resolveSessionStorage(
+	workingDir: string,
+	chatGuid: string,
+	options?: Pick<ProcessMessageOptions, "sessionKey" | "ephemeral">
+): { mapKey: string; sessionDir: string; isolated: boolean } {
+	if (options?.ephemeral && !options.sessionKey) {
+		throw new Error("ephemeral sessions require sessionKey");
+	}
+	if (!options?.sessionKey) {
+		return {
+			mapKey: chatGuid,
+			sessionDir: join(workingDir, sanitizeChatGuid(chatGuid)),
+			isolated: false,
+		};
+	}
+	if (!SESSION_KEY_PATTERN.test(options.sessionKey)) {
+		throw new Error("sessionKey must be 1-128 characters using only letters, numbers, '.', '_' or '-'");
+	}
+	const safeChatGuid = sanitizeChatGuid(chatGuid);
+	return {
+		mapKey: `task:${safeChatGuid}:${options.sessionKey}`,
+		sessionDir: join(workingDir, ".task-sessions", safeChatGuid, options.sessionKey),
+		isolated: true,
+	};
 }
 
 /**
@@ -336,7 +374,9 @@ curl -X POST http://localhost:7750/prompt \\
   -d '{"chatGuid":"<chatGuid>","prompt":"generate a daily summary"}'
 \`\`\`
 If the agent is already processing a message for this chat, the prompt is queued (followUp)
-and will run after the current processing finishes.
+and will run after the current processing finishes. Heavy automated tasks should provide a safe
+\`sessionKey\` and \`ephemeral:true\` so their tool and image context is isolated from the destination chat
+and removed after completion; replies are still delivered to \`chatGuid\`.
 
 ### POST /reminders — schedule a persistent one-time reminder
 Use this instead of creating a one-off script or crontab entry. \`scheduledAt\` must be
@@ -515,11 +555,10 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		modelsPath: join(agentDir, "models.json"),
 	});
 
-	/** Create a new AgentSession for a chat, persisted to context.jsonl. */
-	async function createSession(chatGuid: string): Promise<ChatSession> {
-		const chatDir = join(workingDir, sanitizeChatGuid(chatGuid));
-		mkdirSync(chatDir, { recursive: true });
-		const sessionManager = SessionManager.open(join(chatDir, "context.jsonl"), chatDir);
+	/** Create a new AgentSession for a chat or isolated task, persisted to its own context.jsonl. */
+	async function createSession(sessionMapKey: string, chatGuid: string, sessionDir: string): Promise<ChatSession> {
+		mkdirSync(sessionDir, { recursive: true });
+		const sessionManager = SessionManager.open(join(sessionDir, "context.jsonl"), sessionDir);
 		const loadedMemoryIds = new Set<string>();
 
 		// Force SSE for pi-imessage. Large Codex contexts frequently exceed the
@@ -527,12 +566,12 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		const settingsManager = SettingsManager.create(workingDir, agentDir);
 		settingsManager.applyOverrides({ transport: "sse" });
 
-		// Per-chat resource loader so the system prompt can reference chatDir.
+		// Per-session resource loader so the system prompt can reference its isolated directory.
 		const resourceLoader = new DefaultResourceLoader({
 			cwd: workingDir,
 			agentDir,
 			settingsManager,
-			systemPrompt: buildSystemPrompt(workingDir, chatDir),
+			systemPrompt: buildSystemPrompt(workingDir, sessionDir),
 			// Keep extension discovery disabled, but install this one controlled
 			// inline hook so Codex 5.6 fast mode still applies to iMessage.
 			extensionFactories: [
@@ -560,10 +599,12 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		});
 
 		const modelLabel = session.model ? `${session.model.provider}/${session.model.id}` : "default";
-		console.log(`[agent] session created: ${chatGuid} model=${modelLabel} transport=sse sol_fast=priority`);
+		console.log(
+			`[agent] session created: ${chatGuid} session=${sessionMapKey} model=${modelLabel} transport=sse sol_fast=priority`
+		);
 
-		const entry: ChatSession = { session, chatGuid, chain: Promise.resolve() };
-		sessionMap.set(chatGuid, entry);
+		const entry: ChatSession = { session, chatGuid, sessionMapKey, sessionDir, chain: Promise.resolve() };
+		sessionMap.set(sessionMapKey, entry);
 		return entry;
 	}
 
@@ -576,13 +617,29 @@ export async function createAgentManager(config: AgentManagerConfig) {
 	async function processMessage(
 		msg: IncomingMessage,
 		handler: (reply: AgentReply) => Promise<void>,
-		options?: { streamingBehavior?: "steer" | "followUp" }
+		options?: ProcessMessageOptions
 	): Promise<void> {
-		const entry = sessionMap.get(msg.chatGuid) ?? (await createSession(msg.chatGuid));
+		const storage = resolveSessionStorage(workingDir, msg.chatGuid, options);
+		const entry =
+			sessionMap.get(storage.mapKey) ?? (await createSession(storage.mapKey, msg.chatGuid, storage.sessionDir));
 		const queuedAt = Date.now();
 		const run = () => runPrompt(entry, msg, handler, queuedAt, options);
-		entry.chain = entry.chain.then(run, run);
-		return entry.chain;
+		const runPromise = entry.chain.then(run, run);
+		entry.chain = runPromise;
+		try {
+			await runPromise;
+		} finally {
+			// Only the last prompt queued on an ephemeral session performs cleanup.
+			if (options?.ephemeral && entry.chain === runPromise && sessionMap.get(storage.mapKey) === entry) {
+				sessionMap.delete(storage.mapKey);
+				try {
+					rmSync(storage.sessionDir, { recursive: true, force: true });
+					console.log(`[agent] ephemeral session removed: ${storage.mapKey}`);
+				} catch (error) {
+					console.error(`[agent] ephemeral session cleanup failed: ${storage.mapKey}`, error);
+				}
+			}
+		}
 	}
 
 	async function runPrompt(
@@ -590,9 +647,9 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		msg: IncomingMessage,
 		handler: (reply: AgentReply) => Promise<void>,
 		queuedAt: number,
-		options?: { streamingBehavior?: "steer" | "followUp" }
+		options?: ProcessMessageOptions
 	): Promise<void> {
-		const { session, chatGuid } = entry;
+		const { session, chatGuid, sessionMapKey } = entry;
 
 		const promptText = formatPromptText(msg);
 
@@ -680,7 +737,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 					console.error(
 						`[agent] prompt ${label}: ${chatGuid} after ${timeoutMs}ms — detaching session and aborting in background`
 					);
-					if (sessionMap.get(chatGuid) === entry) sessionMap.delete(chatGuid);
+					if (sessionMap.get(sessionMapKey) === entry) sessionMap.delete(sessionMapKey);
 					void clearAndAbortSession(session).catch((error) => {
 						console.error(`[agent] background abort failed: ${chatGuid}`, error);
 					});
@@ -702,7 +759,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 			// prompt only when the model-relative threshold has been crossed.
 			const contextUsage = session.getContextUsage();
 			const threshold = getAutoCompactTokenThreshold(session.model?.contextWindow);
-			if (typeof contextUsage?.tokens === "number" && contextUsage.tokens >= threshold) {
+			if (!options?.ephemeral && typeof contextUsage?.tokens === "number" && contextUsage.tokens >= threshold) {
 				console.log(
 					`[agent] post-reply compact start: ${chatGuid} tokens=${contextUsage.tokens} threshold=${threshold} ` +
 						`context_window=${session.model?.contextWindow ?? "unknown"}`
@@ -712,7 +769,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 						() => session.compact(),
 						() => {
 							console.error(`[agent] post-reply compact timeout: ${chatGuid} after ${AGENT_COMPACT_TIMEOUT_MS}ms`);
-							if (sessionMap.get(chatGuid) === entry) sessionMap.delete(chatGuid);
+							if (sessionMap.get(sessionMapKey) === entry) sessionMap.delete(sessionMapKey);
 							void clearAndAbortSession(session).catch(() => {});
 						},
 						AGENT_COMPACT_TIMEOUT_MS
@@ -748,7 +805,8 @@ export async function createAgentManager(config: AgentManagerConfig) {
 
 	/** Compact the session context, reducing token usage while preserving a summary. */
 	async function compact(chatGuid: string, customInstructions?: string): Promise<string> {
-		const entry = sessionMap.get(chatGuid) ?? (await createSession(chatGuid));
+		const storage = resolveSessionStorage(workingDir, chatGuid);
+		const entry = sessionMap.get(chatGuid) ?? (await createSession(storage.mapKey, chatGuid, storage.sessionDir));
 		const { session } = entry;
 		let result: CompactionResult;
 		try {
@@ -775,7 +833,8 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		if (existsSync(contextFile)) {
 			unlinkSync(contextFile);
 		}
-		await createSession(chatGuid);
+		const storage = resolveSessionStorage(workingDir, chatGuid);
+		await createSession(storage.mapKey, chatGuid, storage.sessionDir);
 		console.log(`[agent] new session: ${chatGuid}`);
 	}
 
