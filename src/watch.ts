@@ -47,7 +47,9 @@ const MESSAGES_QUERY = `
 `;
 
 const REPLY_TO_QUERY = `
-	SELECT message.text AS text
+	SELECT
+		message.text           AS text,
+		message.attributedBody AS attributedBody
 	FROM message
 	WHERE message.guid = ?
 	LIMIT 1
@@ -153,7 +155,7 @@ export function createWatcher(config: WatcherConfig) {
 	}
 
 	/** Resolve message text: prefer message.text, fall back to attributedBody. */
-	function resolveText(row: RawRow): string | null {
+	function resolveText(row: Pick<RawRow, "text" | "attributedBody">): string | null {
 		const text = row.text?.trim();
 		if (text) return text;
 		if (row.attributedBody) return extractTextFromAttributedBody(row.attributedBody);
@@ -178,8 +180,8 @@ export function createWatcher(config: WatcherConfig) {
 	/** Look up the text of a replied-to message by its guid. Returns null on miss. */
 	function getReplyToText(guid: string): string | null {
 		try {
-			const row = db.prepare(REPLY_TO_QUERY).get(guid) as { text: string | null } | undefined;
-			return row?.text?.trim() || null;
+			const row = db.prepare(REPLY_TO_QUERY).get(guid) as Pick<RawRow, "text" | "attributedBody"> | undefined;
+			return row ? resolveText(row) : null;
 		} catch {
 			return null;
 		}

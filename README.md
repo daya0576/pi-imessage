@@ -9,6 +9,7 @@ A minimal and self-managing iMessage bot — powered by [pi](https://github.com/
 - **Self-managing**: Turn the agent into whatever you need. He builds his own tools without pre-built assumptions
 - **Transparent**: tool calls and reasoning are sent to your iMessage chat, so you can see exactly what it's doing and why
 - **iMessage Integration**: Responds to DMs, SMS, and group chats; identifies who sent each message; understands quoted/reply-to messages
+- **Persistent Reminders**: Schedule one-time messages without per-reminder cron jobs; reminders survive restarts and retry transient failures
 - **Web UI**: browse chat history, toggle replies on/off per chat, live updates — disable with WEB_ENABLED=false and let the agent build your own web UI
 
 # Get Started
@@ -35,9 +36,44 @@ Available at `http://localhost:7750` (configurable via `WEB_HOST` and `WEB_PORT`
 
 - Chat history with live updates
 - Logs (tail -f style)
-- Memory (global & per-chat)
+- Memory tab: personality, system prompt, structured memory, skills
 
 P.S. Disable with `WEB_ENABLED=false` and let the agent build your own web UI
+
+## Structured Memory
+
+Durable memories are stored as namespaced JSONL records under
+`WORKING_DIR/skills/file-memory/namespaces/`. Each record includes a stable ID,
+creation timestamp, factual event date when known, source, kind, subjects,
+importance, confidence, and status. This keeps every memory traceable without
+inventing dates for older facts.
+
+The agent uses typed tools to load complete namespaces, search for specific
+records, and append validated memories. Corrections append a new record that
+supersedes the old ID, preserving an auditable history instead of silently
+rewriting it. Legacy global and per-chat `MEMORY.md` files remain read-only
+archives. See [the structured memory flow](docs/structured-memory-sequence.md)
+for migration, retrieval, and write behavior.
+
+## Nightly Reflection
+
+Each night (local 03:00 by default) the bot reviews new signals from:
+
+- chat `log.jsonl` files
+- optional Atom/RSS feeds (`settings.reflection.atomFeeds`)
+- optional GitHub public events (`settings.reflection.githubUser`)
+
+Empty `atomFeeds` / `githubUser` skips that source. It applies small evidence-backed
+updates:
+
+- durable facts → structured memory (`save_memory`)
+- standing instructions → `# Prompt Notes` in `SYSTEM.md`
+- reusable workflows → `skills/<name>/SKILL.md`
+
+Each source has its own checkpoint under `WORKING_DIR/harness/`. Note/skill
+edits are snapshotted and can be rolled back. First pass for chats and GitHub
+only reviews the last 48 hours; a new Atom feed with no checkpoint ingests the
+full history currently in that feed.
 
 ## API
 
@@ -45,8 +81,13 @@ The agent is aware of these endpoints via its system prompt and can use them as 
 
 | Endpoint | Description | Example |
 |---|---|---|
-| `POST /send` | Send a raw iMessage to a chat (bypasses the agent) | `curl -X POST localhost:7750/send -d '{"chatGuid": "iMessage;-;+11234567890", "text": "hello"}'`<br>→ `{"ok": true}` |
+| `POST /send` | Send text and/or a local file attachment to a chat (bypasses the agent) | `curl -X POST localhost:7750/send -d '{"chatGuid": "iMessage;-;+11234567890", "text": "hello"}'`<br>→ `{"ok": true}` |
 | `POST /prompt` | Feed a prompt to the agent asynchronously; replies are sent to the chat when ready | `curl -X POST localhost:7750/prompt -d '{"chatGuid": "iMessage;-;+11234567890", "prompt": "say hello"}'`<br>→ `{"ok": true}` |
+| `POST /reminders` | Schedule a persistent one-time reminder; `scheduledAt` requires an explicit timezone | `curl -X POST localhost:7750/reminders -d '{"chatGuid":"iMessage;-;+11234567890","text":"check the oven","scheduledAt":"2026-08-08T21:30:00+08:00"}'` |
+| `GET /reminders` | List reminders; optionally filter with `?status=pending` | `curl 'localhost:7750/reminders?status=pending'` |
+| `DELETE /reminders/:id` | Cancel a pending reminder | `curl -X DELETE localhost:7750/reminders/<id>` |
+| `GET /health/model` | Make a live request to the configured default AI model; returns HTTP 200 when healthy or 503 on failure | `curl localhost:7750/health/model`<br>→ `{"ok":true,"model":"openai/gpt-5","latencyMs":842,"checkedAt":"..."}` |
+| `POST /reflect/rollback` | Restore `SYSTEM.md` notes and skills from a snapshot | `curl -X POST localhost:7750/reflect/rollback -d '{"snapshotId":"snap_..."}'` |
 
 ## Commands
 
@@ -54,6 +95,7 @@ Send these as iMessage to interact with the bot:
 
 | Command | Description | Example Reply |
 |---|---|---|
+| `/help` | List available slash commands | `Commands:`<br>`/help — list commands` |
 | `/new` | Reset the session, starting a fresh conversation | `✓ New session started` |
 | `/status` | Show session stats: tokens, context, model | `💬 3 msgs - ↑7.2k ↓505 1.1%/128k`<br>`🤖 anthropic/claude-sonnet-4 • 💭 minimal` |
 | `/compact` | Compress session context to free up token space | `✓ Compacted: 15.2k → 2.1k tokens` |
@@ -73,6 +115,12 @@ All fields are optional.
   "richText": {
     "enabled": false,
     "markdown": true
+  },
+  "reflection": {
+    "enabled": true,
+    "hour": 3,
+    "atomFeeds": [],
+    "githubUser": ""
   }
 }
 ```
@@ -80,6 +128,8 @@ All fields are optional.
 **Chat allowlist** controls which chats receive replies (messages are always logged). By default, replies are **off** for all chats (`blacklist: ["*"]`) — opt in specific chats via the web UI or by adding their guid to `whitelist`. Resolution priority: `blacklist[guid]` > `whitelist[guid]` > `blacklist["*"]` > `whitelist["*"]`.
 
 **Rich text** is optional and disabled by default. When enabled, pi-imessage uses a UI automation fallback to open the target conversation, paste an RTF payload, and send it. Currently this is intended for direct-message iMessage chats. With `markdown: true`, pi-imessage interprets `**bold**` spans and renders them as actual bold text in Messages.
+
+**Reflection** runs nightly at the local `hour` (0–23, default 3). Set `enabled` to `false` to pause it. Set `atomFeeds` to a list of Atom/RSS URLs and/or `githubUser` to a GitHub login to include those sources; leave empty to skip.
 
 ## Environment Variables
 
@@ -89,6 +139,8 @@ All fields are optional.
 | `WEB_HOST` | no | `localhost` | Web UI host |
 | `WEB_PORT` | no | `7750` | Web UI port |
 | `WORKING_DIR` | no | `~/.pi/imessage` | Workspace directory |
+| `AGENT_IDLE_TIMEOUT_MS` | no | `120000` | Abort only after this much continuous agent inactivity; model and tool events reset the timer |
+| `AGENT_MAX_PROMPT_DURATION_MS` | no | `1800000` | Absolute ceiling for one prompt, independent of activity |
 
 # Development
 

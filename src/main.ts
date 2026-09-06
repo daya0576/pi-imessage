@@ -8,7 +8,10 @@ import { join } from "node:path";
 import { createAgentManager } from "./agent.js";
 import { createIMessageBot } from "./imessage.js";
 import { createAppLogger, createDigestLogger } from "./logger.js";
+import { createModelHealthChecker } from "./model-health.js";
 import { createAsyncQueue } from "./queue.js";
+import { startReflectionScheduler } from "./reflection.js";
+import { createReminderService } from "./reminders.js";
 import { createSelfEchoFilter } from "./self-echo.js";
 import { checkEnvironment, createMessageSender } from "./send.js";
 import { readSettings, writeSettings } from "./settings.js";
@@ -20,6 +23,7 @@ import { createWebServer } from "./web/index.js";
 
 async function main() {
 	const webEnabled = process.env.WEB_ENABLED !== "false";
+	const workerEnabled = process.env.WORKER_ENABLED !== "false";
 	const webHost = process.env.WEB_HOST || "localhost";
 	const webPort = Number.parseInt(process.env.WEB_PORT || "7750", 10);
 	const workingDir = process.env.WORKING_DIR || join(homedir(), ".pi", "imessage");
@@ -36,17 +40,45 @@ async function main() {
 	const getSettings = (): Settings => readSettings(workingDir);
 	const setSettings = (updated: Settings): void => writeSettings(workingDir, updated);
 	const agent = await createAgentManager({ workingDir });
+	const checkModelHealth = createModelHealthChecker(workingDir);
 	const store = createChatStore({ workingDir });
 	const queue = createAsyncQueue<IncomingMessage>(join(workingDir, "queue.json"));
 	const watcher = createWatcher({ queue });
+	const reflectionScheduler = workerEnabled
+		? startReflectionScheduler(workingDir, {
+				onSuccess: () => agent.invalidateSessions(),
+			})
+		: null;
 	const bot = createIMessageBot({ queue, agent, sender, echoFilter, store, getSettings, digestLogger });
+	const reminders = createReminderService({
+		workingDir,
+		deliver: async (reminder) => {
+			echoFilter.remember(reminder.chatGuid, reminder.text);
+			await sender.sendMessage(reminder.chatGuid, reminder.text);
+		},
+	});
 	const web = webEnabled
-		? createWebServer({ workingDir, host: webHost, port: webPort, getSettings, setSettings, sender, echoFilter, agent })
+		? createWebServer({
+				workingDir,
+				host: webHost,
+				port: webPort,
+				getSettings,
+				setSettings,
+				sender,
+				echoFilter,
+				agent,
+				checkModelHealth,
+				reminders,
+			})
 		: null;
 
 	console.log(`[sid] workspace:  ${workingDir}`);
-	watcher.start();
-	bot.start();
+	console.log(`[sid] worker:     ${workerEnabled ? "active" : "shadow"}`);
+	if (workerEnabled) {
+		watcher.start();
+		bot.start();
+		reminders.start();
+	}
 	if (web) web.start();
 
 	let shuttingDown = false;
@@ -54,8 +86,12 @@ async function main() {
 		if (shuttingDown) return;
 		shuttingDown = true;
 		console.log("[sid] Shutting down…");
-		watcher.stop();
-		bot.stop();
+		if (workerEnabled) {
+			watcher.stop();
+			bot.stop();
+			await reminders.stop();
+			reflectionScheduler?.stop();
+		}
 		await web?.stop();
 		digestLogger.close();
 		appLogger.close();

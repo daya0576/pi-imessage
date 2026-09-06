@@ -6,13 +6,14 @@
  * before:
  *   logIncoming      — logs the received message
  *   dropSelfEcho     — drops messages that are echoes of the bot's own replies
+ *   archiveImages    — copies image attachments into chat/images/YYYY-MM-DD
  *   storeIncoming    — persists the incoming message to log.jsonl
  *   checkReplyEnabled — drops messages when reply is disabled by settings
  *   downloadImages   — reads image attachments from disk and populates incoming.images
- *   resizeImages     — resizes oversized images via macOS sips
+ *   resizeImages     — normalizes images for model-compatible input via macOS sips
  *
  * start:
- *   commandHandler   — intercepts slash commands (/new, /status, /reload) before the agent
+ *   commandHandler   — intercepts slash commands (/help, /new, /status, /reload) before the agent
  *   callAgent        — sends the message to the agent and yields replies as they arrive
  *
  * end:
@@ -26,7 +27,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import type { ImageContent } from "@mariozechner/pi-ai";
+import type { ImageContent } from "@earendil-works/pi-ai";
 import type { AgentManager } from "./agent.js";
 import type { DigestLogger } from "./logger.js";
 import type { BeforeTask, EmitFn, EndTask, StartTask } from "./pipeline.js";
@@ -49,6 +50,18 @@ function formatIncomingTarget(chat: ChatContext, incoming: IncomingMessage): str
 	return chat.messageType === "group" ? `${chat.groupName}|${incoming.sender}` : incoming.sender;
 }
 
+function helpText(): string {
+	return [
+		"Commands:",
+		"/help — list commands",
+		"/new — reset this chat session",
+		"/status — show session stats",
+		"/compact [instructions] — compress session context",
+		"/stop — stop the current agent run",
+		"/reload — reload models and clear sessions",
+	].join("\n");
+}
+
 // ── before tasks ──────────────────────────────────────────────────────────────
 
 /**
@@ -67,6 +80,21 @@ export function createLogIncomingTask(digestLogger: DigestLogger): BeforeTask {
 		digestLogger.log(
 			`[sid] <- [${label}] ${target}: ${(incoming.text ?? "(attachment)").substring(0, 80)}${attachmentNote}`
 		);
+		return outgoing;
+	};
+}
+
+/** Copy image attachments into the chat workspace and update their paths before logging/reading. */
+export function createArchiveImagesTask(store: ChatStore): BeforeTask {
+	return async (chat, incoming, outgoing) => {
+		try {
+			const archived = await store.archiveImages(chat.chatGuid, incoming);
+			if (archived.length > 0) {
+				console.log(`[sid] archived ${archived.length} image(s) for ${chat.chatGuid}`);
+			}
+		} catch (error) {
+			console.error(`[sid] failed to archive image attachments for ${chat.chatGuid}:`, error);
+		}
 		return outgoing;
 	};
 }
@@ -151,52 +179,48 @@ export function createDownloadImagesTask(): BeforeTask {
 }
 
 /**
- * Resize images whose longest edge exceeds MAX_EDGE_PX using macOS sips.
- * Converts to JPEG at 80% quality to keep size well under Anthropic's 5MB limit.
+ * Normalize image attachments before sending them to the model.
  *
- *   before: raw downloaded image (any size, any format)
- *   after:  JPEG ≤ MAX_EDGE_PX on longest edge, 80% quality
- *
- * Images that are already within the limit are left untouched.
- * Resize failures are logged and the original image is kept as-is.
+ * OpenAI only accepts JPEG, PNG, GIF, and WebP image payloads. iMessage often
+ * stores camera images as HEIC, and corrupted/iCloud-placeholder files can also
+ * be tagged as image/* by chat.db. Unsupported formats are converted to JPEG;
+ * invalid images are dropped so one bad attachment cannot fail the whole prompt.
  */
 const MAX_EDGE_PX = 1024;
+const MODEL_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 
 export function createResizeImagesTask(): BeforeTask {
 	return async (_chat, incoming, outgoing) => {
-		const resized: ImageContent[] = [];
+		const normalized: ImageContent[] = [];
 		for (const image of incoming.images) {
 			try {
-				resized.push(await resizeImageIfNeeded(image));
+				normalized.push(await normalizeImageForModel(image));
 			} catch (error) {
-				console.error("[sid] failed to resize image, keeping original:", error);
-				resized.push(image);
+				console.warn(`[sid] skipping invalid or unsupported image (${image.mimeType}):`, error);
 			}
 		}
-		incoming.images = resized;
+		incoming.images = normalized;
 		return outgoing;
 	};
 }
 
 /**
- * Resize a single image if its longest edge exceeds MAX_EDGE_PX.
- * Uses macOS sips to resample and convert to JPEG at 80% quality.
- * Returns the original image unchanged if already within limits.
+ * Convert unsupported formats to JPEG and resize oversized images.
+ * Returns supported images unchanged when already within limits.
  */
 const execFileAsync = promisify(execFile);
 
-async function resizeImageIfNeeded(image: ImageContent): Promise<ImageContent> {
+async function normalizeImageForModel(image: ImageContent): Promise<ImageContent> {
 	const originalBytes = Buffer.from(image.data, "base64");
 	const originalSizeKB = (originalBytes.length / 1024).toFixed(0);
 
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-imessage-resize-"));
+	const tempDir = await mkdtemp(join(tmpdir(), "pi-imessage-image-"));
 	const inputPath = join(tempDir, "input");
 	const outputPath = join(tempDir, "output.jpg");
 
 	try {
 		await writeFile(inputPath, originalBytes);
 
-		// Get dimensions via sips
 		const { stdout } = await execFileAsync("sips", ["-g", "pixelWidth", "-g", "pixelHeight", inputPath]);
 		const widthMatch = stdout.match(/pixelWidth:\s*(\d+)/);
 		const heightMatch = stdout.match(/pixelHeight:\s*(\d+)/);
@@ -204,30 +228,42 @@ async function resizeImageIfNeeded(image: ImageContent): Promise<ImageContent> {
 		const height = heightMatch ? Number.parseInt(heightMatch[1], 10) : 0;
 		const longestEdge = Math.max(width, height);
 
-		if (longestEdge <= MAX_EDGE_PX) {
+		if (longestEdge <= 0) {
+			throw new Error("sips could not read image dimensions");
+		}
+
+		const needsConversion = !MODEL_IMAGE_MIME_TYPES.has(image.mimeType);
+		const needsResize = longestEdge > MAX_EDGE_PX;
+
+		if (!needsConversion && !needsResize) {
 			return image;
 		}
 
-		// Resize with sips — resampleHeightWidthMax scales the longest edge
-		await execFileAsync("sips", [
-			"--resampleHeightWidthMax",
-			String(MAX_EDGE_PX),
-			"-s",
-			"format",
-			"jpeg",
-			"-s",
-			"formatOptions",
-			"80",
-			inputPath,
-			"--out",
-			outputPath,
-		]);
+		const sipsArgs = needsResize
+			? [
+					"--resampleHeightWidthMax",
+					String(MAX_EDGE_PX),
+					"-s",
+					"format",
+					"jpeg",
+					"-s",
+					"formatOptions",
+					"80",
+					inputPath,
+					"--out",
+					outputPath,
+				]
+			: ["-s", "format", "jpeg", "-s", "formatOptions", "80", inputPath, "--out", outputPath];
+		await execFileAsync("sips", sipsArgs);
 
-		const resizedBytes = await readFile(outputPath);
-		const resizedSizeKB = (resizedBytes.length / 1024).toFixed(0);
-		console.log(`[sid] resized image: ${width}x${height} ${originalSizeKB}KB → ${MAX_EDGE_PX}px ${resizedSizeKB}KB`);
+		const normalizedBytes = await readFile(outputPath);
+		const normalizedSizeKB = (normalizedBytes.length / 1024).toFixed(0);
+		const reason = [needsConversion ? `converted ${image.mimeType}→image/jpeg` : null, needsResize ? "resized" : null]
+			.filter(Boolean)
+			.join(", ");
+		console.log(`[sid] normalized image: ${reason} ${width}x${height} ${originalSizeKB}KB → ${normalizedSizeKB}KB`);
 
-		return { type: "image", mimeType: "image/jpeg", data: resizedBytes.toString("base64") };
+		return { type: "image", mimeType: "image/jpeg", data: normalizedBytes.toString("base64") };
 	} finally {
 		await rm(tempDir, { recursive: true, force: true });
 	}
@@ -236,17 +272,27 @@ async function resizeImageIfNeeded(image: ImageContent): Promise<ImageContent> {
 // ── start tasks ───────────────────────────────────────────────────────────────
 
 /**
- * Intercept slash commands (e.g. "/new", "/status") before they reach the agent.
+ * Intercept slash commands (e.g. "/help", "/new", "/status") before they reach the agent.
  * Sets shouldContinue=false on the outgoing message to skip subsequent start tasks.
  *
  * Supported commands:
- *   /new    — reset the agent session for this chat (equivalent to /new in pi coding agent).
- *   /status — show session stats: tokens, cost, context usage, model, thinking level.
- *   /reload — reload models and clear all sessions.
+ *   /help            — list available commands.
+ *   /new             — reset the agent session for this chat (equivalent to /new in pi coding agent).
+ *   /status          — show session stats: tokens, cost, context usage, model, thinking level.
+ *   /compact [text]  — compact context with optional custom instructions.
+ *   /stop            — stop the current agent run (handled before the per-chat queue).
+ *   /reload          — reload models and clear all sessions.
  */
 export function createCommandHandlerTask(agent: AgentManager): StartTask {
 	return async (chat, incoming, outgoing, emit) => {
 		const text = incoming.text?.trim();
+
+		if (text === "/help") {
+			console.log(`[sid] /help command: ${chat.chatGuid} → listed commands`);
+			emit({ ...outgoing, reply: { type: "message", text: helpText() } });
+			outgoing.shouldContinue = false;
+			return;
+		}
 
 		if (text === "/new") {
 			await agent.newSession(chat.chatGuid);
@@ -288,7 +334,6 @@ export function createCommandHandlerTask(agent: AgentManager): StartTask {
 			console.log(`[sid] /reload command: ${chat.chatGuid} → ${replyText}`);
 			emit({ ...outgoing, reply: { type: "message", text: replyText } });
 			outgoing.shouldContinue = false;
-			return;
 		}
 	};
 }

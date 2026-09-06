@@ -1,15 +1,20 @@
 /** Web server: serves the chat log UI, logs page, and API endpoints. */
 
-import { existsSync, readFileSync, readdirSync, watch } from "node:fs";
+import { existsSync, readFileSync, watch } from "node:fs";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
 import { join } from "node:path";
-import type { AgentManager } from "../agent.js";
+import { type AgentManager, BASE_PERSONALITY, buildSystemPrompt, resolveSessionStorage } from "../agent.js";
+import { listSkillCatalog } from "../harness.js";
+import { activeMemoryItems, listMemoryNamespaces, loadAllMemoryItems, readCoreMemory } from "../memory.js";
+import type { ModelHealthChecker } from "../model-health.js";
+import { rollbackSnapshot } from "../reflection.js";
+import { REMINDER_STATUSES, type ReminderService, type ReminderStatus } from "../reminders.js";
 import type { SelfEchoFilter } from "../self-echo.js";
 import type { MessageSender } from "../send.js";
 import type { Settings } from "../settings.js";
 import type { AgentReply } from "../types.js";
 import { getChatBlocks } from "./data.js";
-import { type ChatMemory, renderLogsPage, renderMemoryPage, renderPage } from "./render.js";
+import { type MemoryPageData, renderLogsPage, renderMemoryPage, renderPage } from "./render.js";
 
 export interface WebServerConfig {
 	workingDir: string;
@@ -20,6 +25,8 @@ export interface WebServerConfig {
 	sender: MessageSender;
 	echoFilter: SelfEchoFilter;
 	agent: AgentManager;
+	checkModelHealth: ModelHealthChecker;
+	reminders: ReminderService;
 }
 
 export interface WebServer {
@@ -55,26 +62,59 @@ function parseJsonBody(request: IncomingMessage): Promise<Record<string, unknown
 	});
 }
 
-/** Read global and per-chat MEMORY.md files. */
-function readMemories(workingDir: string): { globalMemory: string; chatMemories: ChatMemory[] } {
-	const globalMemoryPath = join(workingDir, "MEMORY.md");
-	const globalMemory = existsSync(globalMemoryPath) ? readFileSync(globalMemoryPath, "utf-8").trim() : "";
-	const chatMemories: ChatMemory[] = [];
-	if (existsSync(workingDir)) {
-		for (const entry of readdirSync(workingDir, { withFileTypes: true })) {
-			if (!entry.isDirectory()) continue;
-			const memPath = join(workingDir, entry.name, "MEMORY.md");
-			if (existsSync(memPath)) {
-				const content = readFileSync(memPath, "utf-8").trim();
-				if (content) chatMemories.push({ name: entry.name, content });
-			}
-		}
+/** Read harness view for the Memory tab: personality, prompt, memory, skills. */
+function readMemories(workingDir: string): MemoryPageData {
+	const activeByNamespace = new Map<string, ReturnType<typeof activeMemoryItems>>();
+	for (const item of activeMemoryItems(loadAllMemoryItems(workingDir))) {
+		const list = activeByNamespace.get(item.namespace) ?? [];
+		list.push(item);
+		activeByNamespace.set(item.namespace, list);
 	}
-	return { globalMemory, chatMemories };
+
+	const namespaces = listMemoryNamespaces(workingDir).map((entry) => {
+		const items = (activeByNamespace.get(entry.namespace) ?? [])
+			.slice()
+			.sort(
+				(a, b) => (b.event_time ?? "").localeCompare(a.event_time ?? "") || b.created_at.localeCompare(a.created_at)
+			)
+			.map((item) => ({
+				id: item.id,
+				kind: item.kind,
+				text: item.text,
+				subjects: item.subjects,
+				event_time: item.event_time,
+				created_at: item.created_at,
+				importance: item.importance,
+				confidence: item.confidence,
+			}));
+		return {
+			namespace: entry.namespace,
+			active: entry.active,
+			total: entry.total,
+			items,
+		};
+	});
+
+	const skills = listSkillCatalog(workingDir).map((skill) => ({
+		name: skill.name,
+		description: skill.description,
+		scope: skill.scope,
+		chatGuid: skill.chatGuid,
+		instructions: skill.instructions,
+	}));
+
+	return {
+		personality: BASE_PERSONALITY,
+		prompt: buildSystemPrompt(workingDir),
+		core: readCoreMemory(workingDir),
+		namespaces,
+		skills,
+	};
 }
 
 export function createWebServer(config: WebServerConfig): WebServer {
-	const { workingDir, host, port, getSettings, setSettings, sender, echoFilter, agent } = config;
+	const { workingDir, host, port, getSettings, setSettings, sender, echoFilter, agent, checkModelHealth, reminders } =
+		config;
 	const sseClients = new Set<ServerResponse>();
 	let fsWatcher: ReturnType<typeof watch> | null = null;
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -93,8 +133,16 @@ export function createWebServer(config: WebServerConfig): WebServer {
 		if (!existsSync(workingDir)) return;
 		try {
 			fsWatcher = watch(workingDir, { recursive: true }, (_event, filename) => {
-				if (filename?.endsWith("log.jsonl") || filename?.endsWith(".log") || filename?.endsWith("MEMORY.md"))
+				if (
+					filename?.endsWith("log.jsonl") ||
+					filename?.endsWith(".log") ||
+					filename?.endsWith("core.md") ||
+					filename?.endsWith("SYSTEM.md") ||
+					filename?.endsWith("SKILL.md") ||
+					(filename?.includes("file-memory") && filename.endsWith(".jsonl"))
+				) {
 					broadcast();
+				}
 			});
 			fsWatcher.on("error", () => {});
 		} catch {
@@ -138,8 +186,7 @@ export function createWebServer(config: WebServerConfig): WebServer {
 
 		// Memory page
 		if (url.pathname === "/memory" && request.method === "GET") {
-			const { globalMemory, chatMemories } = readMemories(workingDir);
-			const html = renderMemoryPage(globalMemory, chatMemories);
+			const html = renderMemoryPage(readMemories(workingDir));
 			response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
 			response.end(html);
 			return;
@@ -169,19 +216,115 @@ export function createWebServer(config: WebServerConfig): WebServer {
 			return;
 		}
 
-		// POST /send — send a message directly to a chat
+		// GET /health/runtime — lightweight readiness/drain state for deployment.
+		if (request.method === "GET" && url.pathname === "/health/runtime") {
+			const runtime = agent.getRuntimeStatus?.() ?? { activePrompts: 0, sessions: 0, lastAgentActivityAt: null };
+			jsonResponse(response, 200, { ok: true, ...runtime });
+			return;
+		}
+
+		// GET /health/model — make a live request to the configured default AI model
+		if (request.method === "GET" && url.pathname === "/health/model") {
+			const result = await checkModelHealth();
+			jsonResponse(response, result.ok ? 200 : 503, result);
+			return;
+		}
+
+		// POST /reflect/rollback — restore SYSTEM.md notes and skills from a snapshot
+		if (request.method === "POST" && url.pathname === "/reflect/rollback") {
+			try {
+				const body = await parseJsonBody(request);
+				const snapshotId = body.snapshotId as string;
+				if (!snapshotId) {
+					jsonResponse(response, 400, { error: "snapshotId required" });
+					return;
+				}
+				console.log(`[web] /reflect/rollback start: ${snapshotId}`);
+				const manifest = await rollbackSnapshot(workingDir, snapshotId);
+				agent.invalidateSessions();
+				console.log(`[web] /reflect/rollback done: ${snapshotId} files=${manifest.files.length}`);
+				jsonResponse(response, 200, { ok: true, snapshotId, files: manifest.files.length });
+			} catch (error) {
+				console.error("[web] /reflect/rollback error:", error);
+				jsonResponse(response, 500, { error: String(error) });
+			}
+			return;
+		}
+
+		// GET /reminders — list persisted reminders, optionally filtered by status
+		if (request.method === "GET" && url.pathname === "/reminders") {
+			const statusParam = url.searchParams.get("status");
+			if (statusParam && !REMINDER_STATUSES.includes(statusParam as ReminderStatus)) {
+				jsonResponse(response, 400, { error: `invalid status: ${statusParam}` });
+				return;
+			}
+			const status = (statusParam || undefined) as ReminderStatus | undefined;
+			jsonResponse(response, 200, { reminders: reminders.list(status) });
+			return;
+		}
+
+		// POST /reminders — persist a one-time reminder and deliver it at the requested instant
+		if (request.method === "POST" && url.pathname === "/reminders") {
+			try {
+				const body = await parseJsonBody(request);
+				if (
+					typeof body.chatGuid !== "string" ||
+					typeof body.text !== "string" ||
+					typeof body.scheduledAt !== "string"
+				) {
+					jsonResponse(response, 400, { error: "chatGuid, text, and scheduledAt are required strings" });
+					return;
+				}
+				if (body.idempotencyKey !== undefined && typeof body.idempotencyKey !== "string") {
+					jsonResponse(response, 400, { error: "idempotencyKey must be a string" });
+					return;
+				}
+				const result = reminders.create({
+					chatGuid: body.chatGuid,
+					text: body.text,
+					scheduledAt: body.scheduledAt,
+					idempotencyKey: body.idempotencyKey,
+				});
+				jsonResponse(response, result.created ? 201 : 200, { ok: true, ...result });
+			} catch (error) {
+				jsonResponse(response, 400, { error: error instanceof Error ? error.message : String(error) });
+			}
+			return;
+		}
+
+		// DELETE /reminders/:id — cancel a pending reminder
+		const reminderMatch = url.pathname.match(/^\/reminders\/([^/]+)$/);
+		if (request.method === "DELETE" && reminderMatch) {
+			const reminder = reminders.cancel(decodeURIComponent(reminderMatch[1]));
+			if (!reminder) {
+				jsonResponse(response, 404, { error: "pending reminder not found" });
+				return;
+			}
+			jsonResponse(response, 200, { ok: true, reminder });
+			return;
+		}
+
+		// POST /send — send a message and/or local file attachment directly to a chat
 		if (request.method === "POST" && url.pathname === "/send") {
 			try {
 				const body = await parseJsonBody(request);
 				const chatGuid = body.chatGuid as string;
-				const text = body.text as string;
-				if (!chatGuid || !text) {
-					jsonResponse(response, 400, { error: "chatGuid and text required" });
+				const text = body.text as string | undefined;
+				const filePath = (body.filePath ?? body.attachmentPath) as string | undefined;
+				if (!chatGuid || (!text && !filePath)) {
+					jsonResponse(response, 400, { error: "chatGuid and text or filePath required" });
 					return;
 				}
-				echoFilter.remember(chatGuid, text);
-				await sender.sendMessage(chatGuid, text);
-				console.log(`[web] /send: ${chatGuid} "${text.substring(0, 60)}"`);
+				if (text) {
+					echoFilter.remember(chatGuid, text);
+					await sender.sendMessage(chatGuid, text);
+				}
+				if (filePath) {
+					await sender.sendAttachment(chatGuid, filePath);
+				}
+				console.log(
+					`[web] /send: ${chatGuid} text=${text ? `"${text.substring(0, 60)}"` : "none"} file=${filePath ?? "none"}`
+				);
 				jsonResponse(response, 200, { ok: true });
 			} catch (error) {
 				console.error("[web] /send error:", error);
@@ -196,11 +339,21 @@ export function createWebServer(config: WebServerConfig): WebServer {
 				const body = await parseJsonBody(request);
 				const chatGuid = body.chatGuid as string;
 				const prompt = body.prompt as string;
+				const sessionKey = typeof body.sessionKey === "string" ? body.sessionKey : undefined;
+				const ephemeral = body.ephemeral === true;
 				if (!chatGuid || !prompt) {
 					jsonResponse(response, 400, { error: "chatGuid and prompt required" });
 					return;
 				}
-				console.log(`[web] /prompt: ${chatGuid} "${prompt.substring(0, 60)}"`);
+				try {
+					resolveSessionStorage(workingDir, chatGuid, { sessionKey, ephemeral });
+				} catch (error) {
+					jsonResponse(response, 400, { error: String(error) });
+					return;
+				}
+				console.log(
+					`[web] /prompt: ${chatGuid} session=${sessionKey ?? chatGuid} ephemeral=${ephemeral} "${prompt.substring(0, 60)}"`
+				);
 				jsonResponse(response, 200, { ok: true });
 				// Process asynchronously — agent replies are sent to the chat when ready
 				agent
@@ -221,7 +374,7 @@ export function createWebServer(config: WebServerConfig): WebServer {
 								await sender.sendMessage(chatGuid, agentReply.text);
 							}
 						},
-						{ streamingBehavior: "followUp" }
+						{ streamingBehavior: "followUp", sessionKey, ephemeral }
 					)
 					.then(() => {
 						console.log(`[web] /prompt done: ${chatGuid}`);
