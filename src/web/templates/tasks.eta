@@ -15,20 +15,21 @@ button:disabled, .dim { opacity: .5 }
 @media (max-width: 600px) { body { display: block } nav { width: auto; padding: 12px; border-right: 0; border-bottom: 1px solid } nav a { display: inline-block; margin-right: 12px } main { padding: 16px } }
 </style></head><body>
 <nav><a href="/">Recent Chats</a><a href="/scheduled">Scheduled</a><a href="/tasks" class="active">Tasks</a><a href="/logs">Logs</a><a href="/memory">Memory</a></nav>
-<main><h1>Automation Tasks</h1><p class="dim">Reviewed file configuration only. Resume runs verification. Notification accepted is not verified delivery.</p>
+<% const fmt = (value) => value ? new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '—'; const labels = { idle: '未运行', running: '运行中', healthy: '正常', needs_human: '需要人工处理', failed: '失败' }; %>
+<main><h1>自动任务</h1><p class="dim">上海时间 · 恢复时重新验证，不直接标记成功。通知记录不代表收件人已读。</p>
 <p id="feedback" role="status"></p>
-<% if (!it.tasks.length) { %><p>No automation jobs configured.</p><% } %>
+<% if (!it.tasks.length) { %><p>尚未配置自动任务。</p><% } %>
 <% it.tasks.forEach(function(task) { %>
 <article><h2><%= task.name %></h2>
-<p>State: <%= task.state %><%= task.paused ? ' / paused' : '' %><%= !task.enabled ? ' / disabled in config' : '' %><%= task.blocked ? ' / termination unverified — operator required' : '' %></p>
-<p>Last success: <%= task.lastSuccess || 'never' %></p><p>Next scheduled check: <%= task.paused || !task.enabled ? 'paused' : task.nextRun || 'worker inactive' %></p>
-<p>Reason / action needed: <%= task.reason || 'none' %></p><p>Notification: <%= task.notification %></p>
-<button data-id="<%= task.id %>" data-action="pause">Pause</button>
-<button data-id="<%= task.id %>" data-action="resume" <%= task.running || task.blocked || !task.enabled ? 'disabled' : '' %>>Resume / verify</button>
-<button data-id="<%= task.id %>" data-action="run" <%= task.running || task.paused || task.blocked || !task.enabled ? 'disabled' : '' %>>Run</button>
+<p>状态：<%= labels[task.state] || task.state %><%= task.paused ? ' / 已暂停' : '' %><%= !task.enabled ? ' / 配置已停用' : '' %><%= task.blocked ? ' / 未确认旧进程退出，需要人工检查' : '' %></p>
+<p>上次成功：<%= task.lastSuccess ? fmt(task.lastSuccess) : '尚未成功验证' %></p><p>下次检查：<%= task.paused || !task.enabled ? '暂停中' : task.nextRun ? fmt(task.nextRun) : '执行器未启动' %></p>
+<p>需要处理：<%= (it.runs.find((run) => run.taskId === task.id) || {}).summary || task.reason || '无' %></p><p>通知：<%= task.notification === 'accepted' ? '发送流程已确认（非收件人回执）' : task.notification === 'pending' ? '等待发送确认' : '无' %></p>
+<button data-id="<%= task.id %>" data-action="pause">暂停</button>
+<button data-id="<%= task.id %>" data-action="resume" <%= task.running || task.blocked || !task.enabled ? 'disabled' : '' %>>恢复并验证</button>
+<button data-id="<%= task.id %>" data-action="run" <%= task.running || task.paused || task.blocked || !task.enabled ? 'disabled' : '' %>>立即检查</button>
 </article><% }) %>
-<h2>Recent runs</h2>
-<% it.runs.forEach(function(run) { %><article><p><%= run.taskId %> — <%= run.status %></p><p><%= run.startedAt %> → <%= run.finishedAt || 'running' %></p><p><%= run.summary %></p><p><%= run.reason %></p></article><% }) %>
+<h2>最近运行记录</h2>
+<% it.runs.forEach(function(run) { %><article><p><%= run.taskId %> — <%= labels[run.status] || run.status %></p><p><%= fmt(run.startedAt) %> → <%= run.finishedAt ? fmt(run.finishedAt) : '运行中' %></p><p><%= run.summary %></p><p><%= run.reason %></p></article><% }) %>
 </main><script>
 document.addEventListener('click', async (event) => {
   const button = event.target.closest('button[data-action]');
@@ -39,9 +40,9 @@ document.addEventListener('click', async (event) => {
     const response = await fetch('/tasks/' + encodeURIComponent(button.dataset.id) + '/' + button.dataset.action, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Automation-Action': '1' }, body: '{}'
     });
-    feedback.textContent = response.ok ? 'Accepted; refreshing status…' : 'Unavailable. Refresh and check task state.';
+    feedback.textContent = response.ok ? '请求已受理，正在刷新状态…' : '操作不可用，请检查任务状态。';
     if (response.ok) setTimeout(() => location.reload(), 500);
-  } catch { feedback.textContent = 'Request failed; refresh to check state.'; }
+  } catch { feedback.textContent = '请求失败，请刷新确认当前状态。'; }
   button.disabled = false;
 });
 setTimeout(() => location.reload(), 15000);
