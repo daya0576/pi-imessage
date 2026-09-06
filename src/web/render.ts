@@ -8,6 +8,7 @@ import type { CronJobView, CronRun } from "../cron.js";
 import type { Reminder } from "../reminders.js";
 import { isReplyEnabled } from "../settings.js";
 import type { Settings } from "../settings.js";
+import type { SourcesData } from "../sources.js";
 import { firstLinePreview, senderLabel } from "../store.js";
 import type { MessageType } from "../types.js";
 import type { ChatBlock } from "./data.js";
@@ -93,6 +94,10 @@ export function renderScheduledPage(data: ScheduledPageData): string {
 
 export function renderTasksPage(data: { tasks: AutomationView[]; runs: AutomationRun[] }): string {
 	return eta.render("tasks", data);
+}
+
+export function renderSourcesPage(data: SourcesData): string {
+	return eta.render("sources", data);
 }
 
 export interface ChatMemory {

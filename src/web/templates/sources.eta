@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>blue — external sources</title>
+<style>
+* { box-sizing: border-box }
+body { margin: 0; background: #111; color: #ccc; font: 13px/1.6 monospace; display: flex }
+nav { width: 112px; flex-shrink: 0; padding: 40px 16px; border-right: 1px solid }
+a { color: inherit; overflow-wrap: anywhere }
+nav a { display: block; text-decoration: none; opacity: .5; line-height: 2.4 }
+nav a:hover, nav a.active { opacity: 1 }
+main { padding: 32px; min-width: 0; flex: 1 }
+h1, h2, h3 { font: inherit; margin: 16px 0 8px }
+p { margin: 4px 0 }
+.dim { opacity: .6 }
+.categories { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 16px 0 }
+.row { display: grid; grid-template-columns: minmax(150px, 1.2fr) minmax(100px, 1fr) minmax(160px, 1.2fr); gap: 8px 16px; padding: 12px 0; border-top: 1px solid; overflow-wrap: anywhere }
+.details { grid-column: 1 / -1 }
+summary { cursor: pointer }
+@media (max-width: 600px) { body { display: block } nav { width: auto; padding: 12px; border-right: 0; border-bottom: 1px solid } nav a { display: inline-block; margin-right: 12px } main { padding: 16px } .row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) } .sync { grid-column: 1 / -1 } }
+</style></head><body>
+<nav><a href="/">Recent Chats</a><a href="/scheduled">Scheduled</a><a href="/tasks">Tasks</a><a href="/sources" class="active">Sources</a><a href="/logs">Logs</a><a href="/memory">Memory</a></nav>
+<% const phases = { not_configured: '未配置', installed: '客户端已安装', needs_authorization: '待授权', query_only: '已有工具 / 未确认持续同步', scheduled: '已有同步记录' }; const states = { unknown: '未验证', blocked: '需人工处理', healthy: '最近同步已验证', stale: '证据已过期', failed: '同步或状态读取异常' }; const reasons = { screen_permission: '缺少屏幕录制授权，无法获取登录二维码；聊天采集器尚未接通。', login_required: '需要登录，登录后仍须独立验证采集器。', collector_missing: '缺少已验证的采集器。', sync_unverified: '尚无独立的成功同步证据。', no_local_data: '没有可用的本地同步数据。', sync_error: '需检查对应连接器；原始错误不会暴露在此页。' }; const fmt = value => value ? new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '未确认'; %>
+<main><h1>外部数据源</h1>
+<p>按分类查看接入阶段与同步证据。Tasks 管执行任务，这里管数据来源。</p>
+<p class="dim">只读管理页 · 安装 / 登录不等于采集成功 · 打开页面不会发起同步、登录或模型调用。</p>
+<p class="dim">上海时间 · 页面生成：<%= fmt(it.generatedAt) %> · <a href="/sources">刷新状态</a></p>
+<div class="categories"><% it.categories.forEach(category => { %><a href="#<%= category.id %>"><%= category.name %></a><% }) %></div>
+<% it.categories.forEach(category => { %><section id="<%= category.id %>"><h2><%= category.name %></h2>
+<% it.sources.filter(source => source.category === category.id).forEach(source => { %>
+<div class="row"><div><%= source.name %><p class="dim"><%= phases[source.phase] %></p></div><div><%= states[source.state] %></div><div class="sync">最近成功：<%= fmt(source.lastSuccessAt) %></div>
+<details class="details"><summary>接入详情</summary>
+<p>方式：<%= source.method %></p><p><%= source.note %></p>
+<% if (source.reason) { %><p><%= reasons[source.reason] %></p><% } %>
+<p>状态证据时间：<%= fmt(source.checkedAt) %></p><p>已有索引 / 处理记录数：<%= source.recordCount === null ? '未确认' : source.recordCount %>（不是历史完整性证明）</p>
+<p class="dim">超过 <%= source.staleHours %> 小时未更新证据时，不再显示为当前正常。页面不展示正文、身份、密钥或登录二维码。</p>
+</details></div><% }) %></section><% }) %>
+<p class="dim">未配置项只是接入目录，不表示已获得账户授权。同步计划仍在 Scheduled 查看；私人数据的聊天可见范围由检索权限另行控制。</p>
+</main></body></html>

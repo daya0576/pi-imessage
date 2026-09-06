@@ -15,6 +15,7 @@ import type { AgentReply } from "../types.js";
 import { handleAutomationRequest } from "./automation.js";
 import { getChatBlocks } from "./data.js";
 import { type ChatMemory, renderLogsPage, renderMemoryPage, renderPage, renderScheduledPage } from "./render.js";
+import { handleSourcesRequest } from "./sources.js";
 
 export interface WebServerConfig {
 	workingDir: string;
@@ -142,6 +143,7 @@ export function createWebServer(config: WebServerConfig): WebServer {
 	}
 
 	async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+		if (handleSourcesRequest(request, response, workingDir)) return;
 		if (await handleAutomationRequest(request, response, config.automation)) return;
 		const url = new URL(request.url ?? "/", `http://localhost:${port}`);
 

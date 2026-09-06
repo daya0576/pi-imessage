@@ -14,7 +14,7 @@ button { color: inherit; background: transparent; border: 1px solid; padding: 4p
 button:disabled, .dim { opacity: .5 }
 @media (max-width: 600px) { body { display: block } nav { width: auto; padding: 12px; border-right: 0; border-bottom: 1px solid } nav a { display: inline-block; margin-right: 12px } main { padding: 16px } }
 </style></head><body>
-<nav><a href="/">Recent Chats</a><a href="/scheduled">Scheduled</a><a href="/tasks" class="active">Tasks</a><a href="/logs">Logs</a><a href="/memory">Memory</a></nav>
+<nav><a href="/">Recent Chats</a><a href="/scheduled">Scheduled</a><a href="/tasks" class="active">Tasks</a><a href="/sources">Sources</a><a href="/logs">Logs</a><a href="/memory">Memory</a></nav>
 <% const fmt = (value) => value ? new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '—'; const labels = { idle: '未运行', running: '运行中', healthy: '正常', needs_human: '需要人工处理', failed: '失败' }; %>
 <main><h1>自动任务</h1><p class="dim">上海时间 · 恢复时重新验证，不直接标记成功。通知记录不代表收件人已读。</p>
 <p id="feedback" role="status"></p>
