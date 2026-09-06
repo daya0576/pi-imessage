@@ -63,7 +63,7 @@ export function getAutoCompactTokenThreshold(
 	return Math.floor(contextWindow * ratio);
 }
 
-const FAST_OPENAI_CODEX_MODELS = /^gpt-5\.6-(?:sol|terra|luna)$/;
+const FAST_OPENAI_CODEX_MODELS = /^(?:gpt-5\.6-(?:sol|terra|luna)|gpt-6-astra)$/;
 
 /** Enable OpenAI priority processing without enabling user-discovered extensions. */
 export function openAiCodexFastExtension(pi: ExtensionAPI): void {
