@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import { Eta } from "eta";
 import type { AutomationRun, AutomationView } from "../automation.js";
 import type { CronJobView, CronRun } from "../cron.js";
+import { MEMORY_STATUSES, MEMORY_VIEWS, type MemoryViewData, memoryLink } from "../memory-view.js";
+import { MEMORY_KINDS } from "../memory.js";
 import type { Reminder } from "../reminders.js";
 import { isReplyEnabled } from "../settings.js";
 import type { Settings } from "../settings.js";
@@ -100,11 +102,13 @@ export function renderSourcesPage(data: SourcesData): string {
 	return eta.render("sources", data);
 }
 
-export interface ChatMemory {
-	name: string;
-	content: string;
-}
-
-export function renderMemoryPage(globalMemory: string, chatMemories: ChatMemory[]): string {
-	return eta.render("memory", { globalMemory, chatMemories });
+export function renderMemoryPage(data: MemoryViewData): string {
+	return eta.render("memory", {
+		...data,
+		views: MEMORY_VIEWS,
+		statuses: MEMORY_STATUSES,
+		kinds: MEMORY_KINDS,
+		link: memoryLink,
+		statusLabel: (status: string) => MEMORY_STATUSES.find(({ id }) => id === status)?.label || "无法确认",
+	});
 }

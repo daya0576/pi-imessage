@@ -1,8 +1,9 @@
 /** Web server: serves the chat log UI, logs page, and API endpoints. */
 
-import { existsSync, readFileSync, readdirSync, watch } from "node:fs";
+import { existsSync, readFileSync, watch } from "node:fs";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
 import { join } from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { type AgentManager, resolveSessionStorage } from "../agent.js";
 import type { AutomationService } from "../automation.js";
 import type { CronService } from "../cron.js";
@@ -14,7 +15,8 @@ import type { Settings } from "../settings.js";
 import type { AgentReply } from "../types.js";
 import { handleAutomationRequest } from "./automation.js";
 import { getChatBlocks } from "./data.js";
-import { type ChatMemory, renderLogsPage, renderMemoryPage, renderPage, renderScheduledPage } from "./render.js";
+import { handleMemoryRequest } from "./memory.js";
+import { renderLogsPage, renderPage, renderScheduledPage } from "./render.js";
 import { handleSourcesRequest } from "./sources.js";
 
 export interface WebServerConfig {
@@ -63,24 +65,6 @@ function parseJsonBody(request: IncomingMessage): Promise<Record<string, unknown
 		});
 		request.on("error", reject);
 	});
-}
-
-/** Read global and per-chat MEMORY.md files. */
-function readMemories(workingDir: string): { globalMemory: string; chatMemories: ChatMemory[] } {
-	const globalMemoryPath = join(workingDir, "MEMORY.md");
-	const globalMemory = existsSync(globalMemoryPath) ? readFileSync(globalMemoryPath, "utf-8").trim() : "";
-	const chatMemories: ChatMemory[] = [];
-	if (existsSync(workingDir)) {
-		for (const entry of readdirSync(workingDir, { withFileTypes: true })) {
-			if (!entry.isDirectory()) continue;
-			const memPath = join(workingDir, entry.name, "MEMORY.md");
-			if (existsSync(memPath)) {
-				const content = readFileSync(memPath, "utf-8").trim();
-				if (content) chatMemories.push({ name: entry.name, content });
-			}
-		}
-	}
-	return { globalMemory, chatMemories };
 }
 
 export function createWebServer(config: WebServerConfig): WebServer {
@@ -143,6 +127,7 @@ export function createWebServer(config: WebServerConfig): WebServer {
 	}
 
 	async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+		if (handleMemoryRequest(request, response, workingDir, getAgentDir())) return;
 		if (handleSourcesRequest(request, response, workingDir)) return;
 		if (await handleAutomationRequest(request, response, config.automation)) return;
 		const url = new URL(request.url ?? "/", `http://localhost:${port}`);
@@ -157,21 +142,6 @@ export function createWebServer(config: WebServerConfig): WebServer {
 			response.write("retry: 5000\n\n");
 			sseClients.add(response);
 			request.on("close", () => sseClients.delete(response));
-			return;
-		}
-
-		// Memory page
-		if (url.pathname === "/memory" && request.method === "GET") {
-			const { globalMemory, chatMemories } = readMemories(workingDir);
-			const html = renderMemoryPage(globalMemory, chatMemories);
-			response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-			response.end(html);
-			return;
-		}
-
-		// Memory data API (JSON)
-		if (url.pathname === "/memory/data" && request.method === "GET") {
-			jsonResponse(response, 200, readMemories(workingDir));
 			return;
 		}
 
