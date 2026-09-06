@@ -41,6 +41,23 @@ DEPLOY_CHAT_GUID='iMessage;-;+...' ops/deploy-detached.sh
 Manual deployment outside the agent can call `ops/deploy-blue-green.sh`
 directly.
 
+## Remote review and automatic deployment
+
+Install the polling LaunchAgent once:
+
+```bash
+ops/install-remote-review-launchd.sh
+```
+
+It checks `origin/main` every 60 seconds. Each unseen commit is fetched into a
+detached worktree and reviewed by a read-only Pi session before any dependency
+or project script runs. Only an exact `VERDICT: APPROVE` continues. Approved
+commits deploy directly from the reviewed detached checkout through the normal
+blue-green flow, which repeats checks, tests, audit, shadow startup, and real LLM probes.
+Rejected, oversized, rewritten, or failed candidates are not deployed and are
+reported to the configured iMessage chat. Runtime state and full reviews live
+under `~/.pi/imessage/remote-review/`.
+
 ## Watchdog
 
 `ops/pi-imessage-watchdog.sh`:
