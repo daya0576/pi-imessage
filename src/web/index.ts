@@ -4,6 +4,7 @@ import { existsSync, readFileSync, watch } from "node:fs";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
 import { join } from "node:path";
 import { type AgentManager, BASE_PERSONALITY, buildSystemPrompt, resolveSessionStorage } from "../agent.js";
+import type { CronService } from "../cron.js";
 import { listSkillCatalog } from "../harness.js";
 import { activeMemoryItems, listMemoryNamespaces, loadAllMemoryItems, readCoreMemory } from "../memory.js";
 import type { ModelHealthChecker } from "../model-health.js";
@@ -14,7 +15,7 @@ import type { MessageSender } from "../send.js";
 import type { Settings } from "../settings.js";
 import type { AgentReply } from "../types.js";
 import { getChatBlocks } from "./data.js";
-import { type MemoryPageData, renderLogsPage, renderMemoryPage, renderPage } from "./render.js";
+import { type MemoryPageData, renderLogsPage, renderMemoryPage, renderPage, renderScheduledPage } from "./render.js";
 
 export interface WebServerConfig {
 	workingDir: string;
@@ -27,6 +28,7 @@ export interface WebServerConfig {
 	agent: AgentManager;
 	checkModelHealth: ModelHealthChecker;
 	reminders: ReminderService;
+	cron: CronService;
 }
 
 export interface WebServer {
@@ -113,8 +115,19 @@ function readMemories(workingDir: string): MemoryPageData {
 }
 
 export function createWebServer(config: WebServerConfig): WebServer {
-	const { workingDir, host, port, getSettings, setSettings, sender, echoFilter, agent, checkModelHealth, reminders } =
-		config;
+	const {
+		workingDir,
+		host,
+		port,
+		getSettings,
+		setSettings,
+		sender,
+		echoFilter,
+		agent,
+		checkModelHealth,
+		reminders,
+		cron,
+	} = config;
 	const sseClients = new Set<ServerResponse>();
 	let fsWatcher: ReturnType<typeof watch> | null = null;
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -195,6 +208,53 @@ export function createWebServer(config: WebServerConfig): WebServer {
 		// Memory data API (JSON)
 		if (url.pathname === "/memory/data" && request.method === "GET") {
 			jsonResponse(response, 200, readMemories(workingDir));
+			return;
+		}
+
+		// Unified recurring jobs and one-time reminders page.
+		if (url.pathname === "/scheduled" && request.method === "GET") {
+			const html = renderScheduledPage({
+				jobs: cron.list(),
+				runs: cron.listRuns(100),
+				reminders: reminders.list(),
+				configPath: cron.configPath,
+			});
+			response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+			response.end(html);
+			return;
+		}
+
+		if (url.pathname === "/scheduled/data" && request.method === "GET") {
+			jsonResponse(response, 200, {
+				jobs: cron.list(),
+				runs: cron.listRuns(100),
+				reminders: reminders.list(),
+				configPath: cron.configPath,
+			});
+			return;
+		}
+
+		const cronRunMatch = url.pathname.match(/^\/cron\/jobs\/([^/]+)\/run$/);
+		if (request.method === "POST" && cronRunMatch) {
+			try {
+				const run = await cron.runNow(decodeURIComponent(cronRunMatch[1]));
+				jsonResponse(response, 200, { ok: true, run });
+			} catch (error) {
+				jsonResponse(response, 404, { error: error instanceof Error ? error.message : String(error) });
+			}
+			return;
+		}
+
+		const cronToggleMatch = url.pathname.match(/^\/cron\/jobs\/([^/]+)\/enabled$/);
+		if (request.method === "POST" && cronToggleMatch) {
+			try {
+				const body = await parseJsonBody(request);
+				if (typeof body.enabled !== "boolean") throw new Error("enabled must be boolean");
+				const job = cron.setEnabled(decodeURIComponent(cronToggleMatch[1]), body.enabled);
+				jsonResponse(response, 200, { ok: true, job });
+			} catch (error) {
+				jsonResponse(response, 400, { error: error instanceof Error ? error.message : String(error) });
+			}
 			return;
 		}
 

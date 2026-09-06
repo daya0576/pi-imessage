@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>blue — scheduled tasks</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box }
+body { background: #111; color: #ccc; font: 13px/1.6 monospace; display: flex; height: 100vh; overflow: hidden }
+::-webkit-scrollbar { width: 8px; height: 8px }
+::-webkit-scrollbar-track { background: transparent }
+::-webkit-scrollbar-thumb { background: #2a2a2a }
+* { scrollbar-width: thin; scrollbar-color: #2a2a2a transparent }
+nav { width: 112px; flex-shrink: 0; padding: 40px 16px; border-right: 1px solid #1a1a1a }
+nav a { display: block; color: inherit; text-decoration: none; line-height: 2.4; opacity: .35 }
+nav a:hover, nav a.active { opacity: 1 }
+.content { flex: 1; padding: 40px; overflow-y: auto }
+h2 { font-size: 13px; font-weight: normal; opacity: .5; margin: 0 0 12px }
+.section { margin-bottom: 32px }
+.meta { opacity: .35; margin-bottom: 12px; word-break: break-all }
+table { width: 100%; border-collapse: collapse; background: #1a1a1a }
+th, td { padding: 9px 12px; border-bottom: 1px solid #252525; text-align: left; vertical-align: top }
+th { opacity: .4; font-weight: normal; white-space: nowrap }
+.dim { opacity: .4 }
+.good { color: #93b58c }
+.bad { color: #c47f7f }
+.running { color: #c7b477 }
+.action { max-width: 420px; white-space: pre-wrap; word-break: break-word }
+button { background: none; border: 1px solid #333; color: #aaa; font: 12px monospace; padding: 2px 7px; cursor: pointer; margin-right: 4px }
+button:hover { border-color: #777; color: #ddd }
+.empty { padding: 14px; background: #1a1a1a; opacity: .35 }
+</style></head><body>
+
+<nav>
+  <a href="/">Recent Chats</a>
+  <a href="/scheduled" class="active">Scheduled</a>
+  <a href="/logs">Logs</a>
+  <a href="/memory">Memory</a>
+</nav>
+
+<div class="content">
+  <div class="section">
+    <h2>Recurring jobs</h2>
+    <div class="meta">config: <%= it.configPath %></div>
+<% if (it.jobs.length === 0) { %>
+    <div class="empty">no recurring jobs configured</div>
+<% } else { %>
+    <table>
+      <thead><tr><th>job</th><th>schedule</th><th>next run</th><th>action</th><th>last result</th><th>controls</th></tr></thead>
+      <tbody>
+<% it.jobs.forEach(function(job) { %>
+        <tr>
+          <td><%= job.name || job.id %><br><span class="dim"><%= job.enabled ? 'enabled' : 'paused' %><%= job.running ? ' / running' : '' %></span></td>
+          <td><%= job.schedule %><br><span class="dim"><%= job.timezone %></span></td>
+          <td><%= job.nextRunAt || '—' %></td>
+          <td class="action"><%= JSON.stringify(job.action) %></td>
+          <td class="<%= job.lastRun && job.lastRun.status === 'success' ? 'good' : job.lastRun ? 'bad' : 'dim' %>">
+            <%= job.lastRun ? job.lastRun.status : 'never' %><br>
+            <span class="dim"><%= job.lastRun ? job.lastRun.finishedAt || job.lastRun.startedAt : '' %></span>
+          </td>
+          <td>
+            <button onclick="runJob('<%= job.id %>')">run</button>
+            <button onclick="toggleJob('<%= job.id %>', <%= !job.enabled %>)"><%= job.enabled ? 'pause' : 'resume' %></button>
+          </td>
+        </tr>
+<% }) %>
+      </tbody>
+    </table>
+<% } %>
+  </div>
+
+  <div class="section">
+    <h2>One-time reminders</h2>
+<% const visibleReminders = it.reminders.filter(function(reminder) { return reminder.status === 'pending' }).concat(it.reminders.filter(function(reminder) { return reminder.status !== 'pending' }).slice(-20)); %>
+<% if (visibleReminders.length === 0) { %>
+    <div class="empty">no reminders</div>
+<% } else { %>
+    <table>
+      <thead><tr><th>status</th><th>scheduled</th><th>chat</th><th>text</th><th>result</th></tr></thead>
+      <tbody>
+<% visibleReminders.forEach(function(reminder) { %>
+        <tr>
+          <td class="<%= reminder.status === 'delivered' ? 'good' : reminder.status === 'pending' ? 'running' : 'bad' %>"><%= reminder.status %></td>
+          <td><%= reminder.scheduledAt %></td>
+          <td><%= reminder.chatGuid %></td>
+          <td class="action"><%= reminder.text %></td>
+          <td><span class="dim"><%= reminder.lastError || (reminder.deliveredAt || '') %></span></td>
+        </tr>
+<% }) %>
+      </tbody>
+    </table>
+<% } %>
+  </div>
+
+  <div class="section">
+    <h2>Recent recurring runs</h2>
+<% if (it.runs.length === 0) { %>
+    <div class="empty">no runs recorded</div>
+<% } else { %>
+    <table>
+      <thead><tr><th>job</th><th>trigger</th><th>status</th><th>started</th><th>finished / error</th></tr></thead>
+      <tbody>
+<% it.runs.slice(0, 50).forEach(function(run) { %>
+        <tr>
+          <td><%= run.jobId %></td>
+          <td><%= run.trigger %></td>
+          <td class="<%= run.status === 'success' ? 'good' : run.status === 'running' ? 'running' : 'bad' %>"><%= run.status %></td>
+          <td><%= run.startedAt %></td>
+          <td><%= run.finishedAt || '—' %><% if (run.error) { %><br><span class="bad"><%= run.error %></span><% } %></td>
+        </tr>
+<% }) %>
+      </tbody>
+    </table>
+<% } %>
+  </div>
+</div>
+
+<script>
+async function runJob(id) {
+  const response = await fetch('/cron/jobs/' + encodeURIComponent(id) + '/run', { method: 'POST' });
+  if (!response.ok) alert(await response.text());
+  location.reload();
+}
+async function toggleJob(id, enabled) {
+  const response = await fetch('/cron/jobs/' + encodeURIComponent(id) + '/enabled', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled })
+  });
+  if (!response.ok) alert(await response.text());
+  location.reload();
+}
+const es = new EventSource('/events');
+es.addEventListener('update', () => location.reload());
+setInterval(() => location.reload(), 30000);
+</script>
+</body></html>

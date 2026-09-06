@@ -3,9 +3,11 @@
  */
 
 import "dotenv/config";
+import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createAgentManager } from "./agent.js";
+import { type CronJobConfig, createCronService } from "./cron.js";
 import { createIMessageBot } from "./imessage.js";
 import { createAppLogger, createDigestLogger } from "./logger.js";
 import { createModelHealthChecker } from "./model-health.js";
@@ -57,6 +59,67 @@ async function main() {
 			await sender.sendMessage(reminder.chatGuid, reminder.text);
 		},
 	});
+
+	async function executeCronJob(job: CronJobConfig, signal: AbortSignal): Promise<void> {
+		const action = job.action;
+		if (action.type === "send") {
+			echoFilter.remember(action.chatGuid, action.text);
+			await sender.sendMessage(action.chatGuid, action.text);
+			return;
+		}
+		if (action.type === "prompt") {
+			await agent.processMessage(
+				{
+					chatGuid: action.chatGuid,
+					sender: `cron:${job.id}`,
+					text: action.prompt,
+					messageType: "imessage",
+					groupName: "",
+					replyToText: null,
+					attachments: [],
+					images: [],
+				},
+				async (reply) => {
+					if (reply.kind !== "assistant") return;
+					echoFilter.remember(action.chatGuid, reply.text);
+					await sender.sendMessage(action.chatGuid, reply.text);
+				},
+				{ streamingBehavior: "followUp" }
+			);
+			return;
+		}
+
+		await new Promise<void>((resolve, reject) => {
+			const [command, ...args] = action.argv;
+			if (!command) {
+				reject(new Error("exec action has no command"));
+				return;
+			}
+			const child = spawn(command, args, {
+				cwd: action.cwd,
+				shell: false,
+				stdio: ["ignore", "pipe", "pipe"],
+				signal,
+			});
+			let output = "";
+			const collect = (chunk: Buffer) => {
+				output = `${output}${chunk.toString()}`.slice(-16_000);
+			};
+			child.stdout.on("data", collect);
+			child.stderr.on("data", collect);
+			child.on("error", reject);
+			child.on("exit", (code, childSignal) => {
+				if (code === 0) {
+					if (output.trim()) console.log(`[cron] ${job.id} output: ${output.trim()}`);
+					resolve();
+				} else {
+					reject(new Error(`command exited code=${code ?? "null"} signal=${childSignal ?? "none"}: ${output.trim()}`));
+				}
+			});
+		});
+	}
+
+	const cron = createCronService({ workingDir, execute: executeCronJob });
 	const web = webEnabled
 		? createWebServer({
 				workingDir,
@@ -69,6 +132,7 @@ async function main() {
 				agent,
 				checkModelHealth,
 				reminders,
+				cron,
 			})
 		: null;
 
@@ -78,6 +142,7 @@ async function main() {
 		watcher.start();
 		bot.start();
 		reminders.start();
+		cron.start();
 	}
 	if (web) web.start();
 
@@ -89,7 +154,7 @@ async function main() {
 		if (workerEnabled) {
 			watcher.stop();
 			bot.stop();
-			await reminders.stop();
+			await Promise.all([reminders.stop(), cron.stop()]);
 			reflectionScheduler?.stop();
 		}
 		await web?.stop();
