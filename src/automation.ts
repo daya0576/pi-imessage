@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import Database from "better-sqlite3";
 import { Cron } from "croner";
+import { readTaskBacklog } from "./automation-backlog.js";
 
 export interface AutomationJob {
 	id: string;
@@ -459,28 +460,30 @@ export function createAutomationService(config: {
 			workerLock = undefined;
 		},
 		list() {
-			return jobs.map((job) => {
-				const task = row(job.id);
-				const notice = db
-					.prepare(
-						"SELECT status FROM notifications WHERE taskId=? ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END,id DESC LIMIT 1"
-					)
-					.get(job.id) as { status: string } | undefined;
-				return {
-					id: task.id,
-					state: task.state,
-					paused: task.paused,
-					blocked: task.blocked,
-					lastSuccess: task.lastSuccess,
-					nextRun: task.nextRun,
-					reason: task.reason,
-					incident: task.incident,
-					name: job.name,
-					enabled: job.enabled,
-					running: active.has(job.id),
-					notification: notice?.status ?? "none",
-				};
-			});
+			return jobs
+				.map((job) => {
+					const task = row(job.id);
+					const notice = db
+						.prepare(
+							"SELECT status FROM notifications WHERE taskId=? ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END,id DESC LIMIT 1"
+						)
+						.get(job.id) as { status: string } | undefined;
+					return {
+						id: task.id,
+						state: task.state,
+						paused: task.paused,
+						blocked: task.blocked,
+						lastSuccess: task.lastSuccess,
+						nextRun: task.nextRun,
+						reason: task.reason,
+						incident: task.incident,
+						name: job.name,
+						enabled: job.enabled,
+						running: active.has(job.id),
+						notification: notice?.status ?? "none",
+					};
+				})
+				.concat(readTaskBacklog(join(directory, "backlog.json"), new Set(jobs.map((job) => job.id))));
 		},
 		listRuns() {
 			return (

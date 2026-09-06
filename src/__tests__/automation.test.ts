@@ -269,3 +269,35 @@ it("refuses a second active worker and releases ownership after shutdown", async
 	second.action("check", "run");
 	expect((await finished(second)).status).toBe("healthy");
 });
+
+it("shows dynamically added plans without scheduling or allowing any execution action", async () => {
+	const { service, workingDir } = fixture(undefined, { enabled: false });
+	const path = join(workingDir, "automation/backlog.json");
+	const task = { id: "nas-backup", name: "NAS <script>alert(1)</script>", summary: "需求梳理", frequency: "每周一次" };
+	writeFileSync(path, JSON.stringify({ version: 1, tasks: [task] }));
+	const plan = service.list().find((item) => item.id === task.id);
+	expect(plan).toMatchObject({ state: "planned", enabled: false, running: false, nextRun: null });
+	for (const action of ["run", "resume", "pause"] as const)
+		expect(() => service.action(task.id, action)).toThrow("Unknown task");
+	expect(service.listRuns()).toEqual([]);
+	if (!plan) throw new Error("Missing plan");
+	const html = renderTasksPage({ tasks: [plan], runs: [] });
+	expect(html).toContain("待实现");
+	expect(html).toContain("仅规划，不执行");
+	expect(html).not.toContain("<script>alert(1)</script>");
+	expect(html).not.toContain('data-action="run"');
+	expect(html).not.toContain('data-action="resume"');
+	await service.stop();
+	const restored = createAutomationService({ workingDir });
+	services.push(restored);
+	expect(restored.list().find((item) => item.id === task.id)?.state).toBe("planned");
+});
+
+it("rejects runnable fields, duplicate ids and executable-id collisions in display-only plans", () => {
+	const { service, workingDir } = fixture(undefined, { enabled: false });
+	const task = { id: "plan", name: "Backup", summary: "Plan", frequency: "Weekly" };
+	for (const tasks of [[{ ...task, argv: ["/bin/echo"] }], [task, task], [{ ...task, id: "check" }]]) {
+		writeFileSync(join(workingDir, "automation/backlog.json"), JSON.stringify({ version: 1, tasks }));
+		expect(service.list().map((item) => item.id)).toEqual(["check"]);
+	}
+});
