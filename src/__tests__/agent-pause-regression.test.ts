@@ -47,6 +47,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 					session.thinkingLevel = level;
 				}),
 				setModel: async () => {},
+				dispose: vi.fn(),
 				subscribe: (fn: (event: Record<string, unknown>) => void) => {
 					listeners.add(fn);
 					return () => listeners.delete(fn);

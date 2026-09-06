@@ -14,7 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { type AssistantMessage, type Message, type TextContent, Type } from "@earendil-works/pi-ai";
-import type { CompactionResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	type AgentSession,
 	DefaultResourceLoader,
@@ -44,9 +44,17 @@ import type { AgentReply, IncomingMessage } from "./types.js";
  */
 export const AGENT_IDLE_TIMEOUT_MS = Number.parseInt(process.env.AGENT_IDLE_TIMEOUT_MS || "120000", 10);
 
-/** Absolute safety ceiling that activity cannot extend. */
+/** Foreground safety ceiling: compaction time is accounted separately. */
 export const AGENT_MAX_PROMPT_DURATION_MS = Number.parseInt(process.env.AGENT_MAX_PROMPT_DURATION_MS || "1800000", 10);
-export const AGENT_COMPACT_TIMEOUT_MS = Number.parseInt(process.env.AGENT_COMPACT_TIMEOUT_MS || "60000", 10);
+export const AGENT_COMPACT_TIMEOUT_MS = Number.parseInt(process.env.AGENT_COMPACT_TIMEOUT_MS || "600000", 10);
+export const COMPACTION_CANCEL_GRACE_MS = 10_000;
+
+export class CompactionTimeoutError extends Error {
+	constructor() {
+		super("Compaction did not settle within its dedicated deadline");
+		this.name = "CompactionTimeoutError";
+	}
+}
 export const AUTO_COMPACT_CONTEXT_RATIO = Number.parseFloat(process.env.AGENT_AUTO_COMPACT_RATIO || "0.7");
 export const AUTO_COMPACT_FALLBACK_TOKENS = 100_000;
 
@@ -96,8 +104,12 @@ interface ChatSession {
 	chatGuid: string;
 	sessionMapKey: string;
 	sessionDir: string;
-	/** Promise chain serializing prompts for this chat or isolated task session. */
-	chain: Promise<void>;
+	/** Cancellation fence; accepted later input waits for actual SDK settlement. */
+	settlement?: Promise<void>;
+	epoch: number;
+	cancel?: () => void;
+	cancellationSettled?: () => Promise<void>;
+	activeOperation?: Promise<void>;
 }
 
 export interface ProcessMessageOptions {
@@ -108,6 +120,8 @@ export interface ProcessMessageOptions {
 	sessionKey?: string;
 	/** Remove the isolated session after all prompts queued on it have completed. */
 	ephemeral?: boolean;
+	/** Live view of accepted input in the transport queue (not yet in the session chain). */
+	hasQueuedInput?: () => boolean;
 }
 
 const SESSION_KEY_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
@@ -194,24 +208,31 @@ export type { ActivityTimeoutKind } from "./prompt-timeout.js";
 
 /**
  * Race an operation against a sliding inactivity timeout and a separate hard
- * duration ceiling. Calling `markActivity()` refreshes only the idle timer.
+ * foreground duration ceiling. Compaction suspends both foreground clocks and
+ * has one absolute deadline, never refreshed by events or synthetic heartbeats.
  */
 export async function runWithActivityTimeout<T>(
-	operation: (markActivity: () => void) => Promise<T>,
-	onTimeout: (kind: ActivityTimeoutKind) => Promise<void> | void,
+	operation: (markActivity: () => void, setCompacting: (active: boolean) => void) => Promise<T>,
+	onTimeout: (kind: ActivityTimeoutKind | "compaction") => Promise<void> | void,
 	idleTimeoutMs: number,
-	maxDurationMs: number
+	maxDurationMs: number,
+	compactionTimeoutMs = AGENT_COMPACT_TIMEOUT_MS
 ): Promise<T> {
 	let idleTimer: ReturnType<typeof setTimeout> | undefined;
 	let maxTimer: ReturnType<typeof setTimeout> | undefined;
 	let settled = false;
+	let compacting = false;
+	let compactTimer: ReturnType<typeof setTimeout> | undefined;
+	let foregroundStarted = Date.now();
+	let remaining = maxDurationMs;
 	let rejectTimeout: (reason: Error) => void = () => {};
 
 	const clearTimers = () => {
 		if (idleTimer) clearTimeout(idleTimer);
 		if (maxTimer) clearTimeout(maxTimer);
+		if (compactTimer) clearTimeout(compactTimer);
 	};
-	const fireTimeout = (kind: ActivityTimeoutKind, timeoutMs: number) => {
+	const fireTimeout = (kind: ActivityTimeoutKind | "compaction", timeoutMs: number) => {
 		if (settled) return;
 		settled = true;
 		clearTimers();
@@ -220,12 +241,27 @@ export async function runWithActivityTimeout<T>(
 		} catch {
 			// A cleanup failure must never suppress the timeout.
 		}
-		rejectTimeout(new AgentPromptTimeoutError(kind, timeoutMs));
+		rejectTimeout(kind === "compaction" ? new CompactionTimeoutError() : new AgentPromptTimeoutError(kind, timeoutMs));
 	};
 	const markActivity = () => {
-		if (settled) return;
+		if (settled || compacting) return;
 		if (idleTimer) clearTimeout(idleTimer);
 		idleTimer = setTimeout(() => fireTimeout("idle", idleTimeoutMs), idleTimeoutMs);
+	};
+
+	const setCompacting = (active: boolean) => {
+		if (settled || compacting === active) return;
+		compacting = active;
+		clearTimers();
+		if (active) {
+			remaining -= Date.now() - foregroundStarted;
+			compactTimer = setTimeout(() => fireTimeout("compaction", compactionTimeoutMs), compactionTimeoutMs);
+		} else {
+			foregroundStarted = Date.now();
+			markActivity();
+			if (maxDurationMs > 0)
+				maxTimer = setTimeout(() => fireTimeout("max_duration", maxDurationMs), Math.max(0, remaining));
+		}
 	};
 
 	const timeout = new Promise<never>((_resolve, reject) => {
@@ -235,7 +271,7 @@ export async function runWithActivityTimeout<T>(
 			maxTimer = setTimeout(() => fireTimeout("max_duration", maxDurationMs), maxDurationMs);
 		}
 	});
-	const operationPromise = Promise.resolve().then(() => operation(markActivity));
+	const operationPromise = Promise.resolve().then(() => operation(markActivity, setCompacting));
 	try {
 		return await Promise.race([operationPromise, timeout]);
 	} finally {
@@ -560,6 +596,91 @@ function createMemoryExtension(workingDir: string, loadedIds: Set<string>) {
 export async function createAgentManager(config: AgentManagerConfig) {
 	const { workingDir } = config;
 	const sessionMap = new Map<string, ChatSession>();
+	// Input ordering survives session replacement; ownership protects creation and replacement only.
+	const queues = new Map<
+		string,
+		{ chain: Promise<void>; ownership: Promise<void>; queued: number; cancellationEpoch: number }
+	>();
+	function queueFor(key: string) {
+		let queue = queues.get(key);
+		if (!queue) {
+			queue = { chain: Promise.resolve(), ownership: Promise.resolve(), queued: 0, cancellationEpoch: 0 };
+			queues.set(key, queue);
+		}
+		return queue;
+	}
+	function withOwnership<T>(key: string, action: () => Promise<T>): Promise<T> {
+		const queue = queueFor(key);
+		const result = queue.ownership.then(action, action);
+		queue.ownership = result.then(
+			() => {},
+			() => {}
+		);
+		return result;
+	}
+
+	function enqueuePrompt(
+		chatGuid: string,
+		msg: IncomingMessage | undefined,
+		handler: (reply: AgentReply) => Promise<void>,
+		options?: ProcessMessageOptions,
+		manual?: { instructions?: string }
+	): Promise<void> {
+		const storage = resolveSessionStorage(workingDir, chatGuid, options);
+		const queue = queueFor(storage.mapKey);
+		const queuedAt = Date.now();
+		queue.queued++;
+		const run = async () => {
+			let admitted = false;
+			try {
+				while (true) {
+					const admission = await withOwnership(storage.mapKey, async () => {
+						const entry =
+							sessionMap.get(storage.mapKey) ??
+							(await createSession(storage.mapKey, chatGuid, storage.sessionDir, options?.readOnly));
+						if (entry.readOnly !== Boolean(options?.readOnly))
+							throw new Error("Cannot change tool permissions of an existing session");
+						if (entry.settlement) return { settlement: entry.settlement };
+						queue.queued--;
+						admitted = true;
+						return { entry, operation: runPrompt(entry, msg, handler, queuedAt, options, manual) };
+					});
+					if (admission.settlement) {
+						await admission.settlement;
+						continue; // Recheck ownership after /new, never bind queued input to an old epoch.
+					}
+					try {
+						await admission.operation;
+					} finally {
+						await withOwnership(storage.mapKey, async () => {
+							const entry = admission.entry;
+							if (
+								entry &&
+								options?.ephemeral &&
+								queue.queued === 0 &&
+								!entry.settlement &&
+								sessionMap.get(storage.mapKey) === entry
+							) {
+								sessionMap.delete(storage.mapKey);
+								try {
+									entry.session.dispose();
+									rmSync(storage.sessionDir, { recursive: true, force: true });
+								} catch (error) {
+									console.error(`[agent] ephemeral session cleanup failed: ${storage.mapKey}`, error);
+								}
+							}
+						});
+					}
+					return;
+				}
+			} finally {
+				if (!admitted) queue.queued--;
+			}
+		};
+		const pending = queue.chain.then(run, run);
+		queue.chain = pending.catch(() => {});
+		return pending;
+	}
 	let activePrompts = 0;
 	let lastAgentActivityAt: number | null = null;
 	const agentDir = getAgentDir();
@@ -663,7 +784,14 @@ export async function createAgentManager(config: AgentManagerConfig) {
 			`[agent] session created: ${chatGuid} session=${sessionMapKey} model=${modelLabel} transport=sse sol_fast=priority`
 		);
 
-		const entry: ChatSession = { session, readOnly, chatGuid, sessionMapKey, sessionDir, chain: Promise.resolve() };
+		const entry: ChatSession = {
+			session,
+			readOnly,
+			chatGuid,
+			sessionMapKey,
+			sessionDir,
+			epoch: 0,
+		};
 		sessionMap.set(sessionMapKey, entry);
 		return entry;
 	}
@@ -671,7 +799,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 	/**
 	 * Send a user message through the agent and deliver replies via the handler.
 	 *
-	 * Calls are serialized per chat via a promise chain on the session entry,
+	 * Calls are serialized per storage key independently of the current session entry,
 	 * so concurrent callers (queue + web) safely queue instead of colliding.
 	 */
 	async function processMessage(
@@ -681,38 +809,16 @@ export async function createAgentManager(config: AgentManagerConfig) {
 	): Promise<void> {
 		const storage = resolveSessionStorage(workingDir, msg.chatGuid, options);
 		if (options?.readOnly && !storage.isolated) throw new Error("Read-only completion requires an isolated session");
-		const entry =
-			sessionMap.get(storage.mapKey) ??
-			(await createSession(storage.mapKey, msg.chatGuid, storage.sessionDir, options?.readOnly));
-		if (entry.readOnly !== Boolean(options?.readOnly))
-			throw new Error("Cannot change tool permissions of an existing session");
-		const queuedAt = Date.now();
-		const run = () => runPrompt(entry, msg, handler, queuedAt, options);
-		const runPromise = entry.chain.then(run, run);
-		entry.chain = runPromise;
-		try {
-			await runPromise;
-		} finally {
-			// Only the last prompt queued on an ephemeral session performs cleanup.
-			if (options?.ephemeral && entry.chain === runPromise && sessionMap.get(storage.mapKey) === entry) {
-				sessionMap.delete(storage.mapKey);
-				try {
-					entry.session.dispose();
-					rmSync(storage.sessionDir, { recursive: true, force: true });
-					console.log(`[agent] ephemeral session removed: ${storage.mapKey}`);
-				} catch (error) {
-					console.error(`[agent] ephemeral session cleanup failed: ${storage.mapKey}`, error);
-				}
-			}
-		}
+		await enqueuePrompt(msg.chatGuid, msg, handler, options);
 	}
 
 	async function runPrompt(
 		entry: ChatSession,
-		msg: IncomingMessage,
+		msg: IncomingMessage | undefined,
 		handler: (reply: AgentReply) => Promise<void>,
 		queuedAt: number,
-		options?: ProcessMessageOptions
+		options?: ProcessMessageOptions,
+		manual?: { instructions?: string }
 	): Promise<void> {
 		const { session, chatGuid, sessionMapKey } = entry;
 
@@ -722,15 +828,15 @@ export async function createAgentManager(config: AgentManagerConfig) {
 			session,
 			SettingsManager.create(workingDir, agentDir).getDefaultThinkingLevel()
 		);
-		const promptText = formatPromptText(msg);
+		const promptText = msg ? formatPromptText(msg) : "";
 
-		const images = msg.images.length > 0 ? msg.images : undefined;
+		const images = msg && msg.images.length > 0 ? msg.images : undefined;
 		const modelLabel = session.model ? `${session.model.provider}/${session.model.id}` : "default";
 		const promptStart = Date.now();
 		const queueWaitMs = promptStart - queuedAt;
 		console.log(
 			`[agent] prompt start: ${chatGuid} model=${modelLabel} queue_ms=${queueWaitMs} ` +
-				`chars=${promptText.length} images=${msg.images.length} "${promptText.substring(0, 60)}"`
+				`chars=${promptText.length} images=${images?.length ?? 0} "${promptText.substring(0, 60)}"`
 		);
 		activePrompts += 1;
 		lastAgentActivityAt = Date.now();
@@ -741,24 +847,118 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		let assistantDurationMs: number | null = null;
 		const pendingTools = new Map<string, { toolName: string; startTime: number; hidden: boolean }>();
 		let markActivity = () => {};
-		const queueReply = (reply: AgentReply) => {
+		let setCompacting = (_active: boolean) => {};
+		let compactionActive = false;
+		let sawCompaction = false;
+		let completed = false;
+		let agentStarted = false;
+		let cancelled = false;
+		let compactionFailed = false;
+		let operation: Promise<void> | undefined;
+		const epoch = entry.epoch;
+		// Timeout reports outlive automatic replacement, but never an explicit stop/reset.
+		const cancellationEpoch = queueFor(sessionMapKey).cancellationEpoch;
+		const ownsSession = () => sessionMap.get(sessionMapKey) === entry && entry.epoch === epoch;
+		const following = () =>
+			queueFor(sessionMapKey).queued > 0 || session.pendingMessageCount > 0 || options?.hasQueuedInput?.()
+				? "接下来处理排队的新输入。"
+				: "后续输入按队列处理。";
+		const endNotice = (outcome: string, resume: boolean) => {
+			queueNotice(
+				`${outcome}。${manual ? `不会重放历史请求；${following()}` : completed ? `本轮回复已完成，不会重做；${following()}` : resume ? "继续原来未完成的请求。" : `原请求已暂停，不会重跑可能已执行的操作；${following()}`}`
+			);
+		};
+		entry.cancel = () => {
+			if (compactionActive && !cancelled) {
+				queueNotice("压缩已请求取消，不再继续原请求；确认结束前暂停处理。", true);
+				compactionActive = false;
+			}
+			cancelled = true;
+		};
+		const queueReply = (reply: AgentReply, cancellationNotice = false) => {
+			const replyEpoch = cancellationNotice ? entry.epoch : epoch;
+			const isCurrent = () => sessionMap.get(sessionMapKey) === entry && entry.epoch === replyEpoch;
 			replyChain = replyChain
-				.then(() => handler(reply))
+				.then(() => {
+					if (isCurrent()) return handler({ ...reply, isCurrent });
+				})
 				.catch((error) => {
 					console.error(`[agent] reply handler error: ${chatGuid}`, error);
 				});
 		};
 
+		const queueNotice = (text: string, cancellationNotice = false) => {
+			// Internal read-only summarizers collect assistant text as their result, not as live chat output.
+			if (!options?.readOnly) queueReply({ kind: "assistant", text }, cancellationNotice);
+		};
+
+		let cancellationAnnounced = false;
+		entry.cancellationSettled = async () => {
+			if (!cancellationAnnounced && !options?.readOnly) {
+				cancellationAnnounced = true;
+				queueNotice(
+					`取消处理已结束；${completed ? "本轮回复已完成，不会重做。" : "原请求已停止，不会自动恢复。"}${following()}`,
+					true
+				);
+				await replyChain;
+			}
+		};
+
 		const unsubscribe = session.subscribe((event) => {
-			// Every session event proves the run is alive. This includes streamed
-			// message updates as well as tool lifecycle events.
+			// SDK pre-prompt compaction can return to prompt() even after abort().
+			// Fence every subsequent agent run before it can request tools/output.
+			if (event.type === "agent_start" && (cancelled || !ownsSession())) session.agent.abort();
+			if (cancelled || !ownsSession()) return;
 			lastAgentActivityAt = Date.now();
+			if (event.type === "agent_start") {
+				agentStarted = true;
+				completed = false;
+				setCompacting(false);
+			}
+			if (event.type === "compaction_start") {
+				if (compactionActive) return;
+				compactionActive = true;
+				sawCompaction = true;
+				setCompacting(true);
+				console.log(`[agent] compaction start: reason=${event.reason} completed=${completed}`);
+				queueNotice(
+					manual
+						? "开始压缩上下文。"
+						: completed
+							? "开始压缩上下文；本轮回复已完成，不会重做。"
+							: "开始压缩上下文，原请求等待中。"
+				);
+				return;
+			}
+			if (event.type === "compaction_end") {
+				const success = Boolean(event.result) && !event.aborted && !event.errorMessage;
+				console.log(
+					`[agent] compaction end: reason=${event.reason} success=${success} aborted=${event.aborted} sdk_retry=${event.willRetry}`
+				);
+				if (compactionActive)
+					endNotice(
+						success ? "压缩完成" : event.aborted ? "压缩已取消" : "压缩失败",
+						success && !completed && (!agentStarted || event.willRetry)
+					);
+				else if (!success) endNotice("压缩后的自动恢复未完成", false);
+				compactionActive = false;
+				setCompacting(completed || Boolean(manual) || !success);
+				if (!success) {
+					compactionFailed = true;
+					cancelled = true;
+					// Do not let failed preflight or overflow restart uncertain work.
+					session.agent.abort();
+				}
+				return;
+			}
 			markActivity();
 			if (event.type === "message_start" && event.message.role === "assistant") {
 				firstAssistantStartMs ??= Date.now() - promptStart;
 				console.log(`[agent] message start: ${chatGuid} role=assistant first_token_ms=${Date.now() - promptStart}`);
 			} else if (event.type === "message_end" && event.message.role === "assistant") {
 				const assistantMsg = event.message as AssistantMessage;
+				completed = assistantMsg.stopReason === "stop";
+				if (completed) setCompacting(true);
 				const text = extractMessageText(event.message);
 				assistantDurationMs = firstAssistantStartMs === null ? null : Date.now() - promptStart - firstAssistantStartMs;
 				console.log(
@@ -797,64 +997,78 @@ export async function createAgentManager(config: AgentManagerConfig) {
 
 		try {
 			await runWithActivityTimeout(
-				async (activity) => {
+				async (activity, phase) => {
 					markActivity = activity;
-					activity();
-					await session.prompt(promptText, { images, streamingBehavior: options?.streamingBehavior });
+					setCompacting = phase;
+					operation = (async () => {
+						if (manual) {
+							setCompacting(true);
+							await session.compact(manual.instructions);
+						} else {
+							await session.prompt(promptText, { images, streamingBehavior: options?.streamingBehavior });
+							await replyChain;
+							const contextUsage = session.getContextUsage();
+							const threshold = getAutoCompactTokenThreshold(session.model?.contextWindow);
+							if (
+								!cancelled &&
+								ownsSession() &&
+								!sawCompaction &&
+								!options?.ephemeral &&
+								typeof contextUsage?.tokens === "number" &&
+								contextUsage.tokens >= threshold
+							) {
+								console.log(
+									`[agent] preventive compaction requested: tokens=${contextUsage.tokens} threshold=${threshold}`
+								);
+								await session.compact();
+							}
+						}
+					})();
+					entry.activeOperation = operation;
+					await operation;
 				},
 				(kind) => {
-					// Stop late aborted output from being mistaken for task completion.
+					if (kind === "compaction" || completed || compactionFailed || cancelled) {
+						if (!cancelled) entry.epoch++;
+						queueNotice(
+							`${cancelled ? "取消等待" : compactionActive ? "压缩" : manual ? "压缩准备" : "回复后处理"}超时，正在取消；确认结束前保留排队输入并暂停处理。${completed ? "本轮回复已完成，不会重做。" : manual ? "不会重放历史请求。" : "原请求已暂停，不会重跑可能已执行的操作。"}`,
+							true
+						);
+						compactionActive = false;
+						cancelled = true;
+						console.error(
+							"[agent] compaction/post-response deadline: cancelling; retaining ownership until SDK operation and abort settle"
+						);
+						const cancellation = clearAndAbortSession(session);
+						// allSettled is necessary: an early rejection is not cancellation settlement.
+						const settlement = Promise.allSettled([operation, cancellation]).then(async () => {
+							await entry.cancellationSettled?.();
+							unsubscribe();
+							if (entry.settlement === settlement) entry.settlement = undefined;
+							console.log("[agent] compaction cancellation settled; later queued input may proceed, no replay");
+						});
+						entry.settlement = settlement;
+						return;
+					}
 					unsubscribe();
 					const timeoutMs = kind === "idle" ? AGENT_IDLE_TIMEOUT_MS : AGENT_MAX_PROMPT_DURATION_MS;
-					const label = kind === "idle" ? "idle timeout" : "maximum duration exceeded";
 					console.error(
-						`[agent] prompt ${label}: ${chatGuid} after ${timeoutMs}ms — detaching session and aborting in background`
+						`[agent] prompt ${kind}: ${chatGuid} after ${timeoutMs}ms — detaching session and aborting in background; timeout report retained unless explicitly stopped/reset`
 					);
 					if (sessionMap.get(sessionMapKey) === entry) sessionMap.delete(sessionMapKey);
-					void clearAndAbortSession(session).catch((error) => {
-						console.error(`[agent] background abort failed: ${chatGuid}`, error);
-					});
+					void clearAndAbortSession(session).catch(() => {});
 				},
 				AGENT_IDLE_TIMEOUT_MS,
 				AGENT_MAX_PROMPT_DURATION_MS
 			);
-			const sessionEnd = Date.now();
+			if (options?.readOnly && (compactionFailed || cancelled) && !completed)
+				throw new Error("Read-only summary paused during compaction");
 			await replyChain;
-			const replyEnd = Date.now();
 			console.log(
-				`[agent] prompt end: ${chatGuid} total_ms=${replyEnd - promptStart} session_ms=${sessionEnd - promptStart} ` +
-					`handler_ms=${replyEnd - sessionEnd} first_token_ms=${firstAssistantStartMs ?? "n/a"} ` +
-					`generation_ms=${assistantDurationMs ?? "n/a"}`
+				`[agent] prompt settled: total_ms=${Date.now() - promptStart} completed=${completed} compaction_failed=${compactionFailed}`
 			);
-
-			// Never make the current user wait for preventive compaction. Reply
-			// first, mark the prompt complete, then compact before the next queued
-			// prompt only when the model-relative threshold has been crossed.
-			const contextUsage = session.getContextUsage();
-			const threshold = getAutoCompactTokenThreshold(session.model?.contextWindow);
-			if (!options?.ephemeral && typeof contextUsage?.tokens === "number" && contextUsage.tokens >= threshold) {
-				console.log(
-					`[agent] post-reply compact start: ${chatGuid} tokens=${contextUsage.tokens} threshold=${threshold} ` +
-						`context_window=${session.model?.contextWindow ?? "unknown"}`
-				);
-				try {
-					const result = await runWithTimeout(
-						() => session.compact(),
-						() => {
-							console.error(`[agent] post-reply compact timeout: ${chatGuid} after ${AGENT_COMPACT_TIMEOUT_MS}ms`);
-							if (sessionMap.get(sessionMapKey) === entry) sessionMap.delete(sessionMapKey);
-							void clearAndAbortSession(session).catch(() => {});
-						},
-						AGENT_COMPACT_TIMEOUT_MS
-					);
-					console.log(`[agent] post-reply compact end: ${chatGuid} tokens_before=${result.tokensBefore}`);
-				} catch (error: unknown) {
-					const message = error instanceof Error ? error.message : String(error);
-					console.log(`[agent] post-reply compact skipped: ${chatGuid} ${message}`);
-				}
-			}
 		} catch (error) {
-			if (error instanceof AgentPromptTimeoutError) {
+			if (error instanceof AgentPromptTimeoutError && !cancelled) {
 				let checkpointSaved = false;
 				try {
 					saveInterruption(
@@ -866,64 +1080,126 @@ export async function createAgentManager(config: AgentManagerConfig) {
 				} catch {
 					console.error(`[agent] interruption checkpoint failed: ${chatGuid}`);
 				}
-				queueReply({ kind: "assistant", text: timeoutNotice(error, checkpointSaved) });
+				await handler({
+					kind: "assistant",
+					text: timeoutNotice(error, checkpointSaved),
+					isCurrent: () => queueFor(sessionMapKey).cancellationEpoch === cancellationEpoch,
+				});
 				await replyChain;
+				throw error;
 			}
+			if (options?.readOnly && !completed && (sawCompaction || cancelled)) {
+				throw new Error("Read-only summary paused during compaction");
+			}
+			if (error instanceof CompactionTimeoutError || compactionFailed || cancelled) {
+				await replyChain;
+				return;
+			}
+			if (sawCompaction || completed || manual) {
+				// A post-response/preventive error must not reach the transport's prompt retry decorator.
+				console.error("[agent] operation failed after compaction or reply; no automatic prompt replay");
+				endNotice(compactionActive || manual ? "压缩失败" : completed ? "回复后处理失败" : "原请求执行中断", false);
+				cancelled = true;
+				await replyChain;
+				return;
+			}
+
 			// Never inject a steering message here. steer("stop") queues literal
 			// user text, which can survive a failed compaction and contaminate the
 			// next prompt. Abort and clear pending queues instead.
 			void clearAndAbortSession(session).catch(() => {});
 			throw error;
 		} finally {
-			unsubscribe();
+			if (entry.settlement) void entry.settlement.then(unsubscribe);
+			else unsubscribe();
+			if (!entry.settlement) {
+				entry.activeOperation = undefined;
+				entry.cancellationSettled = undefined;
+			}
+			entry.cancel = undefined;
+			await replyChain;
 			activePrompts = Math.max(0, activePrompts - 1);
 		}
 	}
 
 	/** Abort the in-progress agent run for a chat. No-op if no session or not running. */
-	async function stop(chatGuid: string): Promise<void> {
+	async function stopEntry(chatGuid: string): Promise<void> {
 		const entry = sessionMap.get(chatGuid);
 		if (!entry) {
 			console.log(`[agent] stop: no active session for ${chatGuid}`);
 			return;
 		}
-		await clearAndAbortSession(entry.session);
-		console.log(`[agent] stop aborted: ${chatGuid}`);
-	}
-
-	/** Compact the session context, reducing token usage while preserving a summary. */
-	async function compact(chatGuid: string, customInstructions?: string): Promise<string> {
-		const storage = resolveSessionStorage(workingDir, chatGuid);
-		const entry = sessionMap.get(chatGuid) ?? (await createSession(storage.mapKey, chatGuid, storage.sessionDir));
-		const { session } = entry;
-		let result: CompactionResult;
+		if (!entry.settlement) {
+			entry.epoch++;
+			entry.cancel?.();
+			const notifySettled = entry.cancellationSettled;
+			const settlement = Promise.allSettled([entry.activeOperation, clearAndAbortSession(entry.session)]).then(
+				async () => {
+					await notifySettled?.();
+					if (entry.settlement === settlement) {
+						entry.settlement = undefined;
+						entry.activeOperation = undefined;
+						entry.cancellationSettled = undefined;
+					}
+				}
+			);
+			entry.settlement = settlement;
+		}
+		const settlement = entry.settlement;
 		try {
-			result = await session.compact(customInstructions);
-		} catch (error: unknown) {
-			const message = error instanceof Error ? error.message : String(error);
-			if (message.includes("Already compacted")) {
-				console.log(`[agent] compact skipped (already compacted): ${chatGuid}`);
-				return "Already compacted — nothing to do";
-			}
-			throw error;
+			await runWithTimeout(
+				() => settlement,
+				() => {},
+				COMPACTION_CANCEL_GRACE_MS
+			);
+			if (entry.settlement === settlement) entry.settlement = undefined;
+		} catch {
+			throw new Error("取消尚未结束；会话保持暂停，未恢复原请求。请稍后再试。");
 		}
-		const beforeTokens = formatTokenCount(result.tokensBefore);
-		const summary = `\u2713 Compacted ${beforeTokens} tokens`;
-		console.log(`[agent] compact: ${chatGuid} ${summary}`);
-		return summary;
+		console.log(`[agent] stop settled: ${chatGuid}`);
 	}
 
-	/** Start a new session for a chat: evict in-memory session, delete context, recreate fresh. */
+	/** Manual compression shares the same event routing, deadline and ownership as automatic compression. */
+	async function compact(
+		chatGuid: string,
+		customInstructions?: string,
+		handler?: (reply: AgentReply) => Promise<void>,
+		hasQueuedInput?: () => boolean
+	): Promise<string> {
+		let lastNotice = "";
+		await enqueuePrompt(
+			chatGuid,
+			undefined,
+			async (reply) => {
+				if (reply.kind === "assistant") lastNotice = reply.text;
+				await handler?.(reply);
+			},
+			{ hasQueuedInput },
+			{ instructions: customInstructions }
+		);
+		return lastNotice;
+	}
+
+	async function stop(chatGuid: string): Promise<void> {
+		queueFor(chatGuid).cancellationEpoch++;
+		await withOwnership(chatGuid, () => stopEntry(chatGuid));
+	}
+
+	/** Never unlink persistent state while an old SDK operation can still append to it. */
 	async function newSession(chatGuid: string): Promise<void> {
-		sessionMap.delete(chatGuid);
-		const chatDir = join(workingDir, sanitizeChatGuid(chatGuid));
-		const contextFile = join(chatDir, "context.jsonl");
-		if (existsSync(contextFile)) {
-			unlinkSync(contextFile);
-		}
-		const storage = resolveSessionStorage(workingDir, chatGuid);
-		await createSession(storage.mapKey, chatGuid, storage.sessionDir);
-		console.log(`[agent] new session: ${chatGuid}`);
+		queueFor(chatGuid).cancellationEpoch++;
+		await withOwnership(chatGuid, async () => {
+			await stopEntry(chatGuid);
+			const old = sessionMap.get(chatGuid);
+			old?.session.dispose();
+			sessionMap.delete(chatGuid);
+			const chatDir = join(workingDir, sanitizeChatGuid(chatGuid));
+			const contextFile = join(chatDir, "context.jsonl");
+			if (existsSync(contextFile)) unlinkSync(contextFile);
+			const storage = resolveSessionStorage(workingDir, chatGuid);
+			await createSession(storage.mapKey, chatGuid, storage.sessionDir);
+			console.log(`[agent] new session created under exclusive ownership; queued inputs retained: ${chatGuid}`);
+		});
 	}
 
 	/**
@@ -1001,17 +1277,19 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		if (value !== "default" && !isThinkingLevel(value))
 			throw new Error("Use /thinking off|minimal|low|medium|high|xhigh|max|default");
 		writeChatThinking(workingDir, chatGuid, value === "default" ? undefined : value);
-		const entry = sessionMap.get(chatGuid);
-		if (entry) {
-			// Command callers are serialized by the chat queue; do not mutate an active request.
-			await entry.chain.catch(() => {});
-			applyChatThinking(
-				workingDir,
-				chatGuid,
-				entry.session,
-				SettingsManager.create(workingDir, agentDir).getDefaultThinkingLevel()
-			);
-		}
+		await queueFor(chatGuid).chain;
+		await withOwnership(chatGuid, async () => {
+			const entry = sessionMap.get(chatGuid);
+			if (entry) {
+				// Command callers are serialized by the chat queue; do not mutate an active request.
+				applyChatThinking(
+					workingDir,
+					chatGuid,
+					entry.session,
+					SettingsManager.create(workingDir, agentDir).getDefaultThinkingLevel()
+				);
+			}
+		});
 		return `Thinking override: ${value} (this chat only)`;
 	}
 
@@ -1024,6 +1302,8 @@ export async function createAgentManager(config: AgentManagerConfig) {
 				sessionKey: entry.sessionMapKey,
 				thinkingLevel: entry.session.thinkingLevel,
 				readOnly: entry.readOnly,
+				compacting: entry.session.isCompacting,
+				awaitingCancellation: Boolean(entry.settlement),
 			})),
 			lastAgentActivityAt: lastAgentActivityAt === null ? null : new Date(lastAgentActivityAt).toISOString(),
 		};

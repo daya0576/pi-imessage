@@ -72,10 +72,11 @@ export interface IncomingMessage {
 // ── Agent reply (structured output from the agent) ───────────────────────────
 
 /** Structured reply from the agent — preserves semantic type for formatting. */
-export type AgentReply =
+export type AgentReply = { isCurrent?: () => boolean } & (
 	| { kind: "assistant"; text: string }
 	| { kind: "tool_start"; label: string }
-	| { kind: "tool_end"; toolName: string; symbol: string; duration: string; result: string };
+	| { kind: "tool_end"; toolName: string; symbol: string; duration: string; result: string }
+);
 
 const MAX_TOOL_RESULT_LINES = 5;
 
@@ -107,6 +108,8 @@ export type ReplyAction = { type: "message"; text: string } | { type: "none" };
  *                    later phases are skipped.
  */
 export interface OutgoingMessage {
+	/** Delivery-time generation fence for every session-originated reply. */
+	isCurrent?: () => boolean;
 	reply: ReplyAction;
 	shouldContinue: boolean;
 }

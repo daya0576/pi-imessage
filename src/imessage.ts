@@ -49,6 +49,8 @@ export interface IMessageBotConfig {
 export function createIMessageBot(config: IMessageBotConfig) {
 	const { queue, agent, sender, echoFilter, store, getSettings, digestLogger } = config;
 	const pipeline = createMessagePipeline();
+	const waiting = new Map<string, number>();
+	const hasQueuedInput = (chatGuid: string) => (waiting.get(chatGuid) ?? 0) > 0;
 
 	// ── Pipeline tasks ─────────────────────────────────────────────────────────
 	//
@@ -66,8 +68,8 @@ export function createIMessageBot(config: IMessageBotConfig) {
 	pipeline.before(createResizeImagesTask());
 
 	// start
-	pipeline.start(createCommandHandlerTask(agent));
-	pipeline.start(createCallAgentTask(agent));
+	pipeline.start(createCommandHandlerTask(agent, hasQueuedInput));
+	pipeline.start(createCallAgentTask(agent, hasQueuedInput));
 
 	// end
 	pipeline.end(createSendReplyTask(echoFilter, sender, getSettings));
@@ -82,16 +84,23 @@ export function createIMessageBot(config: IMessageBotConfig) {
 				while (true) {
 					const msg = await queue.pull();
 
-					// /stop bypasses the per-chat queue so it can abort a running prompt
-					if (msg.text?.trim() === "/stop") {
-						await agent.stop(msg.chatGuid);
-						const replyText = "✓ Stopped";
-						console.log(`[sid] /stop command: ${msg.chatGuid} → ${replyText}`);
-						await sender.sendMessage(msg.chatGuid, replyText);
+					// Cancellation commands must reach compaction without waiting behind it.
+					const command = msg.text?.trim();
+					if (command === "/stop" || command === "/new") {
+						// Bypass scheduling, never the normal admission or delivery pipeline.
+						try {
+							await pipeline.process(msg);
+						} catch (error) {
+							console.error("[sid] cancellation command failed in pipeline", error);
+						}
 						continue;
 					}
 
+					waiting.set(msg.chatGuid, (waiting.get(msg.chatGuid) ?? 0) + 1);
 					enqueue(msg.chatGuid, async () => {
+						const remaining = (waiting.get(msg.chatGuid) ?? 1) - 1;
+						if (remaining > 0) waiting.set(msg.chatGuid, remaining);
+						else waiting.delete(msg.chatGuid);
 						try {
 							await pipeline.process(msg);
 						} catch (error: unknown) {

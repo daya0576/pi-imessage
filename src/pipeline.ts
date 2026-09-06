@@ -47,6 +47,10 @@ export function createMessagePipeline(): MessagePipeline {
 	async function runEndTasks(chat: ChatContext, outgoing: OutgoingMessage): Promise<void> {
 		let result = outgoing;
 		for (const task of endTasks) {
+			if (result.isCurrent && !result.isCurrent()) {
+				console.log("[pipeline] stale reply suppressed before delivery");
+				return;
+			}
 			result = await task(chat, result);
 			if (!result.shouldContinue) return;
 		}
@@ -70,11 +74,15 @@ export function createMessagePipeline(): MessagePipeline {
 					console.error(`[pipeline] end task error for ${chat.chatGuid}:`, error);
 				});
 		};
-		for (const task of startTasks) {
-			await task(chat, incoming, outgoing, emit);
-			if (!outgoing.shouldContinue) break;
+		try {
+			for (const task of startTasks) {
+				await task(chat, incoming, outgoing, emit);
+				if (!outgoing.shouldContinue) break;
+			}
+		} finally {
+			// Drain emitted replies even on timeout/error before releasing the transport queue.
+			await endChain;
 		}
-		await endChain;
 
 		return outgoing;
 	}

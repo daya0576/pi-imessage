@@ -283,7 +283,10 @@ async function normalizeImageForModel(image: ImageContent): Promise<ImageContent
  *   /stop            — stop the current agent run (handled before the per-chat queue).
  *   /reload          — reload models and clear all sessions.
  */
-export function createCommandHandlerTask(agent: AgentManager): StartTask {
+export function createCommandHandlerTask(
+	agent: AgentManager,
+	hasQueuedInput?: (chatGuid: string) => boolean
+): StartTask {
 	return async (chat, incoming, outgoing, emit) => {
 		const text = incoming.text?.trim();
 
@@ -294,14 +297,24 @@ export function createCommandHandlerTask(agent: AgentManager): StartTask {
 			return;
 		}
 
-		if (text === "/new") {
-			await agent.newSession(chat.chatGuid);
-			const newSessionReply = "✓ New session started";
-			console.log(`[sid] /new command: ${chat.chatGuid} → ${newSessionReply}`);
-			emit({ ...outgoing, reply: { type: "message", text: newSessionReply } });
-			const statusReply = await agent.getSessionStatus(chat.chatGuid);
-			console.log(`[sid] /new status: ${chat.chatGuid} → ${statusReply}`);
-			emit({ ...outgoing, reply: { type: "message", text: statusReply } });
+		if (text === "/new" || text === "/stop") {
+			try {
+				if (text === "/new") await agent.newSession(chat.chatGuid);
+				else await agent.stop(chat.chatGuid);
+				const replyText = text === "/new" ? "新会话已创建，原请求不会自动恢复。" : "已停止，原请求不会自动恢复。";
+				console.log(`[sid] ${text} cancellation settled`);
+				emit({ ...outgoing, reply: { type: "message", text: replyText } });
+				if (text === "/new") {
+					const statusReply = await agent.getSessionStatus(chat.chatGuid);
+					emit({ ...outgoing, reply: { type: "message", text: statusReply } });
+				}
+			} catch {
+				console.log(`[sid] ${text} cancellation unconfirmed; original request remains stopped`);
+				emit({
+					...outgoing,
+					reply: { type: "message", text: "取消尚未确认，会话保持暂停；未恢复原请求，请稍后再试。" },
+				});
+			}
 			outgoing.shouldContinue = false;
 			return;
 		}
@@ -316,13 +329,22 @@ export function createCommandHandlerTask(agent: AgentManager): StartTask {
 
 		if (text?.startsWith("/compact")) {
 			const customInstructions = text.slice("/compact".length).trim() || undefined;
-			const compactReply = await agent.compact(chat.chatGuid, customInstructions);
-			console.log(`[sid] /compact command: ${chat.chatGuid} → ${compactReply}`);
-			emit({ ...outgoing, reply: { type: "message", text: compactReply } });
+			let isCurrent: (() => boolean) | undefined;
+			await agent.compact(
+				chat.chatGuid,
+				customInstructions,
+				async (reply) => {
+					isCurrent = reply.isCurrent;
+					if (reply.kind === "assistant")
+						emit({ ...outgoing, isCurrent: reply.isCurrent, reply: { type: "message", text: reply.text } });
+				},
+				() => hasQueuedInput?.(chat.chatGuid) ?? false
+			);
+			console.log(`[sid] /compact lifecycle settled: ${chat.chatGuid}`);
 
 			const statusReply = await agent.getSessionStatus(chat.chatGuid);
 			console.log(`[sid] /compact status: ${chat.chatGuid} → ${statusReply}`);
-			emit({ ...outgoing, reply: { type: "message", text: statusReply } });
+			emit({ ...outgoing, isCurrent, reply: { type: "message", text: statusReply } });
 			outgoing.shouldContinue = false;
 			return;
 		}
@@ -375,12 +397,20 @@ function withRetry(task: StartTask, options: { delays: number[]; retryable: (mes
 }
 
 /** Send the message to the agent and dispatch a reply for each agent turn. */
-export function createCallAgentTask(agent: AgentManager): StartTask {
+export function createCallAgentTask(agent: AgentManager, hasQueuedInput?: (chatGuid: string) => boolean): StartTask {
 	const task: StartTask = async (_chat, incoming, outgoing, emit) => {
-		await agent.processMessage(incoming, async (agentReply) => {
-			const text = formatAgentReply(agentReply);
-			emit({ ...outgoing, reply: { type: "message" as const, text } });
-		});
+		await agent.processMessage(
+			incoming,
+			async (agentReply) => {
+				const text = formatAgentReply(agentReply);
+				emit({
+					...outgoing,
+					isCurrent: agentReply.isCurrent,
+					reply: { type: "message" as const, text },
+				});
+			},
+			{ hasQueuedInput: () => hasQueuedInput?.(incoming.chatGuid) ?? false }
+		);
 	};
 	return withRetry(task, {
 		delays: [1000, 5000, 10000],

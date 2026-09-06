@@ -111,10 +111,10 @@ Send these as iMessage to interact with the bot:
 | Command | Description | Example Reply |
 |---|---|---|
 | `/help` | List available slash commands | `Commands:`<br>`/help — list commands` |
-| `/new` | Reset the session, starting a fresh conversation | `✓ New session started` |
+| `/new` | Cancel safely, then start a fresh conversation | `新会话已创建，原请求不会自动恢复。` |
 | `/status` | Show session stats: tokens, context, model | `💬 3 msgs - ↑7.2k ↓505 1.1%/128k`<br>`🤖 anthropic/claude-sonnet-4 • 💭 minimal` |
-| `/compact` | Compress session context to free up token space | `✓ Compacted: 15.2k → 2.1k tokens` |
-| `/stop` | Steer the agent to stop after current tool calls finish, then process the next queued message | |
+| `/compact` | Compress context; start/end notices, no replay of prior work | `开始压缩上下文。` / `压缩完成。` |
+| `/stop` | Abort the current request; preserve later queued inputs until cancellation settles | `已停止，原请求不会自动恢复。` |
 | `/reload` | Reload models and clear all sessions | `✓ Models reloaded` |
 
 ## Settings (`WORKING_DIR/settings.json`)
@@ -203,3 +203,15 @@ npm test             # run tests
         ▼
   iMessage (user receives reply via Messages.app)
 ```
+
+### Compaction lifecycle
+
+Automatic and manual compaction announce start and completion in Chinese. The SDK
+continues unfinished prompts itself; completed replies are never submitted again.
+Compression has a separate bounded deadline (default 10 minutes); normal foreground
+idle/maximum-duration clocks do not run during compression. Failed or unconfirmed
+cancellation pauses work instead of guessing that it is safe to replay. `/stop` and
+`/new` cancel; `/new` refuses to replace state until cancellation settles.
+
+See [compaction lifecycle notes](docs/compaction-lifecycle.md) for SDK semantics,
+queue ownership, validation, and limitations.
