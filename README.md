@@ -10,7 +10,8 @@ A minimal and self-managing iMessage bot — powered by [pi](https://github.com/
 - **Transparent**: tool calls and reasoning are sent to your iMessage chat, so you can see exactly what it's doing and why
 - **iMessage Integration**: Responds to DMs, SMS, and group chats; identifies who sent each message; understands quoted/reply-to messages
 - **Persistent Reminders**: Schedule one-time messages without per-reminder cron jobs; reminders survive restarts and retry transient failures
-- **Web UI**: browse chat history, toggle replies on/off per chat, live updates — disable with WEB_ENABLED=false and let the agent build your own web UI
+- **Workspace Cron**: Run recurring send, prompt, or local argv jobs from `WORKING_DIR/cron/jobs.json` with timezone and overlap protection
+- **Web UI**: browse chat history, scheduled tasks, logs, and memory — disable with WEB_ENABLED=false and let the agent build your own web UI
 
 # Get Started
 
@@ -35,6 +36,7 @@ pi-imessage install     # install as launchd service (auto-start on boot, restar
 Available at `http://localhost:7750` (configurable via `WEB_HOST` and `WEB_PORT`).
 
 - Chat history with live updates
+- Scheduled recurring jobs, one-time reminders, and recent run results
 - Logs (tail -f style)
 - Memory tab: personality, system prompt, structured memory, skills
 
@@ -75,6 +77,37 @@ edits are snapshotted and can be rolled back. First pass for chats and GitHub
 only reviews the last 48 hours; a new Atom feed with no checkpoint ingests the
 full history currently in that feed.
 
+## Recurring Jobs
+
+Recurring jobs are configured in `WORKING_DIR/cron/jobs.json`. pi-imessage uses
+[Croner](https://github.com/Hexagon/croner) for cron expressions and timezone
+handling. Only the active worker schedules jobs; deployment shadow workers only
+validate and display the configuration.
+
+Supported actions are `send`, `prompt`, and `exec`. Exec jobs use an argv array
+with an absolute executable path and never invoke a shell. Jobs default to
+`Asia/Shanghai`, reject overlapping runs, and append results to
+`WORKING_DIR/cron/runs.jsonl`.
+
+```json
+{
+  "version": 1,
+  "jobs": [
+    {
+      "id": "morning-message",
+      "enabled": true,
+      "schedule": "0 9 * * *",
+      "timezone": "Asia/Shanghai",
+      "action": {
+        "type": "send",
+        "chatGuid": "iMessage;-;+11234567890",
+        "text": "good morning"
+      }
+    }
+  ]
+}
+```
+
 ## API
 
 The agent is aware of these endpoints via its system prompt and can use them as tools (e.g., scheduling a cron job that calls `/prompt`).
@@ -86,6 +119,9 @@ The agent is aware of these endpoints via its system prompt and can use them as 
 | `POST /reminders` | Schedule a persistent one-time reminder; `scheduledAt` requires an explicit timezone | `curl -X POST localhost:7750/reminders -d '{"chatGuid":"iMessage;-;+11234567890","text":"check the oven","scheduledAt":"2026-08-08T21:30:00+08:00"}'` |
 | `GET /reminders` | List reminders; optionally filter with `?status=pending` | `curl 'localhost:7750/reminders?status=pending'` |
 | `DELETE /reminders/:id` | Cancel a pending reminder | `curl -X DELETE localhost:7750/reminders/<id>` |
+| `GET /scheduled/data` | List recurring jobs, one-time reminders, and recent recurring runs | `curl localhost:7750/scheduled/data` |
+| `POST /cron/jobs/:id/run` | Run a configured recurring job immediately | `curl -X POST localhost:7750/cron/jobs/morning-message/run` |
+| `POST /cron/jobs/:id/enabled` | Pause or resume a recurring job and atomically update the workspace config | `curl -X POST localhost:7750/cron/jobs/morning-message/enabled -d '{"enabled":false}'` |
 | `GET /health/model` | Make a live request to the configured default AI model; returns HTTP 200 when healthy or 503 on failure | `curl localhost:7750/health/model`<br>→ `{"ok":true,"model":"openai/gpt-5","latencyMs":842,"checkedAt":"..."}` |
 | `POST /reflect/rollback` | Restore `SYSTEM.md` notes and skills from a snapshot | `curl -X POST localhost:7750/reflect/rollback -d '{"snapshotId":"snap_..."}'` |
 
