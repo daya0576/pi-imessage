@@ -4,16 +4,16 @@
  *
  *   watcher → queue → pipeline.process()
  *
- * Message ordering: every pulled message is immediately dispatched to the
- * pipeline (fire-and-forget). Different chats run concurrently. Same-chat
- * messages are serialized via per-chat promise chains so the agent never
- * receives concurrent prompts for the same session.
+ * Different chats run concurrently. Idle chats start immediately. While a
+ * chat is busy, consecutive same-sender plain-text messages can be processed
+ * as one turn. Commands, attachments, quotes, and sender changes split batches.
  */
 
 import type { AgentManager } from "./agent.js";
 import type { DigestLogger } from "./logger.js";
+import { createMessageBatchQueue } from "./message-batch.js";
 import { createMessagePipeline } from "./pipeline.js";
-import { type AsyncQueue, QueueClosedError, createKeyedQueue } from "./queue.js";
+import { type AsyncQueue, QueueClosedError } from "./queue.js";
 import type { SelfEchoFilter } from "./self-echo.js";
 import type { MessageSender } from "./send.js";
 import type { Settings } from "./settings.js";
@@ -78,16 +78,25 @@ export function createIMessageBot(config: IMessageBotConfig) {
 
 	return {
 		start() {
-			const enqueue = createKeyedQueue();
+			const batches = createMessageBatchQueue(async (messages) => {
+				const chatGuid = messages[0].chatGuid;
+				const remaining = (waiting.get(chatGuid) ?? messages.length) - messages.length;
+				if (remaining > 0) waiting.set(chatGuid, remaining);
+				else waiting.delete(chatGuid);
+				if (messages.length > 1) {
+					console.log(`[batch] ${messages[0].chatGuid}: merged ${messages.length} pending text messages`);
+				}
+				await pipeline.processBatch(messages);
+			});
 
 			async function loop(): Promise<void> {
 				while (true) {
 					const msg = await queue.pull();
 
-					// Cancellation commands must reach compaction without waiting behind it.
+					// Preserve the current cancellation/admission pipeline and split batches.
 					const command = msg.text?.trim();
 					if (command === "/stop" || command === "/new") {
-						// Bypass scheduling, never the normal admission or delivery pipeline.
+						batches.boundary(msg.chatGuid);
 						try {
 							await pipeline.process(msg);
 						} catch (error) {
@@ -97,16 +106,7 @@ export function createIMessageBot(config: IMessageBotConfig) {
 					}
 
 					waiting.set(msg.chatGuid, (waiting.get(msg.chatGuid) ?? 0) + 1);
-					enqueue(msg.chatGuid, async () => {
-						const remaining = (waiting.get(msg.chatGuid) ?? 1) - 1;
-						if (remaining > 0) waiting.set(msg.chatGuid, remaining);
-						else waiting.delete(msg.chatGuid);
-						try {
-							await pipeline.process(msg);
-						} catch (error: unknown) {
-							console.error(`[sid] failed to process message from ${msg.sender}:`, error);
-						}
-					});
+					batches.enqueue(msg);
 				}
 			}
 
