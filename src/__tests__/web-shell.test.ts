@@ -25,3 +25,32 @@ for (const [name, data] of Object.entries(fixtures)) {
 		expect(html).not.toContain("<%");
 	});
 }
+
+it("keeps each source on one collapsed table row without losing evidence details", () => {
+	const sources = Array.from({ length: 15 }, (_, i) => ({
+		id: `source-${i}`,
+		category: "test",
+		name: `Source ${i}`,
+		phase: "needs_authorization",
+		state: "blocked",
+		reason: "collector_missing",
+		method: "fixture",
+		note: "private <text>",
+		lastSuccessAt: null,
+		checkedAt: "2026-09-06T00:00:00Z",
+		recordCount: null,
+		staleHours: 24,
+	}));
+	const html = eta.render("sources", {
+		sources,
+		categories: [{ id: "test", name: "Test category" }],
+		generatedAt: "2026-09-06T00:00:00Z",
+	});
+	expect(html.match(/<tr data-source-id=/g)).toHaveLength(15);
+	expect(html.match(/<td class="name"><details><summary>/g)).toHaveLength(15);
+	expect(html).not.toMatch(/<details[^>]*\sopen(?:\s|>|=)/);
+	expect(html).toContain("private &lt;text&gt;");
+	expect(html).toContain("缺少已验证的采集器");
+	expect(html).toContain("状态证据时间");
+	expect(html).not.toContain("<script>");
+});
