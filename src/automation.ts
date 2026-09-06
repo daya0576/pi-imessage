@@ -14,6 +14,7 @@ export interface AutomationJob {
 	argv: string[];
 	cwd?: string;
 	chatGuid?: string;
+	dailySummary?: boolean;
 }
 export interface DriverResult {
 	status: "healthy" | "needs_human" | "failed";
@@ -80,7 +81,8 @@ export function parseAutomationConfig(raw: string): AutomationJob[] {
 				job.argv.some((arg) => typeof arg !== "string" || arg.includes("\0")) ||
 				!isAbsolute(job.argv[0]) ||
 				(job.cwd !== undefined && (typeof job.cwd !== "string" || !isAbsolute(job.cwd))) ||
-				(job.chatGuid !== undefined && typeof job.chatGuid !== "string")
+				(job.chatGuid !== undefined && typeof job.chatGuid !== "string") ||
+				(job.dailySummary !== undefined && typeof job.dailySummary !== "boolean")
 			)
 				throw new Error();
 			ids.add(job.id);
@@ -95,6 +97,7 @@ export function parseAutomationConfig(raw: string): AutomationJob[] {
 				argv: [...job.argv],
 				cwd: job.cwd,
 				chatGuid: job.chatGuid,
+				dailySummary: job.dailySummary === true,
 			};
 		});
 	} catch {
@@ -159,6 +162,7 @@ export function createAutomationService(config: {
 	workingDir: string;
 	/** Resolving means sender accepted the request, NOT verified delivery. */
 	notify?: (chatGuid: string, text: string) => Promise<void>;
+	now?: () => Date;
 }): AutomationService {
 	const directory = join(config.workingDir, "automation");
 	mkdirSync(directory, { recursive: true });
@@ -172,7 +176,8 @@ export function createAutomationService(config: {
 		CREATE TABLE IF NOT EXISTS runs (id INTEGER PRIMARY KEY, taskId TEXT NOT NULL, status TEXT NOT NULL,
 		startedAt TEXT NOT NULL, finishedAt TEXT, summary TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL DEFAULT '', pid INTEGER);
 		CREATE TABLE IF NOT EXISTS notifications (id INTEGER PRIMARY KEY, taskId TEXT NOT NULL, text TEXT NOT NULL,
-		status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, retryAt INTEGER NOT NULL DEFAULT 0);`);
+		status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, retryAt INTEGER NOT NULL DEFAULT 0);
+		CREATE TABLE IF NOT EXISTS digest_days (day TEXT NOT NULL, chat TEXT NOT NULL, PRIMARY KEY(day,chat));`);
 	for (const job of jobs) db.prepare("INSERT OR IGNORE INTO tasks(id) VALUES (?)").run(job.id);
 	const active = new Map<string, { cancel: (reason: string) => void; done: Promise<void> }>();
 	const schedules = new Map<string, Cron>();
@@ -193,8 +198,45 @@ export function createAutomationService(config: {
 			`${job.name}: ${failing ? "action needed" : "recovered"}. ${result.summary}`
 		);
 	}
+	function queueDailySummaries(): void {
+		const now = config.now?.() ?? new Date();
+		const parts = new Intl.DateTimeFormat("en-CA", {
+			timeZone: "Asia/Shanghai",
+			year: "numeric",
+			month: "2-digit",
+			day: "2-digit",
+			hour: "2-digit",
+			hourCycle: "h23",
+		}).formatToParts(now);
+		const part = (key: string) => parts.find((item) => item.type === key)?.value ?? "";
+		if (Number(part("hour")) < 21) return;
+		const day = `${part("year")}-${part("month")}-${part("day")}`;
+		const since = new Date(`${day}T00:00:00+08:00`).toISOString();
+		const groups = new Map<string, AutomationJob[]>();
+		for (const job of jobs) {
+			if (!job.dailySummary || !job.chatGuid) continue;
+			groups.set(job.chatGuid, [...(groups.get(job.chatGuid) ?? []), job]);
+		}
+		for (const [chat, members] of groups)
+			db.transaction(() => {
+				if (!db.prepare("INSERT OR IGNORE INTO digest_days(day,chat) VALUES (?,?)").run(day, chat).changes) return;
+				const lines = members.map((job) => {
+					const counts = db
+						.prepare("SELECT status,COUNT(*) AS count FROM runs WHERE taskId=? AND startedAt>=? GROUP BY status")
+						.all(job.id, since) as { status: string; count: number }[];
+					const count = (status: string) => counts.find((item) => item.status === status)?.count ?? 0;
+					const task = row(job.id);
+					return `${job.name}：成功 ${count("healthy")}，失败 ${count("failed")}，需人工 ${count("needs_human")}；当前 ${task.state}${task.paused ? "（暂停）" : ""}。`;
+				});
+				db.prepare("INSERT INTO notifications(taskId,text) VALUES (?,?)").run(
+					members[0].id,
+					`${day} 任务运行汇总\n${lines.join("\n")}`
+				);
+			})();
+	}
 	async function flushNotifications(): Promise<void> {
 		if (!started || !config.notify) return;
+		queueDailySummaries();
 		const pending = db
 			.prepare(
 				"SELECT id,taskId,text,attempts FROM notifications WHERE status='pending' AND attempts<3 AND retryAt<=? ORDER BY id LIMIT 10"
@@ -209,7 +251,7 @@ export function createAutomationService(config: {
 				notice.id
 			);
 			try {
-				await config.notify(job.chatGuid, notice.text);
+				await config.notify(job.chatGuid, `${notice.text}\n〔任务通知 ${notice.id}〕`);
 				db.prepare("UPDATE notifications SET status='accepted' WHERE id=?").run(notice.id);
 			} catch {
 				/* Pending, bounded retry. Sender errors may contain private data. */

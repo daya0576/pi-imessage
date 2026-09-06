@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createAgentManager } from "./agent.js";
+import { createAutomationNotifier } from "./automation-send.js";
 import { createAutomationService } from "./automation.js";
 import { type CronJobConfig, createCronService } from "./cron.js";
 import { createIMessageBot } from "./imessage.js";
@@ -117,11 +118,7 @@ async function main() {
 	const cron = createCronService({ workingDir, execute: executeCronJob });
 	const automation = createAutomationService({
 		workingDir,
-		notify: async (chatGuid, text) => {
-			echoFilter.remember(chatGuid, text);
-			// Existing text sender resolves on submission; it does not verify delivery.
-			await sender.sendMessage(chatGuid, text);
-		},
+		notify: createAutomationNotifier(sender, (chatGuid, text) => echoFilter.remember(chatGuid, text)),
 	});
 	const web = webEnabled
 		? createWebServer({

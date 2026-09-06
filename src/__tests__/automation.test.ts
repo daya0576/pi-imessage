@@ -241,3 +241,20 @@ it("serves whitelisted data; rejects cross-origin, form, large body and traversa
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 	}
 });
+
+it("queues an opted-in Shanghai daily digest once across restarts", async () => {
+	const { service, workingDir } = fixture(undefined, { dailySummary: true });
+	await service.stop();
+	const notify = vi.fn().mockResolvedValue(undefined);
+	const reopened = createAutomationService({ workingDir, notify, now: () => new Date("2026-09-06T21:10:00+08:00") });
+	services.push(reopened);
+	reopened.start();
+	await vi.waitFor(() => expect(notify).toHaveBeenCalledTimes(1));
+	expect(notify.mock.calls[0][1]).toContain("任务运行汇总");
+	await reopened.stop();
+	const again = createAutomationService({ workingDir, notify, now: () => new Date("2026-09-06T22:10:00+08:00") });
+	services.push(again);
+	again.start();
+	await new Promise((r) => setTimeout(r, 100));
+	expect(notify).toHaveBeenCalledTimes(1);
+});
