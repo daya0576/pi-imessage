@@ -1,49 +1,26 @@
 <!DOCTYPE html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>blue — automation tasks</title>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>blue — tasks</title>
 <style>
-* { box-sizing: border-box }
-body { margin: 0; background: #111; color: #ccc; font: 13px/1.6 monospace; display: flex }
-nav { width: 112px; flex-shrink: 0; padding: 40px 16px; border-right: 1px solid; }
-nav a { display: block; color: inherit; text-decoration: none; opacity: .5; line-height: 2.4 }
-nav a:hover, nav a.active { opacity: 1 }
-main { padding: 32px; min-width: 0; flex: 1 }
-h1, h2, button { font: inherit }
-article { border-top: 1px solid; padding: 16px 0; overflow-wrap: anywhere }
-p { margin: 4px 0 }
-button { color: inherit; background: transparent; border: 1px solid; padding: 4px 10px; margin: 8px 4px 0 0; cursor: pointer }
-button:disabled, .dim { opacity: .5 }
-@media (max-width: 600px) { body { display: block } nav { width: auto; padding: 12px; border-right: 0; border-bottom: 1px solid } nav a { display: inline-block; margin-right: 12px } main { padding: 16px } }
+*{box-sizing:border-box}body{margin:0;background:#111;color:#ccc;font:13px/1.6 monospace;display:flex}nav{width:112px;flex-shrink:0;padding:32px 16px;border-right:1px solid #252525}nav a{display:block;color:inherit;text-decoration:none;opacity:.5;line-height:2.4}nav a:hover,nav a.active{opacity:1}main{padding:24px 32px;min-width:0;flex:1}h1,h2,button{font:inherit}h1{margin:0 0 16px}.table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;min-width:700px}th,td{border-bottom:1px solid #292929;padding:10px 12px;text-align:left;vertical-align:top}th{font-weight:normal;opacity:.5;white-space:nowrap}td{white-space:nowrap}.name{width:35%;min-width:180px}.controls{white-space:nowrap;width:1%}button{color:inherit;background:transparent;border:1px solid #444;padding:2px 8px;cursor:pointer}button:disabled,.dim{opacity:.45}.state-healthy{color:#9bbf91}.state-needs_human,.state-failed{color:#dab778}summary{cursor:pointer;list-style-position:outside;margin-left:12px}.details{white-space:normal;min-width:220px;max-width:520px;padding:12px 0 4px;overflow-wrap:anywhere}.details p{margin:0 0 8px}.run{border-top:1px solid #292929;padding:8px 0}.run time{display:block;opacity:.5;font-size:11px}#feedback{min-height:20px;margin:8px 0}.note{font-size:11px;opacity:.4;margin-top:12px}@media(max-width:600px){body{display:block}nav{width:auto;padding:10px 12px;border-right:0;border-bottom:1px solid #252525}nav a{display:inline-block;margin-right:12px}main{padding:16px 12px}table{min-width:660px}th,td{padding:9px}.note{max-width:350px}}
 </style></head><body>
 <nav><a href="/">Recent Chats</a><a href="/scheduled">Scheduled</a><a href="/tasks" class="active">Tasks</a><a href="/logs">Logs</a><a href="/memory">Memory</a></nav>
-<% const fmt = (value) => value ? new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '—'; const labels = { idle: '未运行', running: '运行中', healthy: '正常', needs_human: '需要人工处理', failed: '失败' }; %>
-<main><h1>自动任务</h1><p class="dim">上海时间 · 恢复时重新验证，不直接标记成功。通知记录不代表收件人已读。</p>
-<p id="feedback" role="status"></p>
-<% if (!it.tasks.length) { %><p>尚未配置自动任务。</p><% } %>
-<% it.tasks.forEach(function(task) { %>
-<article><h2><%= task.name %></h2>
-<p>状态：<%= labels[task.state] || task.state %><%= task.paused ? ' / 已暂停' : '' %><%= !task.enabled ? ' / 配置已停用' : '' %><%= task.blocked ? ' / 未确认旧进程退出，需要人工检查' : '' %></p>
-<p>上次成功：<%= task.lastSuccess ? fmt(task.lastSuccess) : '尚未成功验证' %></p><p>下次检查：<%= task.paused || !task.enabled ? '暂停中' : task.nextRun ? fmt(task.nextRun) : '执行器未启动' %></p>
-<p>需要处理：<%= (it.runs.find((run) => run.taskId === task.id) || {}).summary || task.reason || '无' %></p><p>通知：<%= task.notification === 'accepted' ? '发送流程已确认（非收件人回执）' : task.notification === 'pending' ? '等待发送确认' : '无' %></p>
-<button data-id="<%= task.id %>" data-action="pause">暂停</button>
-<button data-id="<%= task.id %>" data-action="resume" <%= task.running || task.blocked || !task.enabled ? 'disabled' : '' %>>恢复并验证</button>
-<button data-id="<%= task.id %>" data-action="run" <%= task.running || task.paused || task.blocked || !task.enabled ? 'disabled' : '' %>>立即检查</button>
-</article><% }) %>
-<h2>最近运行记录</h2>
-<% it.runs.forEach(function(run) { %><article><p><%= run.taskId %> — <%= labels[run.status] || run.status %></p><p><%= fmt(run.startedAt) %> → <%= run.finishedAt ? fmt(run.finishedAt) : '运行中' %></p><p><%= run.summary %></p><p><%= run.reason %></p></article><% }) %>
-</main><script>
-document.addEventListener('click', async (event) => {
-  const button = event.target.closest('button[data-action]');
-  if (!button) return;
-  button.disabled = true;
-  const feedback = document.getElementById('feedback');
-  try {
-    const response = await fetch('/tasks/' + encodeURIComponent(button.dataset.id) + '/' + button.dataset.action, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Automation-Action': '1' }, body: '{}'
-    });
-    feedback.textContent = response.ok ? '请求已受理，正在刷新状态…' : '操作不可用，请检查任务状态。';
-    if (response.ok) setTimeout(() => location.reload(), 500);
-  } catch { feedback.textContent = '请求失败，请刷新确认当前状态。'; }
-  button.disabled = false;
-});
-setTimeout(() => location.reload(), 15000);
+<% const fmt = (value) => value ? new Date(value).toLocaleString('zh-CN', {timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}) : '—'; const labels = {idle:'未运行',running:'运行中',healthy:'正常',needs_human:'待处理',failed:'失败'}; %>
+<main><h1>自动任务</h1><div class="table-wrap"><table><thead><tr><th>任务</th><th>状态</th><th>上次成功</th><th>下次检查</th><th>操作</th></tr></thead><tbody>
+<% if (!it.tasks.length) { %><tr><td colspan="5" class="dim">尚未配置任务</td></tr><% } %>
+<% it.tasks.forEach(function(task) { const runs=it.runs.filter((run)=>run.taskId===task.id); %>
+<tr data-task-id="<%= task.id %>">
+<td class="name"><details><summary><%= task.name %></summary><div class="details">
+<p><%= runs[0]?.summary || task.reason || '暂无运行记录' %></p>
+<% if(task.blocked) { %><p>尚未确认旧进程退出，恢复前需要人工检查。</p><% } %>
+<p class="dim">通知：<%= task.notification==='accepted'?'发送流程已确认（非已读回执）':task.notification==='pending'?'等待发送确认':'无' %></p>
+<% runs.slice(0,10).forEach(function(run) { %><div class="run"><time><%= fmt(run.startedAt) %> → <%= run.finishedAt?fmt(run.finishedAt):'运行中' %></time><%= labels[run.status]||run.status %> · <%= run.summary %></div><% }) %>
+</div></details></td>
+<td class="state-<%= task.state %>"><%= labels[task.state]||task.state %><%= task.paused?' / 暂停':'' %><%= !task.enabled?' / 停用':'' %></td>
+<td><%= fmt(task.lastSuccess) %></td><td><%= task.paused||!task.enabled?'—':fmt(task.nextRun) %></td>
+<td class="controls"><% if(task.paused) { %><button data-id="<%= task.id %>" data-action="resume" <%= task.running||task.blocked||!task.enabled?'disabled':'' %>>恢复</button><% } else { %><button data-id="<%= task.id %>" data-action="run" <%= task.running||task.blocked||!task.enabled?'disabled':'' %>>检查</button> <button data-id="<%= task.id %>" data-action="pause">暂停</button><% } %></td>
+</tr><% }) %>
+</tbody></table></div><p id="feedback" role="status"></p><p class="note">上海时间 · 点击任务名展开详情与运行记录 · 恢复时重新验证</p></main>
+<script>
+document.addEventListener('click',async(event)=>{const button=event.target.closest('button[data-action]');if(!button)return;button.disabled=true;const feedback=document.getElementById('feedback');try{const response=await fetch('/tasks/'+encodeURIComponent(button.dataset.id)+'/'+button.dataset.action,{method:'POST',headers:{'Content-Type':'application/json','X-Automation-Action':'1'},body:'{}'});feedback.textContent=response.ok?'已受理，正在刷新状态…':'操作不可用，请检查任务状态。';if(response.ok)setTimeout(()=>location.reload(),500);}catch{feedback.textContent='请求失败，请刷新确认当前状态。';}button.disabled=false;});
+setInterval(()=>{if(!document.querySelector('details[open]'))location.reload();},15000);
 </script></body></html>
