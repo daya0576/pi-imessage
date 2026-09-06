@@ -406,11 +406,32 @@ function documents(
 			filename,
 			`global / ${filename}`,
 			query.view === "system"
-				? "全局系统操作日志；普通会话 prompt 会附加，不是记忆"
+				? "当前系统配置摘要；普通会话有界加载（最多 8192 字节），不等于个人记忆"
 				: "全局旧档案；停用，不参与结构化检索"
 		);
 		try {
 			const root = realpathSync(workingDir);
+			if (query.view === "system") {
+				try {
+					const history = readdirSync(safePath(root, "system-history"), { withFileTypes: true });
+					if (history.length > 1024) diagnostics.push("系统历史超过 1024 项，仅展示有界清单");
+					for (const entry of history.sort((a, b) => compare(b.name, a.name)).slice(0, 1024)) {
+						if (!/^(?:\d{4}-\d{2}-\d{2}|legacy-before-\d{4}-\d{2}-\d{2})\.md$/.test(entry.name)) continue;
+						if (!entry.isFile() || entry.isSymbolicLink()) {
+							diagnostics.push(`system-history/${entry.name}：已拒绝非普通历史文件`);
+							continue;
+						}
+						add(
+							root,
+							`system-history/${entry.name}`,
+							`历史 / ${entry.name}`,
+							"历史变更记录；只读按需查看，不自动加入模型上下文，不能当成当前配置"
+						);
+					}
+				} catch (error) {
+					if ((error as NodeJS.ErrnoException).code !== "ENOENT") diagnostics.push("系统历史目录不可读或不安全");
+				}
+			}
 			const entries = readdirSync(root, { withFileTypes: true }).sort((a, b) => compare(a.name, b.name));
 			if (entries.length > 4096) diagnostics.push("目录条目超过 4096，仅展示有界目录清单");
 			for (const entry of entries.slice(0, 4096)) {
@@ -428,7 +449,7 @@ function documents(
 						`${entry.name}/${filename}`,
 						`${entry.name} / ${filename}`,
 						query.view === "system"
-							? "仅该普通聊天会话的操作日志；不代表其他聊天或隔离任务"
+							? "仅该普通聊天会话的配置摘要；有界加载，不代表其他聊天或隔离任务"
 							: "聊天旧档案；停用，不参与结构化检索"
 					);
 				} catch (error) {

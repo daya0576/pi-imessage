@@ -5,9 +5,6 @@
 body { background: #111; color: #ccc; font: 13px/1.6 monospace; display: flex; min-height: 100vh }
 a { color: inherit; text-underline-offset: 3px; overflow-wrap: anywhere }
 a:hover { opacity: 1 }
-nav { width: 133px; flex-shrink: 0; padding: 40px 16px; border-right: 1px solid #cccccc26 }
-nav a { display: block; text-decoration: none; line-height: 2.4; opacity: .45 }
-nav a.active { opacity: 1 }
 main { padding: 32px 40px; width: 100%; min-width: 0; max-width: 1160px }
 header, section, .toolbar, .pagination { margin-bottom: 20px }
 h1, h2, h3, strong { font: inherit }
@@ -38,8 +35,6 @@ pre { font: inherit; white-space: pre-wrap; overflow-wrap: anywhere }
 .document-list { display: grid; gap: 8px; margin: 12px 0 }
 .document-list a { padding: 6px 0 }
 @media (max-width: 700px) {
- body { display: block }
- nav { width: 100%; padding: 10px 16px; border-right: 0; border-bottom: 1px solid #cccccc26; display: flex; flex-wrap: wrap; gap: 0 16px }
  main { padding: 16px }
  input, select { font-size: 16px }
  header, section, .toolbar { margin-bottom: 12px }
@@ -50,10 +45,10 @@ pre { font: inherit; white-space: pre-wrap; overflow-wrap: anywhere }
  .card { padding: 12px }
  .meta { grid-template-columns: 78px minmax(0, 1fr); gap: 4px 8px }
 }
-</style></head><body>
-<nav aria-label="主导航">
- <a href="/">Recent Chats</a><a href="/scheduled">Scheduled</a><a href="/tasks">Tasks</a><a href="/sources">Sources</a><a href="/logs">Logs</a><a href="/memory" class="active">Memory</a>
-</nav>
+</style>
+<%~ include("shell-style") %>
+</head><body class="page-memory">
+<%~ include("shell-nav", {active: "memory"}) %>
 <main>
 <header><h1>Memory / 记忆与规则</h1><p class="muted">记忆、Agent 规则与系统记录 · 只读</p></header>
 <div class="tabs" role="navigation" aria-label="记忆视图">
@@ -93,7 +88,7 @@ pre { font: inherit; white-space: pre-wrap; overflow-wrap: anywhere }
 <section>
 <% if (it.query.view === 'core') { %><h2>Core / 精简常驻记忆</h2><p class="muted">固定来源：skills/file-memory/core.md。普通会话构建 system prompt 时读取；不是 AGENTS.md 规则，也不是完整命名空间内容。</p><% } %>
 <% if (it.query.view === 'agents') { %><h2>Agent 规则 / AGENTS.md</h2><details><summary>规则文件的作用范围</summary><p class="muted">运行时 DefaultResourceLoader 的 cwd = workingDir，agentDir = SDK getAgentDir()（默认 ~/.pi/agent，可被环境覆盖）；未关闭 context files。自定义 system prompt 仍附加这些规则。</p><p class="muted">SDK 先读 agentDir，再读 cwd 的祖先到 cwd；每个目录按 AGENTS.override.md → AGENTS.md → AGENTS.MD → CLAUDE.md → CLAUDE.MD 选首个可读文件，并处理嵌套 worktree 遮蔽。本页显示当前 agentDir 与工作区两个固定 AGENTS.md 源，不自动读取其他祖先、chat 或 scratch 文件，不证明某个已运行会话已重载。</p></details><% } %>
-<% if (it.query.view === 'system') { %><h2>系统变更日志 / SYSTEM.md</h2><p class="muted">系统操作与环境修改的记录，不是有效记忆。普通会话 prompt 会附加 global 与当前 sessionDir 的 SYSTEM.md；这里只列全局及直接聊天目录，未扫描隔离任务会话。</p><% } %>
+<% if (it.query.view === 'system') { %><h2>系统配置 / SYSTEM.md</h2><p class="muted">当前配置摘要与历史变更分开保存。模型只加载有长度上限的摘要；下方历史日志按需查看，不自动进入上下文。</p><% } %>
 <% if (it.query.view === 'archives') { %><h2>历史归档 / MEMORY.md · 已停用</h2><p class="muted">全局和聊天旧档案只读，不参与当前结构化检索，不接受新条目；档案内容不代表当前事实。仅通过允许清单中的不透明 ID 选择，不读取任意路径。</p><% } %>
 </section>
 <div class="document-list" aria-label="文档清单"><% it.documents.forEach(function(document) { %><a href="<%= it.link(it.query, {doc: document.id, page: 1, record: ''}) %>"><%= document.label %></a><% }) %></div>

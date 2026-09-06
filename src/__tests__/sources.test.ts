@@ -121,10 +121,13 @@ it("renders source rows safely with category links and the Sources tab on all pa
 	data.sources[0].name = '<script>alert("xss")</script>';
 	const html = renderSourcesPage(data);
 	expect(html).toContain("外部数据源");
+	expect(html).toContain('href="/sources" class="active" aria-current="page"');
 	expect(html).toContain("&lt;script&gt;");
 	expect(html).not.toContain('<script>alert("xss")</script>');
 	for (const page of ["page", "logs", "memory", "scheduled", "tasks"]) {
-		expect(readFileSync(new URL(`../web/templates/${page}.eta`, import.meta.url), "utf8")).toContain('href="/sources"');
+		expect(readFileSync(new URL(`../web/templates/${page}.eta`, import.meta.url), "utf8")).toContain(
+			'include("shell-nav"'
+		);
 	}
 });
 

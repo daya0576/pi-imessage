@@ -5,7 +5,7 @@
 - Structured memory: effective records by default; text/provenance search, namespace/kind/status filters, bounded pagination and cross-namespace correction history.
 - Core: the small always-on `skills/file-memory/core.md`.
 - Agent rules: `AGENTS.md` at the running SDK's `getAgentDir()` and at `workingDir`, explicitly labeled by scope. This is a fixed document browser, not a claim to enumerate every SDK context file or prove existing sessions have reloaded. SDK context-file precedence/ancestor discovery is described in an expandable explanation.
-- System operations: global and allowlisted direct-chat `SYSTEM.md` files, separate from personal memory.
+- System configuration: compact global and allowlisted direct-chat `SYSTEM.md` summaries plus allowlisted dated files in `system-history/`, clearly distinguished from current state and never auto-injected into the model.
 - Archives: global and direct-chat legacy `MEMORY.md`, labeled inactive and read-only.
 
 `GET /memory/data` exposes the same bounded view model. The former `{globalMemory, chatMemories}` JSON shape is replaced, not retained as an active-memory interface. No known internal consumer uses the legacy shape. All non-GET Memory methods are rejected. There are no save, delete, migration, ingestion or arbitrary-file endpoints.

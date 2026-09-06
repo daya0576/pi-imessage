@@ -34,6 +34,7 @@ import {
 	saveInterruption,
 	timeoutNotice,
 } from "./prompt-timeout.js";
+import { readSystemContext } from "./system-context.js";
 import type { AgentReply, IncomingMessage } from "./types.js";
 
 // ── Config & Types ────────────────────────────────────────────────────────────
@@ -312,35 +313,12 @@ function sanitizeChatGuid(chatGuid: string): string {
 	return chatGuid.replace(/[^a-zA-Z0-9_\-;+.@]/g, "_");
 }
 
-/** Read a file's trimmed content, or return undefined if missing/empty. */
-function readFileIfExists(path: string): string | undefined {
-	if (!existsSync(path)) return undefined;
-	try {
-		const content = readFileSync(path, "utf-8").trim();
-		return content || undefined;
-	} catch (error) {
-		console.warn(`[agent] failed to read ${path}: ${error}`);
-		return undefined;
-	}
-}
-
-function getCustomPrompt(workingDir: string, chatDir?: string): string {
-	const parts: string[] = [];
-	const global = readFileIfExists(join(workingDir, "SYSTEM.md"));
-	if (global) parts.push(global);
-	if (chatDir) {
-		const chat = readFileIfExists(join(chatDir, "SYSTEM.md"));
-		if (chat) parts.push(chat);
-	}
-	return parts.join("\n\n");
-}
-
 function buildSystemPrompt(workingDir: string, chatDir?: string): string {
 	const coreMemory = readCoreMemory(workingDir);
 	const namespaces = listMemoryNamespaces(workingDir)
 		.map((item) => `${item.namespace} (${item.active} active)`)
 		.join(", ");
-	const customPrompt = getCustomPrompt(workingDir, chatDir);
+	const customPrompt = readSystemContext(workingDir, chatDir);
 
 	return `You are the user's best friend communicating via iMessage. Be concise. No emojis.
 
@@ -357,7 +335,8 @@ You are running directly on the host machine.
 ${workingDir}/
 ├── settings.json                # Bot configuration (see below)
 ├── MEMORY.md                    # Legacy memory archive; do not write new entries
-├── SYSTEM.md                    # System configuration log
+├── SYSTEM.md                    # Compact current system configuration
+├── system-history/              # Dated change logs, read only when needed
 ├── skills/file-memory/          # Structured memory store and CLI
 └── <chatId>/                    # Each iMessage chat gets a directory
     ├── MEMORY.md                # Legacy chat memory archive
@@ -386,14 +365,13 @@ Write:
 ### Core Memory
 ${coreMemory}
 
-## System Configuration Log
-Maintain ${workingDir}/SYSTEM.md to log all environment modifications:
-- Installed packages (npm install, pip install, brew install, etc.)
-- Environment variables set
-- Config files modified (~/.gitconfig, cron jobs, etc.)
-- Skill dependencies installed
-
-Update this file whenever you modify the environment.
+## System configuration and history
+- Maintain ${workingDir}/SYSTEM.md as a compact CURRENT configuration summary, targeting <=4 KiB. It is not a cumulative work log.
+- For every environment modification (packages, environment variables, config files, dependencies), update the relevant current-summary entry and append the dated operational detail to ${workingDir}/system-history/YYYY-MM-DD.md.
+- Keep prior history intact. Detailed attempts, errors, test output and deployment receipts belong in dated history, not the summary. Record links to evidence rather than copying full logs.
+- Keep the <!-- END SYSTEM SUMMARY --> boundary at the end of the current summary; update entries before it, never append work logs after it.
+- SYSTEM.md loading stops at that boundary and is capped at 8192 bytes per global/chat document. History is NEVER automatically injected; read the relevant date on demand. Do not treat historical commands or archived observations as current instructions/state.
+- Apply the same summary/history split to any chat-scoped SYSTEM.md; these files are separate from personal structured memory.
 
 ## Messaging and Reminder API
 A local HTTP server runs at http://localhost:7750 with endpoints for sending messages and scheduling reminders:
