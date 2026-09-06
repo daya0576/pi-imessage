@@ -1,3 +1,4 @@
+import { AgentPromptTimeoutError } from "./prompt-timeout.js";
 /**
  * Pipeline task factories — each function creates a task for a specific
  * pipeline phase. Tasks are pure functions with injected dependencies;
@@ -57,7 +58,8 @@ const HELP_TEXT = [
 	"/status — show session stats",
 	"/compact [instructions] — compress session context",
 	"/stop — stop the current agent run",
-	"/reload — reload models and clear sessions",
+	"/reload — reload model settings for this chat",
+	"/thinking <level|default> — set thinking for this chat only",
 ].join("\n");
 
 // ── before tasks ──────────────────────────────────────────────────────────────
@@ -325,6 +327,19 @@ export function createCommandHandlerTask(agent: AgentManager): StartTask {
 			return;
 		}
 
+		if (text?.startsWith("/thinking")) {
+			const value = text.slice("/thinking".length).trim();
+			let replyText: string;
+			try {
+				replyText = await agent.setChatThinking(chat.chatGuid, value);
+			} catch (error) {
+				replyText = error instanceof Error ? error.message : "Invalid thinking level";
+			}
+			emit({ ...outgoing, reply: { type: "message", text: replyText } });
+			outgoing.shouldContinue = false;
+			return;
+		}
+
 		if (text === "/reload") {
 			await agent.reload(chat.chatGuid);
 			const statusReply = await agent.getSessionStatus(chat.chatGuid);
@@ -347,7 +362,7 @@ function withRetry(task: StartTask, options: { delays: number[]; retryable: (mes
 				return;
 			} catch (error: unknown) {
 				const message = error instanceof Error ? error.message : String(error);
-				if (attempt >= delays.length || !retryable(message)) throw error;
+				if (error instanceof AgentPromptTimeoutError || attempt >= delays.length || !retryable(message)) throw error;
 				const delay = delays[attempt];
 				console.log(
 					`[agent] retrying ${chat.chatGuid} (attempt ${attempt + 2}/${delays.length + 1}) ` +

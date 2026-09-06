@@ -122,6 +122,17 @@ if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
 fi
 mkdir -p "${RELEASE_ROOT}"
 
+# Optional caller precondition, checked while holding the deployment lock.
+# A delayed queued deployment must never overwrite an unrelated newer release.
+if [[ -n "${EXPECTED_ACTIVE_RELEASE:-}" ]]; then
+  ACTUAL_CANONICAL="$(cd "${CURRENT_LINK}" && pwd -P)" || exit 1
+  EXPECTED_CANONICAL="$(cd "${EXPECTED_ACTIVE_RELEASE}" && pwd -P)" || exit 1
+  if [[ "${ACTUAL_CANONICAL}" != "${EXPECTED_CANONICAL}" ]]; then
+    echo "Active release changed; refusing stale queued deployment" >&2
+    exit 1
+  fi
+fi
+
 if ! git -C "${REPO_ROOT}" diff --quiet || ! git -C "${REPO_ROOT}" diff --cached --quiet; then
   echo "Repository must be clean; commit the deployment candidate first." >&2
   exit 1
