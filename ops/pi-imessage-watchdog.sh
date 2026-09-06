@@ -32,11 +32,6 @@ fi
 
 launch_running() { launchctl print "${SERVICE}" 2>/dev/null | grep -q 'state = running'; }
 web_healthy() { curl -fsS --max-time 4 "${WEB_URL}/health/runtime" >/dev/null 2>&1; }
-messages_healthy() {
-  /usr/bin/osascript -e 'tell application "Messages" to return (count of accounts whose enabled is true)' \
-    2>/dev/null | grep -Eq '^[1-9][0-9]*$'
-}
-
 runtime_stuck() {
   local result active last now last_epoch
   result="$(curl -fsS --max-time 4 "${WEB_URL}/health/runtime" 2>/dev/null)" || return 1
@@ -59,7 +54,9 @@ restart_and_verify() {
   launchctl kickstart -k "${SERVICE}" >/dev/null 2>&1 || true
   for _ in $(seq 1 30); do
     sleep 1
-    launch_running && web_healthy && messages_healthy && return 0
+    # Only gate recovery on conditions restarting this worker can repair.
+    # Messages account availability is external and must not cause restart loops.
+    launch_running && web_healthy && return 0
   done
   return 1
 }
@@ -75,7 +72,7 @@ rollback() {
   restart_and_verify
 }
 
-if ! launch_running || ! web_healthy || ! messages_healthy || runtime_stuck; then
+if ! launch_running || ! web_healthy || runtime_stuck; then
   log "Local health failed; restarting active immutable release"
   if ! restart_and_verify; then
     log "Restart failed; attempting previous release"
