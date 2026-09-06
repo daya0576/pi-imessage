@@ -2,20 +2,12 @@
 .controls { white-space: nowrap; width: 1% }
 .detail-button, .detail-dialog button { color: #ccc; background: transparent; border: 1px solid #444; border-radius: 3px; padding: 2px 8px; font: 13px/1.6 monospace; cursor: pointer }
 .detail-button:hover, .detail-dialog button:hover { color: #eee; border-color: #777 }
-.detail-dialog { box-sizing: border-box; margin: auto; padding: 0; width: min(640px, calc(100vw - 32px)); max-width: none; max-height: calc(100dvh - 48px); border: 1px solid #333; border-radius: 6px; background: #171717; color: #ccc; font: 13px/1.6 monospace; white-space: normal; text-align: left; overflow: auto }
+.detail-dialog { position: fixed; inset: 0; box-sizing: border-box; margin: auto; padding: 0; width: min(640px, calc(100vw - 32px)); max-width: none; max-height: calc(100dvh - 48px); border: 1px solid #333; border-radius: 6px; background: #171717; color: #ccc; font: 13px/1.6 monospace; white-space: normal; text-align: left; overflow: auto }
 .detail-dialog::backdrop { background: rgb(0 0 0 / 65%) }
 .detail-dialog header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid #292929; position: sticky; top: 0; background: #171717 }
 .detail-dialog h2 { margin: 0; font: inherit; color: #eee; overflow-wrap: anywhere }
-.detail-dialog form { margin: 0; flex-shrink: 0 }
+.detail-dialog header > button { flex-shrink: 0 }
 .detail-content { padding: 20px; overflow-wrap: anywhere }
 .detail-content p { margin: 0 0 12px }
 .detail-content p:last-child { margin-bottom: 0 }
 </style>
-<script>
-document.addEventListener('click', (event) => {
-  const button = event.target.closest('button[data-detail-id]');
-  if (!button) return;
-  const dialog = document.getElementById(button.dataset.detailId);
-  if (dialog instanceof HTMLDialogElement && !dialog.open) dialog.showModal();
-});
-</script>

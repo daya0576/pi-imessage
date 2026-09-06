@@ -54,6 +54,8 @@ it("keeps each source on one plain table row with a separate details button", ()
 	expect(html).toContain("状态证据时间");
 	expect(html).toContain('data-detail-ui="v1"');
 	expect(html).not.toContain("<summary>");
+	expect(html).toContain("popovertarget=");
+	expect(html).not.toContain("<script>");
 });
 
 it("uses the same details dialog for planned and paused tasks without changing controls", () => {
@@ -71,6 +73,6 @@ it("uses the same details dialog for planned and paused tasks without changing c
 	expect(html).toContain("Evidence &lt;private&gt;");
 	expect(html).not.toContain("<summary>");
 	expect(html).not.toContain("<script>bad</script>");
-	expect(html).toContain("document.querySelector('dialog[open]')");
+	expect(html).toContain("document.querySelector('[popover]:popover-open')");
 	expect(html).toContain('data-detail-ui="v1"');
 });
