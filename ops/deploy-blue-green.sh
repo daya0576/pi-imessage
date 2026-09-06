@@ -25,6 +25,8 @@ BOOTSTRAP="${BOOTSTRAP:-auto}"
 GREEN_PID=""
 NEW_RELEASE=""
 OLD_TARGET=""
+SWITCHED=false
+DEPLOY_SUCCEEDED=false
 
 log() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -40,11 +42,18 @@ send_progress() {
 }
 
 cleanup() {
+  local rc=$?
+  trap - EXIT
+  if [[ "${rc}" != "0" && "${SWITCHED}" == "true" && "${DEPLOY_SUCCEEDED}" != "true" ]]; then
+    log "Deployment failed after switch (exit=${rc}); forcing rollback"
+    rollback || log "Emergency rollback could not restore service"
+  fi
   if [[ -n "${GREEN_PID}" ]] && kill -0 "${GREEN_PID}" 2>/dev/null; then
     kill -TERM "${GREEN_PID}" 2>/dev/null || true
     wait "${GREEN_PID}" 2>/dev/null || true
   fi
   rmdir "${LOCK_DIR}" 2>/dev/null || true
+  exit "${rc}"
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
@@ -79,14 +88,32 @@ atomic_link() {
   /bin/mv -fh "${temp}" "${link}"
 }
 
+start_active_service() {
+  local plist="${HOME}/Library/LaunchAgents/com.kingcrab.pi-imessage.plist"
+  if launchctl print "${SERVICE}" >/dev/null 2>&1; then
+    launchctl kickstart -k "${SERVICE}"
+    return
+  fi
+  [[ -f "${plist}" ]] || return 1
+  # launchctl can transiently return EIO immediately after a bootout. Retry
+  # bootstrap without first destroying any healthy loaded service.
+  for delay in 0 1 2 4; do
+    (( delay == 0 )) || sleep "${delay}"
+    launchctl bootstrap "gui/$(id -u)" "${plist}" >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
+
 rollback() {
   [[ -n "${OLD_TARGET}" ]] || return 1
-  log "Post-switch health failed; rolling back to ${OLD_TARGET}"
+  log "Rolling back to ${OLD_TARGET}"
   atomic_link "${OLD_TARGET}" "${CURRENT_LINK}"
-  launchctl kickstart -k "${SERVICE}" >/dev/null 2>&1 || true
-  wait_http "${ACTIVE_URL}/health/runtime" "${START_TIMEOUT_SECONDS}" || true
-  check_model "${ACTIVE_URL}" || true
-  send_progress "pi-imessage 新版本健康检查失败，已自动回滚。"
+  start_active_service || true
+  if wait_http "${ACTIVE_URL}/health/runtime" "${START_TIMEOUT_SECONDS}"; then
+    send_progress "pi-imessage 新版本切换失败，旧版本已自动恢复。"
+    return 0
+  fi
+  return 1
 }
 
 if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
@@ -190,21 +217,18 @@ fi
 if [[ -L "${CURRENT_LINK}" ]]; then OLD_TARGET="$(readlink "${CURRENT_LINK}")"; fi
 if [[ -n "${OLD_TARGET}" ]]; then atomic_link "${OLD_TARGET}" "${PREVIOUS_LINK}"; fi
 atomic_link "${NEW_RELEASE}" "${CURRENT_LINK}"
+SWITCHED=true
 
 log "Switching active service to ${NEW_RELEASE}"
-if [[ "${BOOTSTRAP}" == "auto" ]]; then
-  if launchctl print "${SERVICE}" 2>/dev/null | grep -q "${CURRENT_LINK}/dist/main.js"; then BOOTSTRAP=false; else BOOTSTRAP=true; fi
-fi
-if [[ "${BOOTSTRAP}" == "true" ]]; then
-  "${NEW_RELEASE}/ops/install-launchd.sh"
-else
-  launchctl kickstart -k "${SERVICE}"
-fi
+# Ordinary releases never bootout the live LaunchAgent. Its plist points at the
+# stable current symlink, so kickstart is sufficient. If it is unexpectedly
+# unloaded, bootstrap it with retries; any failure is caught by the EXIT trap.
+start_active_service
 if ! wait_http "${ACTIVE_URL}/health/runtime" "${START_TIMEOUT_SECONDS}" || ! check_model "${ACTIVE_URL}"; then
-  rollback
   exit 1
 fi
 
+DEPLOY_SUCCEEDED=true
 send_progress "pi-imessage 已完成蓝绿切换，切换后真实 LLM 健康检查通过。"
 log "Deployment succeeded"
 

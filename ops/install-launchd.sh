@@ -11,12 +11,17 @@ DOMAIN="gui/$(id -u)"
 LAUNCH_DIR="${HOME}/Library/LaunchAgents"
 SERVICE_PLIST="${LAUNCH_DIR}/${LABEL}.plist"
 WATCHDOG_PLIST="${LAUNCH_DIR}/${WATCHDOG_LABEL}.plist"
+STABLE_WATCHDOG="${IMESSAGE_DIR}/watchdog/pi-imessage-watchdog.sh"
 
 [[ -x "${CURRENT_LINK}/dist/main.js" || -f "${CURRENT_LINK}/dist/main.js" ]] || {
   echo "Missing built immutable release at ${CURRENT_LINK}" >&2
   exit 1
 }
 mkdir -p "${LAUNCH_DIR}" "${IMESSAGE_DIR}/logs" "${IMESSAGE_DIR}/watchdog"
+bash -n "${CURRENT_LINK}/ops/pi-imessage-watchdog.sh"
+cp "${CURRENT_LINK}/ops/pi-imessage-watchdog.sh" "${STABLE_WATCHDOG}.new"
+chmod 755 "${STABLE_WATCHDOG}.new"
+mv "${STABLE_WATCHDOG}.new" "${STABLE_WATCHDOG}"
 
 cat >"${SERVICE_PLIST}.new" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -51,7 +56,7 @@ cat >"${WATCHDOG_PLIST}.new" <<PLIST
   <key>Label</key><string>${WATCHDOG_LABEL}</string>
   <key>ProgramArguments</key><array>
     <string>/bin/bash</string>
-    <string>${CURRENT_LINK}/ops/pi-imessage-watchdog.sh</string>
+    <string>${STABLE_WATCHDOG}</string>
   </array>
   <key>EnvironmentVariables</key><dict>
     <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
@@ -65,10 +70,27 @@ PLIST
 plutil -lint "${WATCHDOG_PLIST}.new" >/dev/null
 mv "${WATCHDOG_PLIST}.new" "${WATCHDOG_PLIST}"
 
+bootstrap_with_retry() {
+  local plist="$1"
+  for delay in 0 1 2 4; do
+    (( delay == 0 )) || sleep "${delay}"
+    launchctl bootstrap "${DOMAIN}" "${plist}" >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
+
+# Never unload a healthy main service during installation. The program path is
+# stable (`releases/current`), so a kickstart picks up the selected release.
+if launchctl print "${DOMAIN}/${LABEL}" >/dev/null 2>&1; then
+  launchctl kickstart -k "${DOMAIN}/${LABEL}"
+else
+  bootstrap_with_retry "${SERVICE_PLIST}"
+fi
+
+# The watchdog is independent of the app release. Reloading only this helper is
+# safe; even if it fails, the main service remains online.
 launchctl bootout "${DOMAIN}/${WATCHDOG_LABEL}" >/dev/null 2>&1 || true
-launchctl bootout "${DOMAIN}/${LABEL}" >/dev/null 2>&1 || true
-launchctl bootstrap "${DOMAIN}" "${SERVICE_PLIST}"
-launchctl bootstrap "${DOMAIN}" "${WATCHDOG_PLIST}"
+bootstrap_with_retry "${WATCHDOG_PLIST}"
 
 for _ in $(seq 1 60); do
   if curl -fsS --max-time 3 http://127.0.0.1:7750/health/runtime >/dev/null 2>&1; then break; fi
