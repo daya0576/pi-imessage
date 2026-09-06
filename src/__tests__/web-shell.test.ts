@@ -26,7 +26,7 @@ for (const [name, data] of Object.entries(fixtures)) {
 	});
 }
 
-it("keeps each source on one collapsed table row without losing evidence details", () => {
+it("keeps each source on one plain table row with a separate details button", () => {
 	const sources = Array.from({ length: 15 }, (_, i) => ({
 		id: `source-${i}`,
 		category: "test",
@@ -47,10 +47,30 @@ it("keeps each source on one collapsed table row without losing evidence details
 		generatedAt: "2026-09-06T00:00:00Z",
 	});
 	expect(html.match(/<tr data-source-id=/g)).toHaveLength(15);
-	expect(html.match(/<td class="name"><details><summary>/g)).toHaveLength(15);
+	expect(html.match(/data-detail-id="source-/g)).toHaveLength(15);
 	expect(html).not.toMatch(/<details[^>]*\sopen(?:\s|>|=)/);
 	expect(html).toContain("private &lt;text&gt;");
 	expect(html).toContain("缺少已验证的采集器");
 	expect(html).toContain("状态证据时间");
-	expect(html).not.toContain("<script>");
+	expect(html).toContain('data-detail-ui="v1"');
+	expect(html).not.toContain("<summary>");
+});
+
+it("uses the same details dialog for planned and paused tasks without changing controls", () => {
+	const html = eta.render("tasks", {
+		tasks: [
+			{ id: "plan", name: "Plan <script>bad</script>", state: "planned", enabled: false },
+			{ id: "paused", name: "Paused", state: "needs_human", paused: true, enabled: true },
+		],
+		runs: [{ taskId: "paused", summary: "Evidence <private>", status: "failed", startedAt: "2026-09-06T00:00:00Z" }],
+	});
+	expect(html.match(/<tr data-task-id=/g)).toHaveLength(2);
+	expect(html.match(/data-detail-id="task-/g)).toHaveLength(2);
+	expect(html).toContain('data-action="resume"');
+	expect(html).toContain("仅规划，不执行");
+	expect(html).toContain("Evidence &lt;private&gt;");
+	expect(html).not.toContain("<summary>");
+	expect(html).not.toContain("<script>bad</script>");
+	expect(html).toContain("document.querySelector('dialog[open]')");
+	expect(html).toContain('data-detail-ui="v1"');
 });

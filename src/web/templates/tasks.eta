@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>blue — tasks</title>
 <style>
-h1,h2,button{font:inherit}h1{margin:0 0 16px}.table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;min-width:700px}th,td{border-bottom:1px solid #292929;padding:10px 12px;text-align:left;vertical-align:top}th{font-weight:normal;opacity:.5;white-space:nowrap}td{white-space:nowrap}.name{width:35%;min-width:180px}.controls{white-space:nowrap;width:1%}button{color:inherit;background:transparent;border:1px solid #444;padding:2px 8px;cursor:pointer}button:disabled,.dim{opacity:.45}.state-healthy{color:#9bbf91}.state-needs_human,.state-failed{color:#dab778}summary{cursor:pointer;list-style-position:outside;margin-left:12px}.details{white-space:normal;min-width:220px;max-width:520px;padding:12px 0 4px;overflow-wrap:anywhere}.details p{margin:0 0 8px}.run{border-top:1px solid #292929;padding:8px 0}.run time{display:block;opacity:.5;font-size:11px}#feedback{min-height:20px;margin:8px 0}.note{font-size:11px;opacity:.4;margin-top:12px}@media(max-width:600px){table{min-width:660px}th,td{padding:9px}.note{max-width:350px}}
+h1,h2,button{font:inherit}h1{margin:0 0 16px}.table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;min-width:700px}th,td{border-bottom:1px solid #292929;padding:10px 12px;text-align:left;vertical-align:top}th{font-weight:normal;opacity:.5;white-space:nowrap}td{white-space:nowrap}.name{width:35%;min-width:180px}.controls{white-space:nowrap;width:1%}button{color:inherit;background:transparent;border:1px solid #444;padding:2px 8px;cursor:pointer}button:disabled,.dim{opacity:.45}.state-healthy{color:#9bbf91}.state-needs_human,.state-failed{color:#dab778}.run{border-top:1px solid #292929;padding:8px 0}.run time{display:block;opacity:.5;font-size:11px}#feedback{min-height:20px;margin:8px 0}.note{font-size:11px;opacity:.4;margin-top:12px}@media(max-width:600px){table{min-width:660px}th,td{padding:9px}.note{max-width:350px}}
 </style>
 <%~ include("shell-style") %>
 </head><body class="page-tasks">
@@ -11,18 +11,20 @@ h1,h2,button{font:inherit}h1{margin:0 0 16px}.table-wrap{overflow-x:auto}table{b
 <% if (!it.tasks.length) { %><tr><td colspan="5" class="dim">尚未配置任务</td></tr><% } %>
 <% it.tasks.forEach(function(task) { const runs=it.runs.filter((run)=>run.taskId===task.id); %>
 <tr data-task-id="<%= task.id %>">
-<td class="name"><details><summary><%= task.name %></summary><div class="details">
+<% const detailBody = capture(() => { %>
 <p><%= runs[0]?.summary || task.reason || '暂无运行记录' %></p>
 <% if(task.blocked) { %><p>尚未确认旧进程退出，恢复前需要人工检查。</p><% } %>
 <p class="dim">通知：<%= task.notification==='accepted'?'发送流程已确认（非已读回执）':task.notification==='pending'?'等待发送确认':'无' %></p>
 <% runs.slice(0,10).forEach(function(run) { %><div class="run"><time><%= fmt(run.startedAt) %> → <%= run.finishedAt?fmt(run.finishedAt):'运行中' %></time><%= labels[run.status]||run.status %> · <%= run.summary %></div><% }) %>
-</div></details></td>
+<% }); %>
+<td class="name"><%= task.name %></td>
 <td class="state-<%= task.state %>"><%= labels[task.state]||task.state %><%= task.paused?' / 暂停':'' %><%= !task.enabled&&task.state!=='planned'?' / 停用':'' %></td>
 <td><%= fmt(task.lastSuccess) %></td><td><%= task.paused||!task.enabled?'—':fmt(task.nextRun) %></td>
-<td class="controls"><% if(task.state==='planned') { %><span class="dim">仅规划，不执行</span><% } else if(task.paused) { %><button data-id="<%= task.id %>" data-action="resume" <%= task.running||task.blocked||!task.enabled?'disabled':'' %>>恢复</button><% } else { %><button data-id="<%= task.id %>" data-action="run" <%= task.running||task.blocked||!task.enabled?'disabled':'' %>>检查</button> <button data-id="<%= task.id %>" data-action="pause">暂停</button><% } %></td>
+<td class="controls"><% if(task.state==='planned') { %><span class="dim">仅规划，不执行</span><% } else if(task.paused) { %><button data-id="<%= task.id %>" data-action="resume" <%= task.running||task.blocked||!task.enabled?'disabled':'' %>>恢复</button><% } else { %><button data-id="<%= task.id %>" data-action="run" <%= task.running||task.blocked||!task.enabled?'disabled':'' %>>检查</button> <button data-id="<%= task.id %>" data-action="pause">暂停</button><% } %> <%~ include("detail-dialog", { detailId: "task-" + task.id, detailTitle: task.name, detailBody }) %></td>
 </tr><% }) %>
-</tbody></table></div><p id="feedback" role="status"></p><p class="note">上海时间 · 点击任务名展开详情与运行记录 · 恢复时重新验证</p></main>
+</tbody></table></div><p id="feedback" role="status"></p><p class="note">上海时间 · 详情与运行记录见右侧 · 恢复时重新验证</p></main>
 <script>
 document.addEventListener('click',async(event)=>{const button=event.target.closest('button[data-action]');if(!button)return;button.disabled=true;const feedback=document.getElementById('feedback');try{const response=await fetch('/tasks/'+encodeURIComponent(button.dataset.id)+'/'+button.dataset.action,{method:'POST',headers:{'Content-Type':'application/json','X-Automation-Action':'1'},body:'{}'});feedback.textContent=response.ok?'已受理，正在刷新状态…':'操作不可用，请检查任务状态。';if(response.ok)setTimeout(()=>location.reload(),500);}catch{feedback.textContent='请求失败，请刷新确认当前状态。';}button.disabled=false;});
-setInterval(()=>{if(!document.querySelector('details[open]'))location.reload();},15000);
-</script></body></html>
+setInterval(()=>{if(!document.querySelector('dialog[open]'))location.reload();},15000);
+</script><%~ include("detail-ui") %>
+</body></html>

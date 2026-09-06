@@ -1,0 +1,5 @@
+<button type="button" class="detail-button" data-detail-id="<%= it.detailId %>" aria-haspopup="dialog" aria-controls="<%= it.detailId %>"><%= it.detailLabel || '详情' %></button>
+<dialog class="detail-dialog" id="<%= it.detailId %>" aria-labelledby="<%= it.detailId %>-title">
+  <header><h2 id="<%= it.detailId %>-title"><%= it.detailTitle %></h2><form method="dialog"><button type="submit" autofocus>关闭</button></form></header>
+  <div class="detail-content"><%~ it.detailBody %></div>
+</dialog>
