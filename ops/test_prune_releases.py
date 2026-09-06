@@ -22,7 +22,7 @@ class PruningTests(unittest.TestCase):
                 os.utime(root / name, (index + 1, index + 1))
             (root / 'current').symlink_to(alias / names[0])
             (root / 'previous').symlink_to(alias / names[1])
-            self.assertEqual(module.plan(alias, alias/'current', alias/'previous'), [root/names[2]])
+            self.assertEqual(module.plan(alias, alias/'current', alias/'previous'), [(root/names[2]).resolve()])
 
     def test_broken_reference_refuses_cleanup(self):
         with tempfile.TemporaryDirectory() as directory:
