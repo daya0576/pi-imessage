@@ -3,6 +3,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Eta } from "eta";
+import type { AutomationRun, AutomationView } from "../automation.js";
 import type { CronJobView, CronRun } from "../cron.js";
 import type { Reminder } from "../reminders.js";
 import { isReplyEnabled } from "../settings.js";
@@ -88,6 +89,10 @@ export interface ScheduledPageData {
 
 export function renderScheduledPage(data: ScheduledPageData): string {
 	return eta.render("scheduled", data);
+}
+
+export function renderTasksPage(data: { tasks: AutomationView[]; runs: AutomationRun[] }): string {
+	return eta.render("tasks", data);
 }
 
 export interface ChatMemory {

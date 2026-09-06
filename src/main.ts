@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createAgentManager } from "./agent.js";
+import { createAutomationService } from "./automation.js";
 import { type CronJobConfig, createCronService } from "./cron.js";
 import { createIMessageBot } from "./imessage.js";
 import { createAppLogger, createDigestLogger } from "./logger.js";
@@ -114,6 +115,14 @@ async function main() {
 	}
 
 	const cron = createCronService({ workingDir, execute: executeCronJob });
+	const automation = createAutomationService({
+		workingDir,
+		notify: async (chatGuid, text) => {
+			echoFilter.remember(chatGuid, text);
+			// Existing text sender resolves on submission; it does not verify delivery.
+			await sender.sendMessage(chatGuid, text);
+		},
+	});
 	const web = webEnabled
 		? createWebServer({
 				workingDir,
@@ -127,6 +136,7 @@ async function main() {
 				checkModelHealth,
 				reminders,
 				cron,
+				automation,
 			})
 		: null;
 
@@ -137,6 +147,7 @@ async function main() {
 		bot.start();
 		reminders.start();
 		cron.start();
+		automation.start();
 	}
 	if (web) web.start();
 
@@ -148,9 +159,9 @@ async function main() {
 		if (workerEnabled) {
 			watcher.stop();
 			bot.stop();
-			await Promise.all([reminders.stop(), cron.stop()]);
+			await Promise.all([reminders.stop(), cron.stop(), automation.stop()]);
 		}
-		await web?.stop();
+		await Promise.all([web?.stop(), automation.stop()]);
 		digestLogger.close();
 		appLogger.close();
 		console.log("[sid] Shutdown complete");

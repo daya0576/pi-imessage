@@ -4,6 +4,7 @@ import { existsSync, readFileSync, readdirSync, watch } from "node:fs";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
 import { join } from "node:path";
 import { type AgentManager, resolveSessionStorage } from "../agent.js";
+import type { AutomationService } from "../automation.js";
 import type { CronService } from "../cron.js";
 import type { ModelHealthChecker } from "../model-health.js";
 import { REMINDER_STATUSES, type ReminderService, type ReminderStatus } from "../reminders.js";
@@ -11,6 +12,7 @@ import type { SelfEchoFilter } from "../self-echo.js";
 import type { MessageSender } from "../send.js";
 import type { Settings } from "../settings.js";
 import type { AgentReply } from "../types.js";
+import { handleAutomationRequest } from "./automation.js";
 import { getChatBlocks } from "./data.js";
 import { type ChatMemory, renderLogsPage, renderMemoryPage, renderPage, renderScheduledPage } from "./render.js";
 
@@ -26,6 +28,7 @@ export interface WebServerConfig {
 	checkModelHealth: ModelHealthChecker;
 	reminders: ReminderService;
 	cron: CronService;
+	automation?: AutomationService;
 }
 
 export interface WebServer {
@@ -139,6 +142,7 @@ export function createWebServer(config: WebServerConfig): WebServer {
 	}
 
 	async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+		if (await handleAutomationRequest(request, response, config.automation)) return;
 		const url = new URL(request.url ?? "/", `http://localhost:${port}`);
 
 		// SSE

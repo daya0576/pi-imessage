@@ -30,6 +30,7 @@ button:hover { border-color: #777; color: #ddd }
 <nav>
   <a href="/">Recent Chats</a>
   <a href="/scheduled" class="active">Scheduled</a>
+  <a href="/tasks">Tasks</a>
   <a href="/logs">Logs</a>
   <a href="/memory">Memory</a>
 </nav>
