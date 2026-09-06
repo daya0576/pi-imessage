@@ -183,6 +183,7 @@ export function createAutomationService(config: {
 	const schedules = new Map<string, Cron>();
 	let started = false;
 	let closed = false;
+	let workerLock: Database.Database | undefined;
 	let retryTimer: ReturnType<typeof setInterval> | undefined;
 	let sending: Promise<void> | undefined;
 	const row = (id: string) => db.prepare("SELECT * FROM tasks WHERE id=?").get(id) as TaskRow;
@@ -391,6 +392,17 @@ export function createAutomationService(config: {
 			if (started) return;
 			if (closed) throw new Error("Automation service closed");
 			if (process.platform === "win32") throw new Error("Automation requires POSIX process groups");
+			// Separate SQLite transaction is an OS-backed lifetime lock; it cannot leave
+			// stale PID files, and does not block reads/writes of the task database.
+			const lock = new Database(join(directory, "worker-lock.db"));
+			try {
+				lock.pragma("busy_timeout = 0");
+				lock.exec("BEGIN EXCLUSIVE");
+				workerLock = lock;
+			} catch {
+				lock.close();
+				throw new Error("Another automation worker owns this workspace");
+			}
 			started = true;
 			// Do not kill persisted PIDs (PID reuse). Interrupted checks require manual verification.
 			for (const interrupted of db.prepare("SELECT id,taskId,pid FROM runs WHERE status='running'").all() as {
@@ -443,6 +455,8 @@ export function createAutomationService(config: {
 			await Promise.all([...active.values()].map((run) => run.done));
 			await sending;
 			db.close();
+			workerLock?.close();
+			workerLock = undefined;
 		},
 		list() {
 			return jobs.map((job) => {

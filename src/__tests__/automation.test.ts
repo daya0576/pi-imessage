@@ -258,3 +258,14 @@ it("queues an opted-in Shanghai daily digest once across restarts", async () => 
 	await new Promise((r) => setTimeout(r, 100));
 	expect(notify).toHaveBeenCalledTimes(1);
 });
+
+it("refuses a second active worker and releases ownership after shutdown", async () => {
+	const { service, workingDir } = fixture();
+	const second = createAutomationService({ workingDir });
+	services.push(second);
+	expect(() => second.start()).toThrow("Another automation worker");
+	await service.stop();
+	expect(() => second.start()).not.toThrow();
+	second.action("check", "run");
+	expect((await finished(second)).status).toBe("healthy");
+});
