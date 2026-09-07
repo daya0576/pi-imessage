@@ -232,10 +232,7 @@ DEPLOY_SUCCEEDED=true
 send_progress "pi-imessage 已完成蓝绿切换，切换后真实 LLM 健康检查通过。"
 log "Deployment succeeded"
 
-# Keep current, previous, and the newest spare release; remove older immutable builds.
-CURRENT_REAL="$(realpath "${CURRENT_LINK}")"
-PREVIOUS_REAL="$(realpath "${PREVIOUS_LINK}" 2>/dev/null || true)"
-while IFS= read -r stale; do
-  [[ "${stale}" == "${CURRENT_REAL}" || "${stale}" == "${PREVIOUS_REAL}" ]] && continue
-  rm -rf "${stale}"
-done < <(find "${RELEASE_ROOT}" -maxdepth 1 -type d -name 'pi-imessage-*' -print | sort -r | tail -n +4)
+# Resolve every candidate and reference through the same filesystem namespace.
+# Cleanup is fail-closed and best-effort, never a reason to damage a healthy release.
+/usr/bin/python3 "${SCRIPT_DIR}/prune-releases.py" "${RELEASE_ROOT}" "${CURRENT_LINK}" "${PREVIOUS_LINK}" --apply \
+  || log "Release cleanup skipped; retained builds for operator review"
