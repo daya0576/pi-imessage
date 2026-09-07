@@ -28,7 +28,9 @@ export type StartTask = (
 	chat: ChatContext,
 	incoming: IncomingMessage,
 	outgoing: OutgoingMessage,
-	emit: EmitFn
+	emit: EmitFn,
+	/** Release control-command admission after synchronous fencing, before cancellation/delivery settlement. */
+	admitted?: () => void
 ) => Promise<void>;
 
 export type EndTask = (chat: ChatContext, outgoing: OutgoingMessage) => Promise<OutgoingMessage> | OutgoingMessage;
@@ -37,7 +39,7 @@ export interface MessagePipeline {
 	before(task: BeforeTask): void;
 	start(task: StartTask): void;
 	end(task: EndTask): void;
-	process(incoming: IncomingMessage): Promise<OutgoingMessage>;
+	process(incoming: IncomingMessage, admitted?: () => void): Promise<OutgoingMessage>;
 	processBatch(incoming: IncomingMessage[]): Promise<void>;
 }
 
@@ -68,7 +70,11 @@ export function createMessagePipeline(): MessagePipeline {
 		return outgoing;
 	}
 
-	async function run(incoming: IncomingMessage, outgoing: OutgoingMessage): Promise<OutgoingMessage> {
+	async function run(
+		incoming: IncomingMessage,
+		outgoing: OutgoingMessage,
+		admitted?: () => void
+	): Promise<OutgoingMessage> {
 		const chat = toChatContext(incoming);
 		// emit() is sync — queues end tasks onto endChain for serialized execution
 		let endChain = Promise.resolve();
@@ -81,7 +87,7 @@ export function createMessagePipeline(): MessagePipeline {
 		};
 		try {
 			for (const task of startTasks) {
-				await task(chat, incoming, outgoing, emit);
+				await task(chat, incoming, outgoing, emit, admitted);
 				if (!outgoing.shouldContinue) break;
 			}
 		} finally {
@@ -92,9 +98,14 @@ export function createMessagePipeline(): MessagePipeline {
 		return outgoing;
 	}
 
-	async function process(incoming: IncomingMessage): Promise<OutgoingMessage> {
-		const outgoing = await prepare(incoming);
-		return outgoing.shouldContinue ? run(incoming, outgoing) : outgoing;
+	async function process(incoming: IncomingMessage, admitted?: () => void): Promise<OutgoingMessage> {
+		try {
+			const outgoing = await prepare(incoming);
+			return outgoing.shouldContinue ? await run(incoming, outgoing, admitted) : outgoing;
+		} finally {
+			// Dropped/invalid commands and failures must also release admission.
+			admitted?.();
+		}
 	}
 
 	async function processBatch(messages: IncomingMessage[]): Promise<void> {

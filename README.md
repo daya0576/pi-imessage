@@ -106,16 +106,18 @@ The agent is aware of these endpoints via its system prompt and can use them as 
 
 ## Commands
 
+`/goal <objective>` starts bounded work in the normal chat session. `/goal` or `/goal status` shows live state without a model call, even while busy. `/goal pause`, `/goal resume`, and `/goal clear` control it. The fixed lifetime budget is **4 outer prompt calls** (not SDK tool turns or tokens); resume never renews it. Restart never automatically resumes. See [goal semantics and limitations](docs/goals.md). Source support is not a claim that a running deployment has been updated.
+
 Send these as iMessage to interact with the bot:
 
 | Command | Description | Example Reply |
 |---|---|---|
 | `/help` | List available slash commands | `Commands:`<br>`/help — list commands` |
-| `/new` | Cancel safely, then start a fresh conversation | `新会话已创建，原请求不会自动恢复。` |
+| `/new` | Cancel safely, start a fresh conversation, keep the old goal paused for inspection | `新会话已创建，旧目标保留为暂停；原请求不会自动恢复。` |
 | `/status` | Show session stats: tokens, context, model | `💬 3 msgs - ↑7.2k ↓505 1.1%/128k`<br>`🤖 anthropic/claude-sonnet-4 • 💭 minimal` |
 | `/compact` | Compress context; start/end notices, no replay of prior work | `开始压缩上下文。` / `压缩完成。` |
-| `/stop` | Abort the current request; preserve later queued inputs until cancellation settles | `已停止，原请求不会自动恢复。` |
-| `/reload` | Reload models and clear all sessions | `✓ Models reloaded` |
+| `/stop` | Abort current work and pause the goal; retain later queued inputs until cancellation settles | `已停止当前执行并暂停目标；普通消息不会自动恢复目标。` |
+| `/reload` | Cancel safely, pause the goal, reload this chat model under ownership | `模型已重新加载，目标已暂停；需显式 /goal resume。` |
 
 ## Settings (`WORKING_DIR/settings.json`)
 

@@ -11,6 +11,7 @@ import { createAutomationNotifier } from "./automation-send.js";
 import { createAutomationService } from "./automation.js";
 import { createBackgroundService } from "./background.js";
 import { type CronJobConfig, createCronService } from "./cron.js";
+import { createGoalController } from "./goal.js";
 import { createIMessageBot } from "./imessage.js";
 import { createAppLogger, createDigestLogger } from "./logger.js";
 import { createModelHealthChecker } from "./model-health.js";
@@ -67,12 +68,13 @@ async function main() {
 			return summary.trim();
 		},
 	});
-	const agent = await createAgentManager({ workingDir, background });
+	const goals = createGoalController(workingDir);
+	const agent = await createAgentManager({ workingDir, background, goals });
 	const checkModelHealth = createModelHealthChecker(workingDir);
 	const store = createChatStore({ workingDir });
 	const queue = createAsyncQueue<IncomingMessage>(join(workingDir, "queue.json"));
 	const watcher = createWatcher({ queue });
-	const bot = createIMessageBot({ queue, agent, sender, echoFilter, store, getSettings, digestLogger });
+	const bot = createIMessageBot({ queue, agent, goals, sender, echoFilter, store, getSettings, digestLogger });
 	const reminders = createReminderService({
 		workingDir,
 		deliver: async (reminder) => {

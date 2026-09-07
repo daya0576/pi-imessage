@@ -44,13 +44,26 @@ export function joinTextBatch(batch: readonly IncomingMessage[]): IncomingMessag
 }
 
 /** No debounce: start idle chats immediately, coalesce only pending messages. */
-export function createMessageBatchQueue(process: (batch: IncomingMessage[]) => Promise<void>) {
+export function createMessageBatchQueue(
+	process: (batch: IncomingMessage[]) => Promise<void>,
+	idle?: (chatGuid: string) => Promise<boolean>
+) {
 	type Entry = { message: IncomingMessage; boundary: number };
-	type State = { pending: Entry[]; boundary: number };
+	type State = { pending: Entry[]; boundary: number; wakeRequested: boolean };
 	const chats = new Map<string, State>();
 
 	async function drain(chatGuid: string, state: State): Promise<void> {
-		while (state.pending.length > 0) {
+		while (true) {
+			if (state.pending.length === 0) {
+				if (!idle) break;
+				// Consume earlier wakes, retaining any new wake arriving during idle delivery.
+				state.wakeRequested = false;
+				const again = await idle(chatGuid);
+				if (state.pending.length === 0) {
+					if (again || state.wakeRequested) continue;
+					break;
+				}
+			}
 			const first = state.pending.shift();
 			if (!first) break;
 			const batch = [first.message];
@@ -70,13 +83,25 @@ export function createMessageBatchQueue(process: (batch: IncomingMessage[]) => P
 	}
 
 	return {
+		wake(chatGuid: string): void {
+			const existing = chats.get(chatGuid);
+			if (existing) {
+				if (!existing.wakeRequested)
+					console.log(`[batch] retained wake for ${chatGuid}; active drain will recheck idle work`);
+				existing.wakeRequested = true;
+				return;
+			}
+			const state: State = { pending: [], boundary: 0, wakeRequested: false };
+			chats.set(chatGuid, state);
+			void drain(chatGuid, state);
+		},
 		enqueue(message: IncomingMessage): void {
 			const existing = chats.get(message.chatGuid);
 			if (existing) {
 				existing.pending.push({ message, boundary: existing.boundary });
 				return;
 			}
-			const state: State = { pending: [{ message, boundary: 0 }], boundary: 0 };
+			const state: State = { pending: [{ message, boundary: 0 }], boundary: 0, wakeRequested: false };
 			chats.set(message.chatGuid, state);
 			void drain(message.chatGuid, state);
 		},

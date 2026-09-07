@@ -54,10 +54,11 @@ function formatIncomingTarget(chat: ChatContext, incoming: IncomingMessage): str
 const HELP_TEXT = [
 	"Commands:",
 	"/help — list commands",
+	"/goal <目标> — 开始目标（最多 4 轮）；/goal [status|pause|resume|clear]",
 	"/new — reset this chat session",
 	"/status — show session stats",
 	"/compact [instructions] — compress session context",
-	"/stop — stop the current agent run",
+	"/stop — 停止当前执行并暂停目标；普通消息不会恢复",
 	"/reload — reload model settings for this chat",
 	"/thinking <level|default> — set thinking for this chat only",
 ].join("\n");
@@ -287,7 +288,7 @@ export function createCommandHandlerTask(
 	agent: AgentManager,
 	hasQueuedInput?: (chatGuid: string) => boolean
 ): StartTask {
-	return async (chat, incoming, outgoing, emit) => {
+	return async (chat, incoming, outgoing, emit, admitted) => {
 		const text = incoming.text?.trim();
 
 		if (text === "/help") {
@@ -299,9 +300,13 @@ export function createCommandHandlerTask(
 
 		if (text === "/new" || text === "/stop") {
 			try {
-				if (text === "/new") await agent.newSession(chat.chatGuid);
-				else await agent.stop(chat.chatGuid);
-				const replyText = text === "/new" ? "新会话已创建，原请求不会自动恢复。" : "已停止，原请求不会自动恢复。";
+				const cancellation = text === "/new" ? agent.newSession(chat.chatGuid) : agent.stop(chat.chatGuid);
+				admitted?.();
+				await cancellation;
+				const replyText =
+					text === "/new"
+						? "新会话已创建，旧目标保留为暂停；原请求不会自动恢复。"
+						: "已停止当前执行并暂停目标；普通消息不会自动恢复目标。";
 				console.log(`[sid] ${text} cancellation settled`);
 				emit({ ...outgoing, reply: { type: "message", text: replyText } });
 				if (text === "/new") {
@@ -363,9 +368,11 @@ export function createCommandHandlerTask(
 		}
 
 		if (text === "/reload") {
-			await agent.reload(chat.chatGuid);
+			const reloading = agent.reload(chat.chatGuid);
+			admitted?.();
+			await reloading;
 			const statusReply = await agent.getSessionStatus(chat.chatGuid);
-			const replyText = `✓ Models reloaded\n${statusReply}`;
+			const replyText = `模型已重新加载，目标已暂停；需显式 /goal resume。\n${statusReply}`;
 			console.log(`[sid] /reload command: ${chat.chatGuid} → ${replyText}`);
 			emit({ ...outgoing, reply: { type: "message", text: replyText } });
 			outgoing.shouldContinue = false;
