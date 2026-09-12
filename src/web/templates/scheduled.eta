@@ -13,6 +13,7 @@ th { opacity: .4; font-weight: normal; white-space: nowrap }
 .bad { color: #c47f7f }
 .running { color: #c7b477 }
 .action { max-width: 420px; white-space: pre-wrap; word-break: break-word }
+.action-preview { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; line-height: 1.6; max-height: 4.8em; overflow: hidden; overflow-wrap: anywhere }
 button { background: none; border: 1px solid #333; color: #aaa; font: 12px monospace; padding: 2px 7px; cursor: pointer; margin-right: 4px }
 button:hover { border-color: #777; color: #ddd }
 .empty { padding: 14px; background: #1a1a1a; opacity: .35 }
@@ -37,7 +38,7 @@ button:hover { border-color: #777; color: #ddd }
           <td><%= job.name || job.id %><br><span class="dim"><%= job.enabled ? 'enabled' : 'paused' %><%= job.running ? ' / running' : '' %></span></td>
           <td><%= job.schedule %><br><span class="dim"><%= job.timezone %></span></td>
           <td><%= job.nextRunAt || '—' %></td>
-          <td class="action"><%= JSON.stringify(job.action) %></td>
+          <td class="action"><div class="action-preview" title="<%= JSON.stringify(job.action) %>"><%= JSON.stringify(job.action) %></div></td>
           <td class="<%= job.lastRun && job.lastRun.status === 'success' ? 'good' : job.lastRun ? 'bad' : 'dim' %>">
             <%= job.lastRun ? job.lastRun.status : 'never' %><br>
             <span class="dim"><%= job.lastRun ? job.lastRun.finishedAt || job.lastRun.startedAt : '' %></span>
