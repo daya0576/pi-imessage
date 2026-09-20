@@ -39,7 +39,7 @@ it("shows the full categorized catalog without claiming configured or healthy so
 	const root = fixture();
 	const data = readSources(root, now);
 	expect(data.categories).toHaveLength(10);
-	expect(data.sources).toHaveLength(15);
+	expect(data.sources).toHaveLength(8);
 	expect(data.sources.every((source) => source.state === "unknown" && source.phase === "not_configured")).toBe(true);
 	put(root, "skills/immich/SKILL.md", "installed");
 	expect(readSources(root, now).sources.find((source) => source.id === "immich")).toMatchObject({
