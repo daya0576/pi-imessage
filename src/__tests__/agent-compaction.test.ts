@@ -136,9 +136,22 @@ class FakeSession {
 }
 vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
 	...(await importOriginal<typeof CodingAgent>()),
-	ModelRuntime: { create: async () => ({}) },
-	SettingsManager: { create: () => ({ applyOverrides() {}, getDefaultThinkingLevel: () => "high" }) },
-	SessionManager: { open: () => ({}) },
+	ModelRuntime: {
+		create: async () => ({
+			refresh: async () => {},
+			getModel: () => ({ provider: "openai-codex", id: "gpt-6-astra" }),
+			hasConfiguredAuth: () => true,
+		}),
+	},
+	SettingsManager: {
+		create: () => ({
+			applyOverrides() {},
+			getDefaultProvider: () => undefined,
+			getDefaultModel: () => undefined,
+			getDefaultThinkingLevel: () => "high",
+		}),
+	},
+	SessionManager: { open: () => ({ buildSessionContext: () => ({ messages: [] }) }) },
 	DefaultResourceLoader: class {
 		async reload() {}
 		getExtensions() {
@@ -201,16 +214,15 @@ describe("production compaction routing and deadline", () => {
 		await flush();
 		const next = manager.processMessage({ ...message, text: "Later input" }, receive, { ephemeral: false });
 		await vi.advanceTimersByTimeAsync(180000);
-		expect(replies).toHaveLength(2);
+		// Process-narration notices are suppressed; only the real final reply is delivered.
+		expect(replies).toHaveLength(1);
 		expect(replies[0]).toBe("Synthetic final");
 		expect(control.sessions[0].abort).not.toHaveBeenCalled();
 		control.mode = "plain";
 		control.sessions[0].release();
 		await first;
 		await next;
-		expect(replies[2]).toContain("接下来处理排队的新输入");
-		expect(replies.filter((text) => text === "Synthetic final")).toHaveLength(1);
-		expect(replies[3]).toBe("Queued final");
+		expect(replies).toEqual(["Synthetic final", "Queued final"]);
 		expect(control.sessions[0].prompt).toHaveBeenCalledTimes(2);
 	});
 	it.each(["pre", "overflow"] as const)(
@@ -222,11 +234,8 @@ describe("production compaction routing and deadline", () => {
 			await flush();
 			control.sessions[0].release();
 			await pending;
-			expect(replies).toEqual([
-				"开始压缩上下文，原请求等待中。",
-				"压缩完成。继续原来未完成的请求。",
-				"Synthetic final",
-			]);
+			// Compaction narration is suppressed; only the real final reply remains.
+			expect(replies).toEqual(["Synthetic final"]);
 			expect(control.sessions[0].prompt).toHaveBeenCalledTimes(1);
 			expect(control.sessions[0].continueCount).toBe(1);
 			expect(control.sessions[0].writes).toBe(mode === "overflow" ? 1 : 0);
@@ -243,8 +252,8 @@ describe("production compaction routing and deadline", () => {
 		await vi.advanceTimersByTimeAsync(180000);
 		control.sessions[0].release();
 		await pending;
-		expect(replies.filter((text) => text.startsWith("开始压缩"))).toHaveLength(1);
-		expect(replies.filter((text) => text.startsWith("压缩完成"))).toHaveLength(1);
+		expect(replies.filter((text) => text.startsWith("开始压缩"))).toHaveLength(0);
+		expect(replies.filter((text) => text.startsWith("压缩完成"))).toHaveLength(0);
 		expect(control.sessions[0].compact).toHaveBeenCalledTimes(1);
 		expect(control.sessions[0].abort).not.toHaveBeenCalled();
 	});
@@ -264,7 +273,8 @@ describe("production compaction routing and deadline", () => {
 			expect(session.writes).toBe(1);
 			expect(session.prompt.mock.calls.length).toBeLessThanOrEqual(2);
 			expect(replies.join(" ")).not.toContain("PRIVATE");
-			expect(replies.join(" ")).toContain("原请求已暂停");
+			// Pause narration is suppressed; the safety behavior (no replay) is asserted below.
+			expect(replies.join(" ")).not.toContain("原请求已暂停");
 			await next;
 			expect(session.prompt).toHaveBeenCalledTimes(2);
 			expect(replies).toContain("Queued final");
@@ -281,15 +291,15 @@ describe("production compaction routing and deadline", () => {
 		await pending;
 		expect(session.prompt).toHaveBeenCalledTimes(1);
 		expect(manager.getRuntimeStatus().sessions).toBe(1);
-		expect(replies[2]).toContain("压缩超时");
+		expect(replies.join(" ")).not.toContain("压缩超时");
 		expect(replies.join(" ")).not.toContain("已中止当前会话");
 		control.mode = "plain";
 		session.release();
 		await next;
 		expect(session.prompt).toHaveBeenCalledTimes(2);
 		expect(replies.filter((text) => text.startsWith("压缩完成"))).toHaveLength(0);
-		expect(replies.filter((text) => text.startsWith("取消处理已结束"))).toHaveLength(1);
-		expect(replies[replies.length - 2]).toContain("不会重做");
+		expect(replies.filter((text) => text.startsWith("取消处理已结束"))).toHaveLength(0);
+		expect(replies).toContain("Queued final");
 	});
 	it.each(["stop", "new"] as const)(
 		"/%s cancels preflight, suppresses stale callbacks and does not resurrect work",
@@ -307,7 +317,7 @@ describe("production compaction routing and deadline", () => {
 				listener({ type: "compaction_end", reason: "threshold", result, aborted: false, willRetry: true });
 			await flush();
 			expect(replies).toHaveLength(before);
-			expect(replies).toContain("压缩已请求取消，不再继续原请求；确认结束前暂停处理。");
+			expect(replies).not.toContain("压缩已请求取消，不再继续原请求；确认结束前暂停处理。");
 			expect(old.continueCount).toBe(0);
 			expect(old.prompt).toHaveBeenCalledTimes(1);
 		}
@@ -457,12 +467,8 @@ describe("production compaction routing and deadline", () => {
 		await Promise.all([first, before, during]);
 		expect(session.continueCount).toBe(0);
 		expect(session.prompt).toHaveBeenCalledTimes(3);
-		expect(replies.filter((text) => text.startsWith("取消处理已结束"))).toHaveLength(1);
-		expect(replies.slice(-3)).toEqual([
-			"取消处理已结束；原请求已停止，不会自动恢复。接下来处理排队的新输入。",
-			"Queued final",
-			"Queued final",
-		]);
+		expect(replies.filter((text) => text.startsWith("取消处理已结束"))).toHaveLength(0);
+		expect(replies.slice(-2)).toEqual(["Queued final", "Queued final"]);
 	});
 
 	it("reserves /new ownership through delayed replacement and routes all accepted input to the replacement", async () => {

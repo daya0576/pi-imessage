@@ -115,6 +115,5 @@ async function toggleJob(id, enabled) {
 }
 const es = new EventSource('/events');
 es.addEventListener('update', () => location.reload());
-setInterval(() => location.reload(), 30000);
 </script>
 </body></html>

@@ -164,7 +164,13 @@ export function createIMessageBot(config: IMessageBotConfig) {
 					if (messages.length > 1) {
 						console.log(`[batch] ${messages[0].chatGuid}: merged ${messages.length} pending text messages`);
 					}
-					await pipeline.processBatch(messages);
+					try {
+						await pipeline.processBatch(messages);
+					} finally {
+						// Ack whether processing succeeded or failed-closed: the batch queue does not
+						// retry in-process, so leaving it unacked would replay forever across restarts.
+						for (const message of messages) queue.ack(message);
+					}
 				},
 				async (chatGuid) => {
 					const chat = chats.get(chatGuid);
@@ -214,8 +220,15 @@ export function createIMessageBot(config: IMessageBotConfig) {
 						});
 						// Keep preflight/fencing in input order, not SDK cancellation or send settlement.
 						void pipeline.process(msg, admit).then(
-							() => batches.wake(msg.chatGuid),
-							(error: unknown) => console.error("[sid] control command settlement failed", error)
+							() => {
+								queue.ack(msg);
+								batches.wake(msg.chatGuid);
+							},
+							(error: unknown) => {
+								// Control command settled (failed closed); do not replay it on restart.
+								queue.ack(msg);
+								console.error("[sid] control command settlement failed", error);
+							}
 						);
 						await admission;
 						console.log(

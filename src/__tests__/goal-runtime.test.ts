@@ -134,7 +134,11 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
 	...(await importOriginal<typeof CodingAgent>()),
 	getAgentDir: () => "/fictional-sdk-no-auth",
 	ModelRuntime: {
-		create: async () => ({ refresh: async () => {}, getModel: () => ({ provider: "mock", id: "fictional" }) }),
+		create: async () => ({
+			refresh: async () => {},
+			hasConfiguredAuth: () => true,
+			getModel: () => ({ provider: "mock", id: "fictional" }),
+		}),
 	},
 	SettingsManager: {
 		create: () => ({
@@ -144,7 +148,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
 			getDefaultModel: () => "fictional",
 		}),
 	},
-	SessionManager: { open: () => ({}) },
+	SessionManager: { open: () => ({ buildSessionContext: () => ({ messages: [] }) }) },
 	DefaultResourceLoader: vi.fn((options: DefaultResourceLoaderOptions) => new FakeLoader(options)),
 	createAgentSession: async ({ resourceLoader }: { resourceLoader: FakeLoader }) => {
 		const session = new FakeSession(resourceLoader);

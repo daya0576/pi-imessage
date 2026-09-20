@@ -303,15 +303,16 @@ export function createCommandHandlerTask(
 				const cancellation = text === "/new" ? agent.newSession(chat.chatGuid) : agent.stop(chat.chatGuid);
 				admitted?.();
 				await cancellation;
-				const replyText =
-					text === "/new"
-						? "新会话已创建，旧目标保留为暂停；原请求不会自动恢复。"
-						: "已停止当前执行并暂停目标；普通消息不会自动恢复目标。";
-				console.log(`[sid] ${text} cancellation settled`);
-				emit({ ...outgoing, reply: { type: "message", text: replyText } });
 				if (text === "/new") {
+					console.log("[sid] /new cancellation settled; sending session status only");
 					const statusReply = await agent.getSessionStatus(chat.chatGuid);
 					emit({ ...outgoing, reply: { type: "message", text: statusReply } });
+				} else {
+					console.log("[sid] /stop cancellation settled");
+					emit({
+						...outgoing,
+						reply: { type: "message", text: "已停止当前执行并暂停目标；普通消息不会自动恢复目标。" },
+					});
 				}
 			} catch {
 				console.log(`[sid] ${text} cancellation unconfirmed; original request remains stopped`);
@@ -372,9 +373,8 @@ export function createCommandHandlerTask(
 			admitted?.();
 			await reloading;
 			const statusReply = await agent.getSessionStatus(chat.chatGuid);
-			const replyText = `模型已重新加载，目标已暂停；需显式 /goal resume。\n${statusReply}`;
-			console.log(`[sid] /reload command: ${chat.chatGuid} → ${replyText}`);
-			emit({ ...outgoing, reply: { type: "message", text: replyText } });
+			console.log(`[sid] /reload settled; sending session status only: ${chat.chatGuid}`);
+			emit({ ...outgoing, reply: { type: "message", text: statusReply } });
 			outgoing.shouldContinue = false;
 			return;
 		}

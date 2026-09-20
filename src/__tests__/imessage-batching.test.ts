@@ -103,7 +103,7 @@ describe("actual bot pipeline with busy batching", () => {
 			expect(f.processMessage).toHaveBeenCalledTimes(1);
 			await waitForPulls();
 			f.release();
-			await vi.waitFor(() => expect(f.sender.sendMessage).toHaveBeenCalledTimes(5));
+			await vi.waitFor(() => expect(f.sender.sendMessage).toHaveBeenCalledTimes(4));
 			expect(f.agent.newSession).toHaveBeenCalledOnce();
 			expect(f.processMessage.mock.calls.map(([m]) => m.text)).toEqual(["busy", "before", "after"]);
 		} finally {

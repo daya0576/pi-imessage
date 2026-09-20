@@ -178,19 +178,15 @@ it("sends final once, survives actual SDK post-answer compaction beyond 120s, an
 		queue.push(message);
 		await vi.waitFor(() => expect(control.events).toContain("compaction_start"));
 		expect(control.events.indexOf("compaction_start")).toBeGreaterThan(control.events.indexOf("agent_end"));
-		expect(sent).toEqual(["Synthetic final", "开始压缩上下文；本轮回复已完成，不会重做。"]);
+		// Compaction narration is suppressed; only the real final reply is sent.
+		expect(sent).toEqual(["Synthetic final"]);
 		queue.push({ ...message, text: "Later synthetic input" });
 		await vi.advanceTimersByTimeAsync(180000);
 		expect(control.session?.abort).not.toHaveBeenCalled();
 		expect(control.session?.prompt).toHaveBeenCalledTimes(1);
 		release();
 		await vi.waitFor(() => expect(sent).toContain("Queued final"));
-		expect(sent).toEqual([
-			"Synthetic final",
-			"开始压缩上下文；本轮回复已完成，不会重做。",
-			"压缩完成。本轮回复已完成，不会重做；接下来处理排队的新输入。",
-			"Queued final",
-		]);
+		expect(sent).toEqual(["Synthetic final", "Queued final"]);
 		expect(control.calls).toBe(2);
 		expect(control.session?.prompt).toHaveBeenCalledTimes(2);
 	} finally {

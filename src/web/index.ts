@@ -8,6 +8,7 @@ import { type AgentManager, resolveSessionStorage } from "../agent.js";
 import type { AutomationService } from "../automation.js";
 import type { CronService } from "../cron.js";
 import type { ModelHealthChecker } from "../model-health.js";
+import { allowsNightlyReset, createNightlyReset } from "../nightly-reset.js";
 import { REMINDER_STATUSES, type ReminderService, type ReminderStatus } from "../reminders.js";
 import type { SelfEchoFilter } from "../self-echo.js";
 import type { MessageSender } from "../send.js";
@@ -81,6 +82,9 @@ export function createWebServer(config: WebServerConfig): WebServer {
 		reminders,
 		cron,
 	} = config;
+	const nightlyReset = agent.getRuntimeStatus
+		? createNightlyReset(workingDir, { newSession: agent.newSession, getRuntimeStatus: agent.getRuntimeStatus })
+		: undefined;
 	const sseClients = new Set<ServerResponse>();
 	let fsWatcher: ReturnType<typeof watch> | null = null;
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -131,6 +135,36 @@ export function createWebServer(config: WebServerConfig): WebServer {
 		if (handleSourcesRequest(request, response, workingDir)) return;
 		if (await handleAutomationRequest(request, response, config.automation)) return;
 		const url = new URL(request.url ?? "/", `http://localhost:${port}`);
+
+		if (url.pathname === "/maintenance/nightly-reset") {
+			if (
+				!allowsNightlyReset(request.socket.remoteAddress, request.headers.origin, request.headers["x-session-reset"])
+			) {
+				jsonResponse(response, 403, { error: "Local maintenance only" });
+				return;
+			}
+			if (!nightlyReset || process.env.WORKER_ENABLED === "false") {
+				jsonResponse(response, 503, { error: "Session reset unavailable on an inactive worker" });
+				return;
+			}
+			try {
+				if (request.method === "GET") {
+					const receipt = nightlyReset.inspect(url.searchParams.get("runId") ?? "");
+					jsonResponse(response, receipt ? 200 : 404, receipt ?? { error: "No receipt" });
+				} else if (request.method === "POST") {
+					const body = await parseJsonBody(request);
+					if (typeof body.runId !== "string") throw new Error("runId required");
+					const receipt = await nightlyReset.reset(body.runId);
+					jsonResponse(response, receipt.status === "completed" ? 200 : 409, receipt);
+				} else {
+					jsonResponse(response, 405, { error: "Method not allowed" });
+				}
+			} catch {
+				console.error("[nightly-reset] request failed; inspect durable receipt, do not replay");
+				jsonResponse(response, 409, { error: "Reset unconfirmed; inspect receipt before further action" });
+			}
+			return;
+		}
 
 		// SSE
 		if (url.pathname === "/events") {

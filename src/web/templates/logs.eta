@@ -59,6 +59,5 @@ async function refreshLogs() {
 initScroll();
 const es = new EventSource('/events');
 es.addEventListener('update', refreshLogs);
-setInterval(refreshLogs, 3000);
 </script>
 </body></html>

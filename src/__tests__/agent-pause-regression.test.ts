@@ -19,6 +19,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 		ModelRuntime: {
 			create: async () => ({
 				refresh: async () => {},
+				hasConfiguredAuth: () => true,
 				getModel: () => ({ provider: "test", id: "test", contextWindow: 272000 }),
 			}),
 		},
@@ -36,7 +37,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 				return { errors: [] };
 			}
 		},
-		SessionManager: { open: () => ({}) },
+		SessionManager: { open: () => ({ buildSessionContext: () => ({ messages: [] }) }) },
 		createAgentSession: async (options: { tools?: string[] }) => {
 			fake.options.push(options);
 			const listeners = new Set<(event: Record<string, unknown>) => void>();

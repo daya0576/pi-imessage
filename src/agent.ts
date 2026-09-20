@@ -30,6 +30,7 @@ import { applyChatThinking, isThinkingLevel, writeChatThinking } from "./chat-th
 import { goalExtension } from "./goal-extension.js";
 import type { GoalController, GoalTurn } from "./goal.js";
 import { listMemoryNamespaces, loadMemoryNamespaces, readCoreMemory, saveMemory, searchMemory } from "./memory.js";
+import { modelFailureNotice, resolveDefaultModel } from "./model-selection.js";
 import {
 	type ActivityTimeoutKind,
 	AgentPromptTimeoutError,
@@ -773,7 +774,16 @@ export async function createAgentManager(config: AgentManagerConfig) {
 			);
 		}
 
+		const model =
+			sessionManager.buildSessionContext().messages.length === 0
+				? await resolveDefaultModel(
+						modelRuntime,
+						settingsManager.getDefaultProvider(),
+						settingsManager.getDefaultModel()
+					)
+				: undefined;
 		const { session } = await createAgentSession({
+			model,
 			cwd: workingDir,
 			agentDir,
 			modelRuntime,
@@ -902,9 +912,9 @@ export async function createAgentManager(config: AgentManagerConfig) {
 				});
 		};
 
-		const queueNotice = (text: string, cancellationNotice = false) => {
-			// Internal read-only summarizers collect assistant text as their result, not as live chat output.
-			if (!options?.readOnly) queueReply({ kind: "assistant", text }, cancellationNotice);
+		const queueNotice = (text: string, _cancellationNotice = false) => {
+			// Cancel/queue/compaction status is process narration only: log it, never send it to chat.
+			console.log(`[agent] notice (suppressed): ${text}`);
 		};
 
 		let cancellationAnnounced = false;
@@ -991,6 +1001,8 @@ export async function createAgentManager(config: AgentManagerConfig) {
 				if (text) {
 					queueReply({ kind: "assistant", text });
 				}
+				const failure = modelFailureNotice(assistantMsg.stopReason, session.model);
+				if (failure) queueReply({ kind: "assistant", text: failure });
 			} else if (event.type === "tool_execution_start") {
 				const toolArgs = event.args as Record<string, unknown>;
 				const label = extractToolLabel(event.toolName, toolArgs);

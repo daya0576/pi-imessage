@@ -25,6 +25,6 @@ h1,h2,button{font:inherit}h1{margin:0 0 16px}.table-wrap{overflow-x:auto}table{b
 </tbody></table></div><p id="feedback" role="status"></p><p class="note">上海时间 · 详情与运行记录见右侧 · 恢复时重新验证</p></main>
 <script>
 document.addEventListener('click',async(event)=>{const button=event.target.closest('button[data-action]');if(!button)return;button.disabled=true;const feedback=document.getElementById('feedback');try{const response=await fetch('/tasks/'+encodeURIComponent(button.dataset.id)+'/'+button.dataset.action,{method:'POST',headers:{'Content-Type':'application/json','X-Automation-Action':'1'},body:'{}'});feedback.textContent=response.ok?'已受理，正在刷新状态…':'操作不可用，请检查任务状态。';if(response.ok)setTimeout(()=>location.reload(),500);}catch{feedback.textContent='请求失败，请刷新确认当前状态。';}button.disabled=false;});
-setInterval(()=>{if(!document.querySelector('[popover]:popover-open'))location.reload();},15000);
+const es=new EventSource('/events');es.addEventListener('update',()=>{if(!document.querySelector('[popover]:popover-open'))location.reload();});
 </script><%~ include("detail-ui") %>
 </body></html>
