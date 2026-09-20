@@ -21,8 +21,13 @@ export async function resolveDefaultModel(
 	return fallback;
 }
 
-export function modelFailureNotice(stopReason: string, model: { provider: string; id: string } | undefined) {
-	if (stopReason !== "error") return undefined;
+export function modelFailureNotice(
+	stopReason: string,
+	model: { provider: string; id: string } | undefined,
+	errorMessage?: string
+) {
+	// Provider/SDK timeout diagnostics belong in logs, including exhausted retries.
+	if (stopReason !== "error" || /timed?[\s-]*out|timeout|ETIMEDOUT/i.test(errorMessage ?? "")) return undefined;
 	const label = model ? `${model.provider}/${model.id}` : "未知模型";
 	// Provider errors can include secrets or request contents; keep details in local logs.
 	return `模型 ${label} 生成失败。`;

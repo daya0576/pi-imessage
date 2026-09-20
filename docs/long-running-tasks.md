@@ -16,8 +16,10 @@ is required to activate this feature. No in-flight inference changes retroactive
 
 The 120-second sliding idle timeout and independent 30-minute safety ceiling
 remain in force. A timeout writes `interrupted-prompt.json` alongside the session
-transcript, notifies the destination, and aborts/detaches the session. Late aborted
-output is ignored. The checkpoint records pending tool names and uncertain
+transcript and aborts/detaches the session. Timeout diagnostics stay in internal
+logs, not destination messages, including provider timeouts during or after SDK
+retries. Late aborted output is ignored. Silence does not mark unfinished work
+complete or authorize replay. Non-timeout failure reporting is unchanged. The checkpoint records pending tool names and uncertain
 outcomes, not argument payloads or invented success/failure. Transport retries
 must not replay a timed-out user prompt. Unknown side effects require inspection
 before manual continuation; this is not arbitrary automatic resumption of code.

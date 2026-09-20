@@ -1,5 +1,13 @@
 # Development Rules
 
+## Default workflow
+
+- A requested code change includes the necessary commit, safe deployment and live verification by default. Do not ask again for deployment permission. Stop only for a material new risk, missing input, scope expansion or an uncertain prior write.
+- For a small copy/display/notification change: inspect the directly affected code and tests, make the smallest patch, validate, commit, deploy and briefly report the actual result. Do not reread unrelated history or repeatedly re-plan the same decision.
+- Work in an isolated worktree. Before publishing, reconcile with the actual live source and accepted UI; preserve unrelated work. Never edit releases/current as source.
+- Deploy only from the clean repository using ops/deploy-detached.sh after committing the verified change. Preserve blue-green validation, idle drain, rollback and post-switch checks. Never restart the running service from inside the agent.
+- Register durable completion reporting before detached deployment. Keep internal timeout/retry diagnostics out of chat; report results or actionable blockers without claiming an unverified deployment succeeded.
+
 ## Never
 
 - Never over-engineer — no abstractions until needed. Functions > classes. No DI frameworks.
@@ -13,7 +21,7 @@
 ## Knowledge Base
 
 - When working on tasks involving pi-mono internals, message handling, or architecture decisions,
-  read `docs/research.md` before proceeding.
+  consult the relevant section of `docs/research.md` before changing those mechanisms. A copy/display-only edit does not require a general architecture review.
 
 ## Code Quality
 
@@ -29,8 +37,8 @@
 
 - After code changes (not documentation changes): `npm run check` (get full output, no tail). Fix all errors, warnings, and infos before committing.
 - Note: `npm run check` does not run tests.
-- NEVER run: `npm run dev`, `npm run build`, `npm test`
+- Run `npm test` for validation. Do not start `npm run dev` on the live host; production builds and restarts belong to the guarded deployment script.
 - Run tests from the package root, not the repo root.
 - When writing tests, run them, identify issues in either the test or implementation, and iterate until fixed.
-- NEVER commit unless user asks
+- Commit the validated requested change as part of the default delivery workflow; never include unrelated changes or private runtime data.
 

@@ -7,7 +7,7 @@ A minimal and self-managing iMessage bot — powered by [pi](https://github.com/
 # Features
 - **Minimal**: No BlueBubble, no webhooks, no extra dependencies
 - **Self-managing**: Turn the agent into whatever you need. He builds his own tools without pre-built assumptions
-- **Transparent**: tool calls and reasoning are sent to your iMessage chat, so you can see exactly what it's doing and why
+- **Observable**: local logs retain operational diagnostics; chat messages focus on results, without timeout/retry notifications.
 - **iMessage Integration**: Responds to DMs, SMS, and group chats; identifies who sent each message; understands quoted/reply-to messages
 - **Persistent Reminders**: Schedule one-time messages without per-reminder cron jobs; reminders survive restarts and retry transient failures
 - **Workspace Cron**: Run recurring send, prompt, or local argv jobs from `WORKING_DIR/cron/jobs.json` with timezone and overlap protection
@@ -113,11 +113,11 @@ Send these as iMessage to interact with the bot:
 | Command | Description | Example Reply |
 |---|---|---|
 | `/help` | List available slash commands | `Commands:`<br>`/help — list commands` |
-| `/new` | Cancel safely, start a fresh conversation, keep the old goal paused for inspection | `新会话已创建，旧目标保留为暂停；原请求不会自动恢复。` |
+| `/new` | Cancel safely, start a fresh conversation, keep the old goal paused for inspection | Session status after safe replacement; no separate progress message. |
 | `/status` | Show session stats: tokens, context, model | `💬 3 msgs - ↑7.2k ↓505 1.1%/128k`<br>`🤖 anthropic/claude-sonnet-4 • 💭 minimal` |
-| `/compact` | Compress context; start/end notices, no replay of prior work | `开始压缩上下文。` / `压缩完成。` |
+| `/compact` | Compress context without replaying prior work | No routine progress notification. |
 | `/stop` | Abort current work and pause the goal; retain later queued inputs until cancellation settles | `已停止当前执行并暂停目标；普通消息不会自动恢复目标。` |
-| `/reload` | Cancel safely, pause the goal, reload this chat model under ownership | `模型已重新加载，目标已暂停；需显式 /goal resume。` |
+| `/reload` | Cancel safely, pause the goal, reload this chat model under ownership | Updated session status; no separate progress message. |
 
 ## Settings (`WORKING_DIR/settings.json`)
 
@@ -153,10 +153,9 @@ All fields are optional.
 
 # Development
 
-```bash
-npm run check        # typecheck + lint (run after code changes)
-npm test             # run tests
-```
+See [AGENTS.md](AGENTS.md) for the authoritative development and delivery workflow,
+validation commands, and safety boundaries. Requested code changes include safe
+deployment and live verification by default; the guarded release process remains mandatory.
 
 # How It Works
 
@@ -208,8 +207,8 @@ npm test             # run tests
 
 ### Compaction lifecycle
 
-Automatic and manual compaction announce start and completion in Chinese. The SDK
-continues unfinished prompts itself; completed replies are never submitted again.
+Automatic and manual compaction retain lifecycle diagnostics in local logs without
+routine chat notifications. The SDK continues unfinished prompts itself; completed replies are never submitted again.
 Compression has a separate bounded deadline (default 10 minutes); normal foreground
 idle/maximum-duration clocks do not run during compression. Failed or unconfirmed
 cancellation pauses work instead of guessing that it is safe to replay. `/stop` and

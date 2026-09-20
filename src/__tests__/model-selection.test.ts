@@ -52,6 +52,18 @@ describe("Astra-only selection fallback", () => {
 		await expect(resolveDefaultModel(r, model.provider, model.id)).rejects.toThrow("refresh failed");
 		expect(r.getModel).not.toHaveBeenCalled();
 	});
+	it("keeps timeout variants internal even when retry attempts are exhausted", () => {
+		for (const error of [
+			"Request timed out.",
+			"APIConnectionTimeoutError",
+			"connect ETIMEDOUT",
+			"504 Gateway Time-out",
+		])
+			expect(modelFailureNotice("error", model, error)).toBeUndefined();
+		expect(modelFailureNotice("error", model, "Unauthorized: private fixture detail")).toBe(
+			`模型 ${model.provider}/${model.id} 生成失败。`
+		);
+	});
 	it("reports failed generation without retrying or flagging cancellation", () => {
 		expect(modelFailureNotice("error", model)).toContain(`${model.provider}/${model.id}`);
 		expect(modelFailureNotice("stop", model)).toBeUndefined();

@@ -395,7 +395,7 @@ describe("production compaction routing and deadline", () => {
 	});
 
 	it.each(["replacement", "stop", "new"] as const)(
-		"drains delayed preflight-timeout reporting through the production pipeline with later %s",
+		"keeps preflight-timeout diagnostics silent through the production pipeline with later %s",
 		async (laterAction) => {
 			control.mode = "pre";
 			control.afterCompactionWait = true;
@@ -407,7 +407,7 @@ describe("production compaction routing and deadline", () => {
 				releaseDelivery = resolve;
 			});
 			pipeline.end(async (_chat, outgoing) => {
-				// An earlier send has begun, but timeout reporting is still queued behind it.
+				// Any earlier legitimate send still drains; timeout diagnostics must never enqueue a send.
 				await deliveryGate;
 				if (outgoing.reply.type === "message") replies.push(outgoing.reply.text);
 				return outgoing;
@@ -425,7 +425,7 @@ describe("production compaction routing and deadline", () => {
 			const checkpoint = JSON.parse(readFileSync(join(root, "synthetic-chat/interrupted-prompt.json"), "utf8"));
 			expect(checkpoint).toMatchObject({ reason: "idle", pendingTools: ["write"], autoReplay: false });
 			if (laterAction === "stop") {
-				// Even a stop with no attached session must fence pending timeout reporting.
+				// A stop with no attached session must not leak stale timeout diagnostics.
 				await manager.stop(message.chatGuid);
 			} else {
 				// Another manager caller can replace the detached session while transport sends wait.
@@ -437,9 +437,7 @@ describe("production compaction routing and deadline", () => {
 			releaseDelivery();
 			await rejected;
 			await flush();
-			expect(replies.filter((text) => text.includes("已中止当前会话"))).toHaveLength(
-				laterAction === "replacement" ? 1 : 0
-			);
+			expect(replies.filter((text) => text.includes("已中止当前会话"))).toHaveLength(0);
 			expect(settledBeforeDelivery).toBe(false);
 			expect(old.prompt).toHaveBeenCalledTimes(1);
 		}

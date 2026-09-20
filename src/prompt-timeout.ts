@@ -14,13 +14,6 @@ export class AgentPromptTimeoutError extends Error {
 		this.name = "AgentPromptTimeoutError";
 	}
 }
-export function timeoutNotice(error: AgentPromptTimeoutError, checkpointSaved: boolean): string {
-	const reason =
-		error.kind === "max_duration"
-			? `本次执行达到 ${Math.round(error.timeoutMs / 60_000)} 分钟安全上限`
-			: `本次执行连续 ${Math.round(error.timeoutMs / 1000)} 秒没有活动`;
-	return `${reason}，已中止当前会话。${checkpointSaved ? "中断检查点已保存。" : "中断检查点保存失败，需检查日志。"}后台进程不一定停止；不会盲目重跑已执行的操作。已登记的后台任务仍会在完成后自动汇总，未登记的需要先核对状态再继续。`;
-}
 export function saveInterruption(sessionDir: string, error: AgentPromptTimeoutError, pendingTools: string[]): void {
 	mkdirSync(sessionDir, { recursive: true });
 	const target = join(sessionDir, "interrupted-prompt.json");

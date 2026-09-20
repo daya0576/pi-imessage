@@ -11,6 +11,7 @@ const fake = vi.hoisted(() => ({
 	options: [] as { tools?: string[] }[],
 	hang: false,
 	heartbeat: false,
+	modelErrors: [] as string[],
 }));
 vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@earendil-works/pi-coding-agent")>();
@@ -68,6 +69,24 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 						});
 				}),
 				prompt: vi.fn(async () => {
+					if (fake.modelErrors.length) {
+						for (const errorMessage of fake.modelErrors)
+							for (const fn of listeners)
+								fn({
+									type: "message_end",
+									message: { role: "assistant", stopReason: "error", errorMessage, content: [] },
+								});
+						for (const fn of listeners)
+							fn({
+								type: "message_end",
+								message: {
+									role: "assistant",
+									stopReason: "stop",
+									content: [{ type: "text", text: "continued successfully" }],
+								},
+							});
+						return;
+					}
 					for (const fn of listeners)
 						fn({ type: "tool_execution_start", toolName: "write", toolCallId: "unknown-write", args: {} });
 					if (fake.heartbeat)
@@ -104,6 +123,7 @@ beforeEach(() => {
 	fake.options = [];
 	fake.hang = false;
 	fake.heartbeat = false;
+	fake.modelErrors = [];
 });
 afterEach(() => {
 	vi.clearAllTimers();
@@ -112,7 +132,7 @@ afterEach(() => {
 });
 describe("agent pause regression", () => {
 	it.each(["idle", "max_duration"] as const)(
-		"%s: emits one notice, saves uncertain checkpoint, suppresses late abort output",
+		"%s: stays silent, saves uncertain checkpoint, suppresses late abort output",
 		async (kind) => {
 			vi.useFakeTimers();
 			fake.hang = true;
@@ -126,8 +146,7 @@ describe("agent pause regression", () => {
 			// Idle threshold, rather than waiting a real two minutes.
 			await vi.advanceTimersByTimeAsync(kind === "idle" ? 120001 : 1800001);
 			await rejected;
-			expect(replies.filter((r) => r.kind === "assistant")).toHaveLength(1);
-			expect(replies.find((r) => r.kind === "assistant")?.text).toContain("已中止当前会话");
+			expect(replies.filter((r) => r.kind === "assistant")).toHaveLength(0);
 			expect(JSON.stringify(replies)).not.toContain("LATE INVALID COMPLETION");
 			const checkpoint = JSON.parse(readFileSync(join(root, "chat-a/interrupted-prompt.json"), "utf8"));
 			expect(checkpoint).toMatchObject({
@@ -139,6 +158,17 @@ describe("agent pause regression", () => {
 			expect(manager.getRuntimeStatus().activePrompts).toBe(0);
 		}
 	);
+	it("keeps repeated model timeouts silent and delivers the later successful response", async () => {
+		fake.modelErrors = ["Request timed out.", "Request timed out."];
+		const manager = await createAgentManager({ workingDir: root });
+		const replies: AgentReply[] = [];
+		await manager.processMessage(msg(), async (reply) => {
+			replies.push(reply);
+		});
+		expect(replies.filter((reply) => reply.kind === "assistant").map((reply) => reply.text)).toEqual([
+			"continued successfully",
+		]);
+	});
 	it("does not replay a timed-out user task through the transport retry wrapper", async () => {
 		const processMessage = vi.fn(async () => {
 			throw new AgentPromptTimeoutError("idle", 120000);

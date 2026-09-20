@@ -31,12 +31,7 @@ import { goalExtension } from "./goal-extension.js";
 import type { GoalController, GoalTurn } from "./goal.js";
 import { listMemoryNamespaces, loadMemoryNamespaces, readCoreMemory, saveMemory, searchMemory } from "./memory.js";
 import { modelFailureNotice, resolveDefaultModel } from "./model-selection.js";
-import {
-	type ActivityTimeoutKind,
-	AgentPromptTimeoutError,
-	saveInterruption,
-	timeoutNotice,
-} from "./prompt-timeout.js";
+import { type ActivityTimeoutKind, AgentPromptTimeoutError, saveInterruption } from "./prompt-timeout.js";
 import { readSystemContext } from "./system-context.js";
 import type { AgentReply, IncomingMessage } from "./types.js";
 
@@ -1001,8 +996,10 @@ export async function createAgentManager(config: AgentManagerConfig) {
 				if (text) {
 					queueReply({ kind: "assistant", text });
 				}
-				const failure = modelFailureNotice(assistantMsg.stopReason, session.model);
+				const failure = modelFailureNotice(assistantMsg.stopReason, session.model, assistantMsg.errorMessage);
 				if (failure) queueReply({ kind: "assistant", text: failure });
+				else if (assistantMsg.stopReason === "error")
+					console.warn(`[agent] model timeout kept in logs; chat notification suppressed: ${chatGuid}`);
 			} else if (event.type === "tool_execution_start") {
 				const toolArgs = event.args as Record<string, unknown>;
 				const label = extractToolLabel(event.toolName, toolArgs);
@@ -1130,11 +1127,9 @@ export async function createAgentManager(config: AgentManagerConfig) {
 				} catch {
 					console.error(`[agent] interruption checkpoint failed: ${chatGuid}`);
 				}
-				await handler({
-					kind: "assistant",
-					text: timeoutNotice(error, checkpointSaved),
-					isCurrent: () => queueFor(sessionMapKey).cancellationEpoch === cancellationEpoch,
-				});
+				console.warn(
+					`[agent] prompt timeout kept in logs; chat notification suppressed: ${chatGuid} checkpoint_saved=${checkpointSaved}`
+				);
 				await replyChain;
 				throw error;
 			}
