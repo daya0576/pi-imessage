@@ -110,7 +110,7 @@ rollback() {
   atomic_link "${OLD_TARGET}" "${CURRENT_LINK}"
   start_active_service || true
   if wait_http "${ACTIVE_URL}/health/runtime" "${START_TIMEOUT_SECONDS}"; then
-    send_progress "pi-imessage 新版本切换失败，旧版本已自动恢复。"
+    send_progress "deploy: rolled back to previous release"
     return 0
   fi
   return 1
@@ -175,7 +175,7 @@ kill -TERM "${GREEN_PID}"
 wait "${GREEN_PID}"
 GREEN_PID=""
 log "Green validation passed"
-send_progress "pi-imessage 新版本已通过测试和真实 LLM 健康检查；等当前回复处理完后再切换。"
+send_progress "deploy: validated, waiting to switch"
 
 # Never kill a live prompt. This also means an agent must launch this script in
 # detached mode after sending its reply, rather than synchronously as a tool.
@@ -240,7 +240,7 @@ if ! wait_http "${ACTIVE_URL}/health/runtime" "${START_TIMEOUT_SECONDS}" || ! ch
 fi
 
 DEPLOY_SUCCEEDED=true
-send_progress "pi-imessage 已完成蓝绿切换，切换后真实 LLM 健康检查通过。"
+send_progress "deploy: switched, healthy"
 log "Deployment succeeded"
 
 # Resolve every candidate and reference through the same filesystem namespace.
