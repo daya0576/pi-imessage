@@ -327,6 +327,7 @@ function buildSystemPrompt(workingDir: string, chatDir?: string): string {
 ## Context
 - Plain text only. Do not use Markdown formatting, double asterisks (**like this**), or [markdown](links).
 - Reply in the same language the user is writing in.
+- Output ONLY the final message to the user. Never include your planning, reasoning, analysis, or meta-commentary (e.g. "Let me...", "I should...", "The user wants...") in the reply. Keep all such thinking internal; if the model cannot emit a separate thinking channel, silently drop it rather than writing it as reply text.
 
 ## Environment
 You are running directly on the host machine.
