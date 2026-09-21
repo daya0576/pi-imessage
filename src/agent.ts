@@ -443,11 +443,21 @@ Usage instructions and details here.
 }
 
 /** Extract concatenated text from a Message, ignoring non-text content parts. */
-function extractMessageText(message: Message): string | null {
+export function extractMessageText(message: Message): string | null {
 	if (typeof message.content === "string") return message.content;
 
 	const texts = message.content
 		.filter((part): part is TextContent => part.type === "text" && "text" in part)
+		.filter((part) => {
+			// Responses API preserves the output channel in its signed text metadata.
+			// Commentary is also type="text"; never deliver it as a final reply.
+			try {
+				const signature = JSON.parse(part.textSignature ?? "null");
+				return !(signature?.v === 1 && signature.phase === "commentary");
+			} catch {
+				return true; // Legacy opaque signatures are not channel metadata.
+			}
+		})
 		.map((part) => part.text);
 	const joined = texts.join("\n").trim();
 	return joined || null;
@@ -991,7 +1001,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 					`[agent] message end: ${chatGuid} stopReason=${assistantMsg.stopReason}` +
 						`${assistantMsg.errorMessage ? ` error="${assistantMsg.errorMessage}"` : ""}` +
 						` first_token_ms=${firstAssistantStartMs ?? "n/a"} generation_ms=${assistantDurationMs ?? "n/a"}` +
-						` chars=${text?.length ?? 0} text="${(text ?? "(empty)").substring(0, 60)}"`
+						` final_text_chars=${text?.length ?? 0} text="${(text ?? "(empty)").substring(0, 60)}"`
 				);
 				if (text) {
 					queueReply({ kind: "assistant", text });
