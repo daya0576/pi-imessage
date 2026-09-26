@@ -12,6 +12,7 @@
  *            Receives ChatContext (not IncomingMessage) — only chat-level identity.
  */
 
+import { joinTextBatch } from "./message-batch.js";
 import type { ChatContext, IncomingMessage, OutgoingMessage } from "./types.js";
 import { createOutgoingMessage, toChatContext } from "./types.js";
 
@@ -37,6 +38,7 @@ export interface MessagePipeline {
 	start(task: StartTask): void;
 	end(task: EndTask): void;
 	process(incoming: IncomingMessage): Promise<OutgoingMessage>;
+	processBatch(incoming: IncomingMessage[]): Promise<void>;
 }
 
 export function createMessagePipeline(): MessagePipeline {
@@ -52,15 +54,18 @@ export function createMessagePipeline(): MessagePipeline {
 		}
 	}
 
-	async function process(incoming: IncomingMessage): Promise<OutgoingMessage> {
+	async function prepare(incoming: IncomingMessage): Promise<OutgoingMessage> {
 		const chat = toChatContext(incoming);
 		let outgoing = createOutgoingMessage();
-
 		for (const task of beforeTasks) {
 			outgoing = await task(chat, incoming, outgoing);
-			if (!outgoing.shouldContinue) return outgoing;
+			if (!outgoing.shouldContinue) break;
 		}
+		return outgoing;
+	}
 
+	async function run(incoming: IncomingMessage, outgoing: OutgoingMessage): Promise<OutgoingMessage> {
+		const chat = toChatContext(incoming);
 		// emit() is sync — queues end tasks onto endChain for serialized execution
 		let endChain = Promise.resolve();
 		const emit: EmitFn = (out) => {
@@ -79,10 +84,41 @@ export function createMessagePipeline(): MessagePipeline {
 		return outgoing;
 	}
 
+	async function process(incoming: IncomingMessage): Promise<OutgoingMessage> {
+		const outgoing = await prepare(incoming);
+		return outgoing.shouldContinue ? run(incoming, outgoing) : outgoing;
+	}
+
+	async function processBatch(messages: IncomingMessage[]): Promise<void> {
+		if (messages.length === 0) return;
+		if (messages.length === 1) {
+			await process(messages[0]);
+			return;
+		}
+		// Validate before any task can mutate an input or produce a side effect.
+		joinTextBatch(messages);
+		const prepared: IncomingMessage[] = [];
+		let firstOutgoing: OutgoingMessage | undefined;
+		for (const message of messages) {
+			try {
+				// Log/store/filter each ORIGINAL message, never the synthetic joined text.
+				const outgoing = await prepare(message);
+				if (outgoing.shouldContinue) {
+					prepared.push(message);
+					firstOutgoing ??= outgoing;
+				}
+			} catch (error: unknown) {
+				console.error(`[pipeline] before task error for ${message.chatGuid}:`, error);
+			}
+		}
+		if (firstOutgoing) await run(joinTextBatch(prepared), firstOutgoing);
+	}
+
 	return {
 		before: (task) => beforeTasks.push(task),
 		start: (task) => startTasks.push(task),
 		end: (task) => endTasks.push(task),
 		process,
+		processBatch,
 	};
 }

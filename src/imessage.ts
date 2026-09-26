@@ -4,16 +4,16 @@
  *
  *   watcher → queue → pipeline.process()
  *
- * Message ordering: every pulled message is immediately dispatched to the
- * pipeline (fire-and-forget). Different chats run concurrently. Same-chat
- * messages are serialized via per-chat promise chains so the agent never
- * receives concurrent prompts for the same session.
+ * Different chats run concurrently. Idle chats start immediately. While a
+ * chat is busy, consecutive same-sender plain-text messages can be processed
+ * as one turn. Commands, attachments, quotes, and sender changes split batches.
  */
 
 import type { AgentManager } from "./agent.js";
 import type { DigestLogger } from "./logger.js";
+import { createMessageBatchQueue } from "./message-batch.js";
 import { createMessagePipeline } from "./pipeline.js";
-import { type AsyncQueue, QueueClosedError, createKeyedQueue } from "./queue.js";
+import { type AsyncQueue, QueueClosedError } from "./queue.js";
 import type { SelfEchoFilter } from "./self-echo.js";
 import type { MessageSender } from "./send.js";
 import type { Settings } from "./settings.js";
@@ -76,7 +76,12 @@ export function createIMessageBot(config: IMessageBotConfig) {
 
 	return {
 		start() {
-			const enqueue = createKeyedQueue();
+			const batches = createMessageBatchQueue(async (messages) => {
+				if (messages.length > 1) {
+					console.log(`[batch] ${messages[0].chatGuid}: merged ${messages.length} pending text messages`);
+				}
+				await pipeline.processBatch(messages);
+			});
 
 			async function loop(): Promise<void> {
 				while (true) {
@@ -84,6 +89,7 @@ export function createIMessageBot(config: IMessageBotConfig) {
 
 					// /stop bypasses the per-chat queue so it can abort a running prompt
 					if (msg.text?.trim() === "/stop") {
+						batches.boundary(msg.chatGuid);
 						await agent.stop(msg.chatGuid);
 						const replyText = "✓ Stopped";
 						console.log(`[sid] /stop command: ${msg.chatGuid} → ${replyText}`);
@@ -91,13 +97,7 @@ export function createIMessageBot(config: IMessageBotConfig) {
 						continue;
 					}
 
-					enqueue(msg.chatGuid, async () => {
-						try {
-							await pipeline.process(msg);
-						} catch (error: unknown) {
-							console.error(`[sid] failed to process message from ${msg.sender}:`, error);
-						}
-					});
+					batches.enqueue(msg);
 				}
 			}
 
