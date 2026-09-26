@@ -126,6 +126,11 @@ export function createGoalController(workingDir: string) {
 		};
 		return `目标：${record.objective}\n状态：${labels[record.state]}\n进展：${record.progress || "尚无"}\n阻塞/说明：${record.reason || "无"}\n报告的验证依据：${record.evidence || "无（不是独立证明）"}\n轮数：${record.turns}/${record.limit}（每轮独立超时；不统计 token）`;
 	}
+	// Recovery of an ordinary chat turn must never resume an admitted/paused goal.
+	function allowsOrdinaryRecovery(chatGuid: string): boolean {
+		const record = get(chatGuid);
+		return !record || record.state === "cleared";
+	}
 	function pause(chatGuid: string, reason: string): void {
 		const record = get(chatGuid);
 		if (!record || record.state === "cleared") return;
@@ -315,6 +320,6 @@ export function createGoalController(workingDir: string) {
 		}
 		return !failed && get(chat.chatGuid)?.state === "ready";
 	}
-	return { command, pause, status, runOne };
+	return { command, pause, status, runOne, allowsOrdinaryRecovery };
 }
 export type GoalController = ReturnType<typeof createGoalController>;

@@ -47,6 +47,7 @@ export const AGENT_IDLE_TIMEOUT_MS = Number.parseInt(process.env.AGENT_IDLE_TIME
 export const AGENT_MAX_PROMPT_DURATION_MS = Number.parseInt(process.env.AGENT_MAX_PROMPT_DURATION_MS || "1800000", 10);
 export const AGENT_COMPACT_TIMEOUT_MS = Number.parseInt(process.env.AGENT_COMPACT_TIMEOUT_MS || "600000", 10);
 export const COMPACTION_CANCEL_GRACE_MS = 10_000;
+const RECOVERY_SETTLEMENT_GRACE_MS = 10_000;
 
 export class CompactionTimeoutError extends Error {
 	constructor() {
@@ -111,6 +112,8 @@ interface ChatSession {
 	cancel?: () => void;
 	cancellationSettled?: () => Promise<void>;
 	activeOperation?: Promise<void>;
+	/** SDK operation AND abort must both settle before a fresh recovery session is created. */
+	timeoutSettlement?: Promise<void>;
 }
 
 export interface ProcessMessageOptions {
@@ -620,6 +623,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		const storage = resolveSessionStorage(workingDir, chatGuid, options);
 		const queue = queueFor(storage.mapKey);
 		const queuedAt = Date.now();
+		const recoveryEpoch = queue.cancellationEpoch;
 		const goalAdmitted = () => {
 			if (!options?.goalTurn) return true;
 			if (!options.goalTurn.current()) return false;
@@ -654,6 +658,68 @@ export async function createAgentManager(config: AgentManagerConfig) {
 					}
 					try {
 						await admission.operation;
+					} catch (error) {
+						if (
+							!(error instanceof AgentPromptTimeoutError) ||
+							!msg ||
+							manual ||
+							options?.goalTurn ||
+							options?.readOnly ||
+							storage.isolated
+						)
+							throw error;
+						const previous = admission.entry;
+						const canRecover = (current = previous) =>
+							queue.cancellationEpoch === recoveryEpoch &&
+							queue.queued === 0 &&
+							!options?.hasQueuedInput?.() &&
+							(config.goals?.allowsOrdinaryRecovery(chatGuid) ?? true) &&
+							(!sessionMap.has(storage.mapKey) || sessionMap.get(storage.mapKey) === current);
+						if (!canRecover()) throw error;
+						let settled = false;
+						if (previous?.timeoutSettlement) {
+							let timer: ReturnType<typeof setTimeout> | undefined;
+							try {
+								settled = await Promise.race([
+									previous.timeoutSettlement.then(() => true),
+									new Promise<false>((resolve) => {
+										timer = setTimeout(() => resolve(false), RECOVERY_SETTLEMENT_GRACE_MS);
+									}),
+								]);
+							} finally {
+								if (timer) clearTimeout(timer);
+							}
+						}
+						if (!canRecover()) throw error;
+						if (!settled) {
+							console.warn(`[agent] recovery withheld: SDK operation/abort did not settle: ${chatGuid}`);
+							await handler({
+								kind: "assistant",
+								text: "这轮处理超时，原命令尚未确认结束，不能安全地自动续接；没有重跑原请求。",
+							});
+							return;
+						}
+						// The old SDK writer is gone. Do not replay the original message or its tool calls.
+						if (sessionMap.get(storage.mapKey) === previous) sessionMap.delete(storage.mapKey);
+						previous?.session.dispose();
+						console.log(`[agent] continuing timed-out chat from checkpoint: ${chatGuid}`);
+						const entry = await createSession(storage.mapKey, chatGuid, storage.sessionDir);
+						if (!canRecover(entry)) return; // A new control/input may have arrived during session creation.
+						const recovery: IncomingMessage = {
+							...msg,
+							sender: "timeout-recovery",
+							attachments: [],
+							images: [],
+							replyToText: null,
+							text: "上一轮处理因超时中断。这不是新的用户授权，也不要重新执行原始请求。先检查当前会话的已有工具结果、interrupted-prompt.json 和实际状态；未确认的命令可能已执行，绝不盲目重跑或重复发送。确认安全后继续原任务；若结果无法核实或需人工授权，说明阻碍并停止。最多只尝试本次自动续接一次。",
+						};
+						try {
+							await runPrompt(entry, recovery, handler, Date.now(), options);
+						} catch (recoveryError) {
+							if (!(recoveryError instanceof AgentPromptTimeoutError)) throw recoveryError;
+							if (canRecover(entry))
+								await handler({ kind: "assistant", text: "自动续接再次超时，已停止，不会反复重试。" });
+						}
 					} finally {
 						await withOwnership(storage.mapKey, async () => {
 							const entry = admission.entry;
@@ -1085,6 +1151,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 							"[agent] goal-capable chat/goal/compaction/post-response deadline: goal paused; retaining ownership until SDK operation and abort settle"
 						);
 						const cancellation = clearAndAbortSession(session);
+						entry.timeoutSettlement = Promise.allSettled([operation, cancellation]).then(() => {});
 						// allSettled is necessary: an early rejection is not cancellation settlement.
 						const settlement = Promise.allSettled([operation, cancellation]).then(async () => {
 							await entry.cancellationSettled?.();
@@ -1101,7 +1168,8 @@ export async function createAgentManager(config: AgentManagerConfig) {
 						`[agent] prompt ${kind}: ${chatGuid} after ${timeoutMs}ms — detaching session and aborting in background; timeout report retained unless explicitly stopped/reset`
 					);
 					if (sessionMap.get(sessionMapKey) === entry) sessionMap.delete(sessionMapKey);
-					void clearAndAbortSession(session).catch(() => {});
+					const cancellation = clearAndAbortSession(session);
+					entry.timeoutSettlement = Promise.allSettled([operation, cancellation]).then(() => {});
 				},
 				AGENT_IDLE_TIMEOUT_MS,
 				AGENT_MAX_PROMPT_DURATION_MS

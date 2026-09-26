@@ -424,16 +424,18 @@ describe("production compaction routing and deadline", () => {
 			const settledBeforeDelivery = settled;
 			const checkpoint = JSON.parse(readFileSync(join(root, "synthetic-chat/interrupted-prompt.json"), "utf8"));
 			expect(checkpoint).toMatchObject({ reason: "idle", pendingTools: ["write"], autoReplay: false });
+			let later: Promise<void> | undefined;
 			if (laterAction === "stop") {
-				// A stop with no attached session must not leak stale timeout diagnostics.
+				// A stop fences recovery even while the old SDK operation has not settled.
 				await manager.stop(message.chatGuid);
 			} else {
-				// Another manager caller can replace the detached session while transport sends wait.
 				control.mode = "plain";
-				await manager.processMessage({ ...message, text: "Later synthetic input" }, receive);
-				expect(control.sessions).toHaveLength(2);
-				if (laterAction === "new") await manager.newSession(message.chatGuid);
+				later = manager.processMessage({ ...message, text: "Later synthetic input" }, receive);
 			}
+			await vi.advanceTimersByTimeAsync(10001);
+			await later;
+			if (laterAction !== "stop") expect(control.sessions).toHaveLength(2);
+			if (laterAction === "new") await manager.newSession(message.chatGuid);
 			releaseDelivery();
 			await rejected;
 			await flush();
