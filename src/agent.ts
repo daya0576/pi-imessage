@@ -773,7 +773,6 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		// Force SSE for pi-imessage. Large Codex contexts frequently exceed the
 		// WebSocket frame limit or leave an auto-selected socket half-open.
 		const settingsManager = SettingsManager.create(workingDir, agentDir);
-		settingsManager.applyOverrides({ transport: "sse" });
 
 		// Per-session resource loader so the system prompt can reference its isolated directory.
 		const resourceLoader = new DefaultResourceLoader({
@@ -846,6 +845,11 @@ export async function createAgentManager(config: AgentManagerConfig) {
 			);
 		}
 
+		// Resource reload resets in-memory settings, so apply service policy afterwards.
+		// CLI defaultTools selectors can silently hide native tools in this pinned SDK.
+		// Override defaults, not the tools allowlist, to retain reviewed extension tools.
+		settingsManager.applyOverrides({ transport: "sse", defaultTools: ["read", "bash", "edit", "write"] });
+
 		const model =
 			sessionManager.buildSessionContext().messages.length === 0
 				? await resolveDefaultModel(
@@ -868,7 +872,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		applyChatThinking(workingDir, chatGuid, session, settingsManager.getDefaultThinkingLevel());
 		const modelLabel = session.model ? `${session.model.provider}/${session.model.id}` : "default";
 		console.log(
-			`[agent] session created: ${chatGuid} session=${sessionMapKey} model=${modelLabel} transport=sse sol_fast=priority`
+			`[agent] session created: ${chatGuid} session=${sessionMapKey} model=${modelLabel} transport=sse sol_fast=priority builtin_tools=${readOnly ? "read" : "read,bash,edit,write"}`
 		);
 
 		const entry: ChatSession = {

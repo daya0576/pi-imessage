@@ -74,6 +74,8 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 			create: () =>
 				sdk.SettingsManager.inMemory({
 					defaultThinkingLevel: "high",
+					// CLI selectors must not hide the service's built-in tools.
+					defaultTools: ["+tool_search", "+codemode"],
 					packages: [],
 					retry: { enabled: false },
 					compaction: { enabled: true, reserveTokens: 16384, keepRecentTokens: 128 },
@@ -85,6 +87,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 					...options,
 					systemPrompt: "Synthetic offline test; no tools or memory.",
 					extensionFactories: [
+						...(options.extensionFactories ?? []),
 						{
 							name: "synthetic-compaction",
 							factory: (pi) => {
@@ -114,7 +117,10 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 				});
 				history.appendMessage(response("Acknowledged synthetic example.", 100));
 			}
-			const created = await sdk.createAgentSession({ ...options, sessionManager: history, model, tools: [] });
+			const created = await sdk.createAgentSession({ ...options, sessionManager: history, model });
+			expect(created.session.getActiveToolNames()).toEqual(
+				expect.arrayContaining(["read", "bash", "edit", "write", "load_memory"])
+			);
 			control.session = created.session;
 			created.session.agent.streamFunction = () => {
 				const stream = createAssistantMessageEventStream();
