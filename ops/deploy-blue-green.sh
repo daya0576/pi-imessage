@@ -110,7 +110,7 @@ rollback() {
   atomic_link "${OLD_TARGET}" "${CURRENT_LINK}"
   start_active_service || true
   if wait_http "${ACTIVE_URL}/health/runtime" "${START_TIMEOUT_SECONDS}"; then
-    send_progress "deploy: rolled back to previous release"
+    send_progress "pi-imessage 新版本切换失败，旧版本已自动恢复。"
     return 0
   fi
   return 1
@@ -240,7 +240,7 @@ if ! wait_http "${ACTIVE_URL}/health/runtime" "${START_TIMEOUT_SECONDS}" || ! ch
 fi
 
 DEPLOY_SUCCEEDED=true
-send_progress "deploy: switched, healthy"
+send_progress "pi-imessage 已完成蓝绿切换，切换后真实 LLM 健康检查通过。"
 log "Deployment succeeded"
 
 # Resolve every candidate and reference through the same filesystem namespace.

@@ -394,7 +394,6 @@ export function createCommandHandlerTask(
 			console.log(`[sid] /reload settled; sending session status only: ${chat.chatGuid}`);
 			emit({ ...outgoing, reply: { type: "message", text: statusReply } });
 			outgoing.shouldContinue = false;
-			return;
 		}
 	};
 }

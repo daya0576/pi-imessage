@@ -9,8 +9,6 @@ A minimal and self-managing iMessage bot — powered by [pi](https://github.com/
 - **Self-managing**: Turn the agent into whatever you need. He builds his own tools without pre-built assumptions
 - **Observable**: local logs retain operational diagnostics; chat messages focus on results, without timeout/retry notifications.
 - **iMessage Integration**: Responds to DMs, SMS, and group chats; identifies who sent each message; understands quoted/reply-to messages
-- **Persistent Reminders**: Schedule one-time messages without per-reminder cron jobs; reminders survive restarts and retry transient failures
-- **Workspace Cron**: Run recurring send, prompt, or local argv jobs from `WORKING_DIR/cron/jobs.json` with timezone and overlap protection
 - **Web UI**: browse chat history, scheduled tasks, logs, and memory — disable with WEB_ENABLED=false and let the agent build your own web UI
 
 # Get Started
@@ -38,7 +36,7 @@ Available at `http://localhost:7750` (configurable via `WEB_HOST` and `WEB_PORT`
 - Chat history with live updates
 - Scheduled recurring jobs, one-time reminders, and recent run results
 - Logs (tail -f style)
-- Memory (global & per-chat)
+- Memory: structured records/corrections, core memory, agent rules, system configuration and read-only archives
 
 P.S. Disable with `WEB_ENABLED=false` and let the agent build your own web UI
 

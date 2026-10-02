@@ -12,7 +12,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { appendFile, copyFile, readFile, stat } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
 import type { IncomingMessage, MessageType } from "./types.js";
@@ -107,6 +107,31 @@ export interface ArchivedImageRecord {
 export interface ChatStore {
 	log(chatGuid: string, message: Omit<Message, "date">): Promise<void>;
 	archiveImages(chatGuid: string, incoming: IncomingMessage): Promise<ArchivedImageRecord[]>;
+}
+
+/** Chat directories that already have a message log. */
+export function listChatGuids(workingDir: string): string[] {
+	if (!existsSync(workingDir)) return [];
+	return readdirSync(workingDir, { withFileTypes: true })
+		.filter((entry) => entry.isDirectory() && existsSync(join(workingDir, entry.name, "log.jsonl")))
+		.map((entry) => entry.name)
+		.sort();
+}
+
+/** Read the append-only chat log. Malformed lines are skipped. */
+export function readChatLog(workingDir: string, chatGuid: string): Message[] {
+	const logFile = join(workingDir, chatGuid, "log.jsonl");
+	if (!existsSync(logFile)) return [];
+	const messages: Message[] = [];
+	for (const line of readFileSync(logFile, "utf-8").split("\n")) {
+		if (!line.trim()) continue;
+		try {
+			messages.push(JSON.parse(line) as Message);
+		} catch {
+			// skip malformed lines
+		}
+	}
+	return messages;
 }
 
 export function createChatStore(config: ChatStoreConfig): ChatStore {

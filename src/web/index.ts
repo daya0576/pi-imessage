@@ -103,8 +103,16 @@ export function createWebServer(config: WebServerConfig): WebServer {
 		if (!existsSync(workingDir)) return;
 		try {
 			fsWatcher = watch(workingDir, { recursive: true }, (_event, filename) => {
-				if (filename?.endsWith("log.jsonl") || filename?.endsWith(".log") || filename?.endsWith("MEMORY.md"))
+				if (
+					filename?.endsWith("log.jsonl") ||
+					filename?.endsWith(".log") ||
+					filename?.endsWith("core.md") ||
+					filename?.endsWith("SYSTEM.md") ||
+					filename?.endsWith("SKILL.md") ||
+					(filename?.includes("file-memory") && filename.endsWith(".jsonl"))
+				) {
 					broadcast();
+				}
 			});
 			fsWatcher.on("error", () => {});
 		} catch {
