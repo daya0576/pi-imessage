@@ -97,9 +97,11 @@ atomic_link() {
 }
 
 start_active_service() {
-  local plist="${SERVICE_PLIST}"
+  local plist="${SERVICE_PLIST}" previous_pid=0 deadline delay=1
   if launchctl print "${SERVICE}" >/dev/null 2>&1; then
     if [[ "${RUNTIME_PLIST_CHANGED}" == "true" ]]; then
+      previous_pid="$(launchctl print "${SERVICE}" | awk '$1 == "pid" && $2 == "=" { print $3; exit }')" || return 1
+      previous_pid="${previous_pid:-0}"
       # Only after green validation and idle drain: load the pinned argv/env.
       # kickstart alone retains launchd's cached old runtime configuration.
       launchctl bootout "${SERVICE}" || return 1
@@ -109,14 +111,25 @@ start_active_service() {
     fi
   fi
   [[ -f "${plist}" ]] || return 1
-  # launchctl can transiently return EIO immediately after a bootout. Retry
-  # bootstrap without first destroying any healthy loaded service.
-  for delay in 0 1 2 4; do
-    (( delay == 0 )) || sleep "${delay}"
-    launchctl bootstrap "gui/$(id -u)" "${plist}" >/dev/null 2>&1 && return 0
-    # The independent watchdog may have bootstrapped the same pinned plist.
-    launchctl print "${SERVICE}" >/dev/null 2>&1 && return 0
+  # bootout can return before the old job is removed (bootstrap error 37).
+  # A printable job is not registration evidence: require a new running PID
+  # with the pinned executable/environment, including watchdog-created jobs.
+  deadline=$((SECONDS + START_TIMEOUT_SECONDS))
+  while :; do
+    if /usr/bin/python3 "${SCRIPT_DIR}/service_runtime.py" ready --previous-pid "${previous_pid}" >/dev/null 2>&1; then
+      log "Pinned replacement process running; checking HTTP/model readiness next"
+      return 0
+    fi
+    (( SECONDS < deadline )) || break
+    if launchctl bootstrap "gui/$(id -u)" "${plist}" >/dev/null 2>&1; then
+      log "LaunchAgent registered; waiting for its pinned replacement process"
+    else
+      log "LaunchAgent registration pending; retrying without treating an old printable job as ready"
+    fi
+    sleep "${delay}"
+    (( delay < 4 )) && delay=$((delay * 2))
   done
+  log "Timed out waiting for pinned replacement process after LaunchAgent reload"
   return 1
 }
 
