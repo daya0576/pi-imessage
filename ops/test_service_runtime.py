@@ -5,7 +5,7 @@ import plistlib
 import tempfile
 import unittest
 
-from service_runtime import needs_reload, pin_plist, resolve_runtime
+from service_runtime import needs_reload, pin_plist, resolve_runtime, service_ready
 
 
 class ServiceRuntimeTest(unittest.TestCase):
@@ -65,6 +65,17 @@ class ServiceRuntimeTest(unittest.TestCase):
         self.assertFalse(pin_plist(self.plist, node, libraries, pinned, backups))
         self.assertEqual(len(list(backups.glob("*.backup"))), 1)
         self.assertFalse(needs_reload(pinned, node, libraries))
+
+    def test_readiness_requires_new_running_pid_and_matching_pinned_runtime(self):
+        node, libraries = resolve_runtime(self.original, self.running)
+        ready = {"state": "running", "pid": 42, "program": node, "executable": node,
+                 "libraries": libraries, "path": str(self.old.parent) + ":/usr/bin"}
+        self.assertTrue(service_ready(ready, node, libraries, previous_pid=41))
+        self.assertFalse(service_ready(ready, node, libraries, previous_pid=42))
+        for change in ({"state": "removing"}, {"pid": 0}, {"executable": str(self.new)},
+                       {"libraries": ""}, {"program": str(self.alias)}, {"path": "/usr/bin"}):
+            with self.subTest(change=change):
+                self.assertFalse(service_ready({**ready, **change}, node, libraries, previous_pid=41))
 
     def test_rejects_unexpected_service_without_mutation(self):
         self.plist.write_bytes(plistlib.dumps({"ProgramArguments": [str(self.old), "other-service"]}))
