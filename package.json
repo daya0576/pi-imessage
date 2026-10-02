@@ -21,7 +21,7 @@
 		"url": "git+https://github.com/daya0576/pi-imessage.git"
 	},
 	"engines": {
-		"node": ">=22.22.2"
+		"node": ">=22.22.0"
 	},
 	"scripts": {
 		"build": "tsc && node ops/copy-resources.mjs",

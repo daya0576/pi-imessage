@@ -21,6 +21,14 @@ DRAIN_TIMEOUT_SECONDS="${DRAIN_TIMEOUT_SECONDS:-1800}"
 START_TIMEOUT_SECONDS="${START_TIMEOUT_SECONDS:-90}"
 DEPLOY_CHAT_GUID="${DEPLOY_CHAT_GUID:-}"
 BOOTSTRAP="${BOOTSTRAP:-auto}"
+SERVICE_PLIST="${HOME}/Library/LaunchAgents/com.kingcrab.pi-imessage.plist"
+# Preserve the actual running executable, not a Homebrew symlink that may have changed.
+NODE_BIN="$(/usr/bin/python3 "${SCRIPT_DIR}/service_runtime.py" node)"
+export NODE_BIN
+DYLD_FALLBACK_LIBRARY_PATH="$(/usr/bin/python3 "${SCRIPT_DIR}/service_runtime.py" libraries)"
+export DYLD_FALLBACK_LIBRARY_PATH
+export PATH="$(dirname "${NODE_BIN}"):${PATH}"
+RUNTIME_PLIST_CHANGED=false
 
 GREEN_PID=""
 NEW_RELEASE=""
@@ -89,10 +97,16 @@ atomic_link() {
 }
 
 start_active_service() {
-  local plist="${HOME}/Library/LaunchAgents/com.kingcrab.pi-imessage.plist"
+  local plist="${SERVICE_PLIST}"
   if launchctl print "${SERVICE}" >/dev/null 2>&1; then
-    launchctl kickstart -k "${SERVICE}"
-    return
+    if [[ "${RUNTIME_PLIST_CHANGED}" == "true" ]]; then
+      # Only after green validation and idle drain: load the pinned argv/env.
+      # kickstart alone retains launchd's cached old runtime configuration.
+      launchctl bootout "${SERVICE}" || return 1
+    else
+      launchctl kickstart -k "${SERVICE}"
+      return
+    fi
   fi
   [[ -f "${plist}" ]] || return 1
   # launchctl can transiently return EIO immediately after a bootout. Retry
@@ -100,6 +114,8 @@ start_active_service() {
   for delay in 0 1 2 4; do
     (( delay == 0 )) || sleep "${delay}"
     launchctl bootstrap "gui/$(id -u)" "${plist}" >/dev/null 2>&1 && return 0
+    # The independent watchdog may have bootstrapped the same pinned plist.
+    launchctl print "${SERVICE}" >/dev/null 2>&1 && return 0
   done
   return 1
 }
@@ -163,13 +179,15 @@ printf '%s\n' '{"chatAllowlist":{"whitelist":[],"blacklist":["*"]},"richText":{"
 log "Starting green in shadow mode on ${GREEN_URL}"
 env WEB_ENABLED=true WEB_HOST=127.0.0.1 WEB_PORT="${GREEN_PORT}" WORKER_ENABLED=false \
   WORKING_DIR="${SMOKE_WORKSPACE}" \
-  /opt/homebrew/bin/node "${NEW_RELEASE}/dist/main.js" \
+  "${NODE_BIN}" "${NEW_RELEASE}/dist/main.js" \
   >"${NEW_RELEASE}/green-smoke.log" 2>&1 &
 GREEN_PID=$!
 
 wait_http "${GREEN_URL}/health/runtime" "${START_TIMEOUT_SECONDS}"
 RUNTIME="$(/usr/bin/curl -fsS --max-time 5 "${GREEN_URL}/health/runtime")"
 [[ "$(printf '%s' "${RUNTIME}" | json_field '["activePrompts"]')" == "0" ]]
+[[ "$(printf '%s' "${RUNTIME}" | json_field '["nodeExecutable"]')" == "${NODE_BIN}" ]]
+log "Validated pinned runtime: ${NODE_BIN} $(printf '%s' "${RUNTIME}" | json_field '["nodeVersion"]')"
 check_model "${GREEN_URL}"
 kill -TERM "${GREEN_PID}"
 wait "${GREEN_PID}"
@@ -225,20 +243,25 @@ if (( SECONDS >= DEADLINE )); then
   exit 1
 fi
 
+# Pin the existing runtime identity; keep that pin on source rollback too.
+# Never restore an old mutable Homebrew alias and accidentally upgrade on rollback.
+RUNTIME_PLIST_CHANGED="$(/usr/bin/python3 "${SCRIPT_DIR}/service_runtime.py" pin)"
 if [[ -L "${CURRENT_LINK}" ]]; then OLD_TARGET="$(readlink "${CURRENT_LINK}")"; fi
 if [[ -n "${OLD_TARGET}" ]]; then atomic_link "${OLD_TARGET}" "${PREVIOUS_LINK}"; fi
 atomic_link "${NEW_RELEASE}" "${CURRENT_LINK}"
 SWITCHED=true
 
 log "Switching active service to ${NEW_RELEASE}"
-# Ordinary releases never bootout the live LaunchAgent. Its plist points at the
-# stable current symlink, so kickstart is sufficient. If it is unexpectedly
-# unloaded, bootstrap it with retries; any failure is caught by the EXIT trap.
+# Ordinary releases use kickstart. The first physical-runtime pin requires a
+# reload, strictly after idle drain; subsequent releases keep the same identity.
+# Any switch/start failure remains covered by the EXIT rollback trap.
 start_active_service
 if ! wait_http "${ACTIVE_URL}/health/runtime" "${START_TIMEOUT_SECONDS}" || ! check_model "${ACTIVE_URL}"; then
   exit 1
 fi
 
+RUNTIME="$(/usr/bin/curl -fsS --max-time 5 "${ACTIVE_URL}/health/runtime")"
+[[ "$(printf '%s' "${RUNTIME}" | json_field '["nodeExecutable"]')" == "${NODE_BIN}" ]]
 DEPLOY_SUCCEEDED=true
 send_progress "pi-imessage 已完成蓝绿切换，切换后真实 LLM 健康检查通过。"
 log "Deployment succeeded"

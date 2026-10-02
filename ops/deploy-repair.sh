@@ -51,6 +51,12 @@ wait_health() {
 }
 
 start_service() {
+  local runtime_reload
+  runtime_reload="$(/usr/bin/python3 "${SCRIPT_DIR}/service_runtime.py" needs-reload)" || return 1
+  if [[ "${runtime_reload}" != "false" ]]; then
+    log "Refusing repair restart with stale runtime configuration; guarded handoff required"
+    return 1
+  fi
   local plist="${HOME}/Library/LaunchAgents/com.kingcrab.pi-imessage.plist"
   if launchctl print "${SERVICE}" >/dev/null 2>&1; then
     launchctl kickstart -k "${SERVICE}"; return

@@ -24,9 +24,13 @@ The global npm package and the Git working tree are not runtime targets.
 7. Atomically update `previous` and `current`, then restart the single worker.
 8. Repeat runtime and real-LLM checks; roll back on failure.
 
-The first deployment automatically replaces the legacy launchd configuration
-with `ops/install-launchd.sh`. Later deployments only move the immutable
-symlink and kickstart the service.
+Deployment preserves the actual running Node executable, not a Homebrew alias
+that may now point elsewhere. `service_runtime.py` validates and pins that
+physical path plus its private library/PATH configuration in launchd. The first
+pin reloads the LaunchAgent only after shadow validation and idle drain; later
+unchanged configurations use kickstart. Source rollback keeps the same validated
+runtime pin. The installer refuses loaded-runtime configuration changes that
+must instead pass the guarded handoff. Original plists are privately backed up.
 
 ## Running from the agent
 
@@ -51,7 +55,13 @@ Dependency locks are generated with npm 12, which ignores dependency-published
 shrinkwraps; otherwise the SDK's shrinkwrap defeats the security override for
 `brace-expansion`. The committed lock is compatible with production npm 10
 `npm ci`. Keep the production audit gate enabled. The three Pi SDK packages
-move together, and the service requires Node.js >=22.22.2.
+move together, and the service requires Node.js >=22.22.0. The minimum is exercised
+in CI and on claw with the actual installed extensions. Runtime upgrades are a
+separate rollout: assess compatibility and Messages Automation authorization,
+retain the old executable and rollback version, and never remove a running
+Homebrew keg. A missing live executable fails closed instead of selecting a newer
+Node. `/health/runtime` reports `nodeExecutable` and `nodeVersion`; both shadow
+and post-switch gates check the selected physical executable.
 
 ## Remote review and automatic deployment
 

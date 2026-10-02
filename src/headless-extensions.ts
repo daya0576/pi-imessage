@@ -19,6 +19,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { type SchedulerService, parseSchedulerInterval, parseSchedulerTime } from "./scheduler.js";
 import sharedSchedulerFactory from "./shared-scheduler/index.js";
+import { headlessSubagentBridge } from "./subagents-extension.js";
 
 export const HEADLESS_BUILTIN_TOOLS = ["read", "bash", "edit", "write"];
 type ExtensionKind =
@@ -520,11 +521,7 @@ export function createHeadlessResourceLoader(options: HeadlessExtensionsOptions)
 			writeFileSync(
 				bridge,
 				kind === "pi-subagents"
-					? // Native Agent and its registry lookup must share this bridge's isolated module graph.
-						`import factory from ${JSON.stringify(path)};\n` +
-							`import { getAgentConfig, resolveSpawnType } from ${JSON.stringify(join(dirname(path), "agent-types.ts"))};\n` +
-							`import { createHeadlessSubagentsExtension } from ${JSON.stringify(join(dirname(self), `subagents-extension${extname(self)}`))};\n` +
-							`export default function(pi) { createHeadlessSubagentsExtension(pi, factory, (requested) => { const resolved = resolveSpawnType(requested); return resolved.ok ? getAgentConfig(resolved.type) : undefined; }, ${JSON.stringify(options.sessionDir)}); }\n`
+					? headlessSubagentBridge(path, join(dirname(self), `subagents-extension${extname(self)}`), options.sessionDir)
 					: `import factory from ${JSON.stringify(path)};\n${goalMigration}import { createHeadlessExtensionAPI } from ${JSON.stringify(self)};\nexport default function(pi) { ${goalFocus}return factory(createHeadlessExtensionAPI(pi, ${JSON.stringify(kind)}, ${JSON.stringify(options.sessionDir)})); }\n`,
 				{ mode: 0o600 }
 			);

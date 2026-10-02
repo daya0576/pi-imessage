@@ -27,11 +27,12 @@ async function request(
 	method: string,
 	body = "",
 	headers: Record<string, string> = { "x-session-reset": "nightly-reflection" },
-	query = ""
+	query = "",
+	pathname = "/maintenance/nightly-reset"
 ) {
 	const incoming = Object.assign(new EventEmitter(), {
 		method,
-		url: `/maintenance/nightly-reset${query}`,
+		url: `${pathname}${query}`,
 		headers,
 		socket: { remoteAddress: "127.0.0.1" },
 	});
@@ -60,7 +61,7 @@ async function request(
 	return { status, result };
 }
 
-describe("nightly reset real HTTP handler without sockets or model calls", () => {
+describe("maintenance/runtime real HTTP handler without sockets or model calls", () => {
 	it("validates local guard, returns settled receipt, and deduplicates repeated POST", async () => {
 		const chatGuid = "iMessage;+;chat1";
 		mkdirSync(join(root, chatGuid));
@@ -80,5 +81,22 @@ describe("nightly reset real HTTP handler without sockets or model calls", () =>
 		expect((await request("POST", body)).result).toEqual(first.result);
 		expect((await request("GET", "", undefined, "?runId=nightly-reset-2026-09-17")).result).toEqual(first.result);
 		expect(newSession).toHaveBeenCalledTimes(1);
+	});
+
+	it("reports the actual Node identity without losing prompt-drain counters", async () => {
+		createWebServer({
+			workingDir: root,
+			port: 0,
+			agent: { getRuntimeStatus: () => ({ activePrompts: 3, sessions: 2 }) },
+		} as unknown as WebServerConfig);
+		const health = await request("GET", "", {}, "", "/health/runtime");
+		expect(health.status).toBe(200);
+		expect(health.result).toMatchObject({
+			ok: true,
+			activePrompts: 3,
+			sessions: 2,
+			nodeExecutable: process.execPath,
+			nodeVersion: process.versions.node,
+		});
 	});
 });

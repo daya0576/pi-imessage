@@ -18,7 +18,7 @@ A minimal and self-managing iMessage bot — powered by [pi](https://github.com/
 > - The agent runs with Full Disk Access and can read/write your filesystem as part of its tool use
 > - The web UI has no authentication and is accessible to anyone on your local network; set `WEB_ENABLED=false` if that's a concern
 
-Prerequisites: macOS with Messages.app, Node.js 22.22.2 or newer, Python 3 (shared memory writer), Full Disk Access for the terminal, [Pi Coding Agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start) authenticated
+Prerequisites: macOS with Messages.app, Node.js 22.22.0 or newer, Python 3 (shared memory writer), Full Disk Access for the terminal, [Pi Coding Agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start) authenticated
 
 ```bash
 npm install -g @kingcrab/pi-imessage

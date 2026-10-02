@@ -60,6 +60,17 @@ model-reported completed operation is replayed or promoted to verified success.
 The original file remains unchanged, and a durable import receipt prevents
 recreating a goal after it is archived. An existing native goal retains focus.
 
+## Native subagents
+
+The canonical installed factory and registry load together in a private SDK jiti
+graph, using the same `.js` registry specifier as the native factory. Execution
+remains the native foreground runner. Only that graph's resource loader is
+adapted: isolated children have no extensions, skills, prompts, themes or context
+files and resolve no package settings. A missing unrelated CLI/TUI package can
+neither block Agent nor trigger a headless installation. Shared settings, process
+environment, the SDK singleton and installed source remain unchanged. Tests run
+the actual native child twice, verify chat isolation and dispose all timers.
+
 ## Acceptance and cleanup
 
 1. Run check, full tests, build and the production dependency audit.
@@ -86,5 +97,5 @@ recreating a goal after it is archived. An existing native goal retains focus.
    restore the archived skill and cron config under stopped scheduler ownership
    before restarting it. Never mark an issue row complete before live acceptance.
 
-The service requires Node.js >=22.22.2. Dependency lock maintenance and the
+The service requires Node.js >=22.22.0; CI and claw exercise that minimum. Dependency lock maintenance and the
 npm-published SDK shrinkwrap caveat are documented in [operations](../ops/README.md).

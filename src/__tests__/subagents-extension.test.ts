@@ -15,9 +15,10 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { afterEach, expect, it, vi } from "vitest";
 import {
+	HeadlessSubagentResourceLoader,
 	type NativeSubagentConfig,
-	assertNativeChildPackagesInstalled,
 	createHeadlessSubagentsExtension,
+	headlessSubagentBridge,
 } from "../subagents-extension.js";
 
 const roots: string[] = [];
@@ -170,13 +171,23 @@ it("never publishes the native process-global registry or changes an existing CL
 	}
 });
 
-it("denies missing native-child packages without installing them", async () => {
+it("ignores missing CLI packages without installing them and rejects non-isolated native resource loading", async () => {
 	const root = temporary();
 	writeFileSync(join(root, "settings.json"), JSON.stringify({ packages: ["npm:headless-missing-test-package@0.0.0"] }));
-	await expect(assertNativeChildPackagesInstalled(join(root, "workspace"), root)).rejects.toThrow(
-		"auto-install prevented"
-	);
+	const options = {
+		cwd: join(root, "workspace"),
+		agentDir: root,
+		noExtensions: true,
+		noSkills: true,
+		noPromptTemplates: true,
+		noThemes: true,
+		noContextFiles: true,
+	};
+	const loader = new HeadlessSubagentResourceLoader(options);
+	await loader.reload();
+	expect(loader.getExtensions().extensions).toEqual([]);
 	expect(existsSync(join(root, "npm"))).toBe(false);
+	expect(() => new HeadlessSubagentResourceLoader({ ...options, noExtensions: false })).toThrow("isolation policy");
 });
 
 // This smoke imports the ACTUAL installed source through SDK's isolated jiti
@@ -247,13 +258,11 @@ it.skipIf(!existsSync(join(nativeRoot, "index.ts")))(
 			const bridge = join(root, `${name}.ts`);
 			writeFileSync(
 				bridge,
-				`import factory from ${JSON.stringify(join(nativeRoot, "index.ts"))};
-import { getAgentConfig, resolveSpawnType } from ${JSON.stringify(join(nativeRoot, "agent-types.js"))};
-import { createHeadlessSubagentsExtension } from ${JSON.stringify(join(process.cwd(), "src/subagents-extension.ts"))};
-export default (pi) => createHeadlessSubagentsExtension(pi, factory, (requested) => {
- const resolution = resolveSpawnType(requested);
- return resolution.ok ? getAgentConfig(resolution.type) : undefined;
-}, ${JSON.stringify(join(root, name))});`
+				headlessSubagentBridge(
+					join(nativeRoot, "index.ts"),
+					join(process.cwd(), "src/subagents-extension.ts"),
+					join(root, name)
+				)
 			);
 			const settingsManager = SettingsManager.inMemory({});
 			const loader = new DefaultResourceLoader({

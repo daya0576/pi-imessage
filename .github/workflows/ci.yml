@@ -20,15 +20,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '22.22.0'
           cache: npm
       - run: npm ci --no-fund --no-audit
       # Exercise the installed native extension, not a skipped or mocked factory.
       # This is a disposable CI-only installation; no user config or credentials.
-      - name: Install native goal acceptance fixture
+      - name: Install native acceptance fixtures
         run: |
-          npm install --prefix "$HOME/.pi/agent/npm" --ignore-scripts --no-fund --no-audit --no-save pi-goal-x@0.32.0
+          npm install --prefix "$HOME/.pi/agent/npm" --ignore-scripts --no-fund --no-audit --no-save pi-goal-x@0.32.0 @tintinweb/pi-subagents@0.19.0
           test -f "$HOME/.pi/agent/npm/node_modules/pi-goal-x/extensions/goal.ts"
+          test -f "$HOME/.pi/agent/npm/node_modules/@tintinweb/pi-subagents/src/index.ts"
+          # A missing unrelated CLI package must not trigger a child install or block Agent.
+          printf '%s\n' '{"packages":["npm:headless-missing-test-package@0.0.0"]}' > "$HOME/.pi/agent/settings.json"
       - run: npm run check
       - run: npm test
       - run: npm run build

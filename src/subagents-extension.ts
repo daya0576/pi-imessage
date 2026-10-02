@@ -1,12 +1,12 @@
 import { mkdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { findPackageJSON } from "node:module";
+import { dirname, join, resolve } from "node:path";
 import {
-	DefaultPackageManager,
+	DefaultResourceLoader,
 	type ExtensionAPI,
 	type ExtensionFactory,
 	SettingsManager,
 	type ToolDefinition,
-	getAgentDir,
 } from "@earendil-works/pi-coding-agent";
 
 /** These fields come from the native registry, AFTER Agent reloads custom files. */
@@ -22,16 +22,48 @@ const managerKey = Symbol.for("pi-subagents:manager");
 const registry = globalThis as unknown as Record<symbol, unknown>;
 const disabled = () => {};
 
-/** Native child reload resolves packages even under noExtensions; deny auto-install before entering it. */
-export async function assertNativeChildPackagesInstalled(workspace: string, agentDir = getAgentDir()): Promise<void> {
-	const settingsManager = SettingsManager.create(workspace, agentDir);
-	const packages = new DefaultPackageManager({ cwd: workspace, agentDir, settingsManager });
-	const missing: string[] = [];
-	await packages.resolve(async (source) => {
-		missing.push(source);
-		return "skip";
-	});
-	if (missing.length) throw new Error(`Native child auto-install prevented: ${missing.join(", ")}`);
+/** Isolated native children need no package resources; never resolve/install unrelated CLI packages. */
+export class HeadlessSubagentResourceLoader extends DefaultResourceLoader {
+	constructor(options: ConstructorParameters<typeof DefaultResourceLoader>[0]) {
+		if (
+			!options.noExtensions ||
+			!options.noSkills ||
+			!options.noPromptTemplates ||
+			!options.noThemes ||
+			!options.noContextFiles ||
+			options.additionalExtensionPaths?.length ||
+			options.extensionFactories?.length
+		)
+			throw new Error("Native child resource loading overrides headless isolation policy");
+		super({ ...options, settingsManager: SettingsManager.inMemory({}) });
+	}
+}
+
+/** One private native module graph; only its SDK resource loader is constrained, not its runner. */
+export function headlessSubagentBridge(nativePath: string, adapterPath: string, sessionDir: string): string {
+	const sdk = findPackageJSON("@earendil-works/pi-coding-agent", import.meta.url);
+	if (!sdk) throw new Error("Cannot locate the installed canonical Pi SDK");
+	const graph = `export { default as factory } from ${JSON.stringify(nativePath)};
+export { getAgentConfig, resolveSpawnType } from ${JSON.stringify(join(dirname(nativePath), "agent-types.js"))};`;
+	return `import * as sdk from "@earendil-works/pi-coding-agent";
+import * as ai from "@earendil-works/pi-ai";
+import * as core from "@earendil-works/pi-agent-core";
+import * as tui from "@earendil-works/pi-tui";
+import { createJiti } from ${JSON.stringify(join(dirname(sdk), "dist/core/extensions/jiti-loader.js"))};
+import { HeadlessSubagentResourceLoader, createHeadlessSubagentsExtension } from ${JSON.stringify(adapterPath)};
+const native = createJiti(import.meta.url, { moduleCache: false, virtualModules: {
+ "@earendil-works/pi-coding-agent": { ...sdk, DefaultResourceLoader: HeadlessSubagentResourceLoader },
+ "@earendil-works/pi-ai": ai, "@earendil-works/pi-agent-core": core, "@earendil-works/pi-tui": tui
+}});
+export default async function(pi) {
+ const { factory, getAgentConfig, resolveSpawnType } = await native.evalModule(${JSON.stringify(graph)}, {
+  filename: ${JSON.stringify(join(sessionDir, "native-graph.ts"))}, forceTranspile: true
+ });
+ createHeadlessSubagentsExtension(pi, factory, (requested) => {
+  const resolution = resolveSpawnType(requested);
+  return resolution.ok ? getAgentConfig(resolution.type) : undefined;
+ }, ${JSON.stringify(sessionDir)});
+}\n`;
 }
 
 /**
@@ -104,8 +136,6 @@ export function createHeadlessSubagentsExtension(
 			signal?.addEventListener("abort", forwardAbort, { once: true });
 			controllers.add(controller);
 			const execution = Promise.resolve().then(async () => {
-				controller.signal.throwIfAborted();
-				await assertNativeChildPackagesInstalled(workspace);
 				controller.signal.throwIfAborted();
 				return tool.execute(id, input, controller.signal, onUpdate, { ...context, cwd: workspace, hasUI: false });
 			});

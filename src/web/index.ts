@@ -255,7 +255,12 @@ export function createWebServer(config: WebServerConfig): WebServer {
 		// GET /health/runtime — lightweight readiness/drain state for deployment.
 		if (request.method === "GET" && url.pathname === "/health/runtime") {
 			const runtime = agent.getRuntimeStatus?.() ?? { activePrompts: 0, sessions: 0, lastAgentActivityAt: null };
-			jsonResponse(response, 200, { ok: true, ...runtime });
+			jsonResponse(response, 200, {
+				ok: true,
+				...runtime,
+				nodeExecutable: process.execPath,
+				nodeVersion: process.versions.node,
+			});
 			return;
 		}
 
