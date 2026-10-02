@@ -53,7 +53,11 @@ In the isolated worktree, with existing uncommitted migration source:
 - Python operations regressions: five tests passed, including detached deployment receipts and acceptance-gated/idempotent skill cleanup preserving embedded prompt payloads and site rules.
 - Native goal status works while a model stream hangs; pause cancels it. Bot controls bypass batching, and goal replies retain rich-text, logs and storage. These regressions pass.
 - Read-only TCC inspection: Messages AppleEvents grants include Node 22.22.0, but launchd currently executes Node 22.23.3; service logs still report -1743. User was asked to grant the current Node Automation permission. Do not change TCC, evade its attribution or switch production before resolution.
-- No PR/merge or deployment/restart yet. Runtime skill cleanup is prepared but deliberately unapplied until an accepted extension release is current.
+- Published application candidate: draft [PR #29](https://github.com/daya0576/pi-imessage/pull/29), migration `9af746e`, explicit main reconciliation `74ad34a`, CI `47646f4`. macOS/Node 22 CI passed (installed native goal extension exercised), run `36958921056`.
+- Canonical scheduler `d59ec3c` is published in [dotfile PR #11](https://github.com/daya0576/dotfile/pull/11); unrelated user settings/goal-host changes remain untouched.
+- Shared memory bytes independently match the terminal and both claw CLI locations: SHA256 `df63bf7bc028636803bd7f14914a71d38e569d92006435bfdd71efb66a910dd4`.
+- Main/production reconciliation and non-conflicting resurrection/duplicate audit are documented in [the reconciliation ledger](issue-28-reconciliation.md). Post-reconciliation claw check/build/audit, all 287 tests, nine actual-SDK/live checks and production-state clone rehearsal passed again.
+- GitHub merge and production switch are deliberately pending user-granted Messages Automation permission, because the remote-review LaunchAgent can deploy new main commits. No restart/deployment or runtime skill cleanup applied; cleanup dry-run finds two legacy references in ten jobs and one obsolete search skill, with all domain/site skills retained.
 
 ## Delivery blockers and safety gates
 
