@@ -1,0 +1,15 @@
+{
+	"version": 1,
+	"apiVersion": 1,
+	"sourceRepository": "https://github.com/daya0576/dotfile",
+	"sourceDirectory": "pi-config/agent/extensions/scheduler",
+	"sourceCommit": "d59ec3ce566e1bfbc29248f579ee6c6a10ccc22f",
+	"algorithm": "sha256",
+	"files": {
+		"index.ts": "dfcdfc7d57fbbc46c9659989a9270d2337e7c49604677cc526599cf458064aa5",
+		"service.cjs": "501ab1e6c8bc43ad8ead783cf72963a3b0b505a689016fc63df96266479c5f5d",
+		"time.cjs": "1dc1c04fece49c070d62e75679a100aa072ec71f61bf6c7c645e2573ecafdb22",
+		"service.d.cts": "050958493f95e137cc9a01a5775d25bc70ba0e38505ca692804c189fc4588b38",
+		"time.d.cts": "244de2c1f8e993dcc65ad10b3c1ec18650381d0019166b6802d1d6446df99b26"
+	}
+}

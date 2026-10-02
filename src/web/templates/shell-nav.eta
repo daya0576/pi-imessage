@@ -1,0 +1,6 @@
+<nav class="app-nav" aria-label="Main navigation">
+<% const links = [['page', '/', 'Recent Chats'], ['scheduled', '/scheduled', 'Scheduled'], ['tasks', '/tasks', 'Tasks'], ['sources', '/sources', 'Sources'], ['logs', '/logs', 'Logs'], ['memory', '/memory', 'Memory']]; %>
+<% links.forEach(([key, href, label]) => { %>
+  <a href="<%= href %>"<% if (it.active === key) { %> class="active" aria-current="page"<% } %>><%= label %></a>
+<% }) %>
+</nav>

@@ -1,16 +1,7 @@
 <!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>blue — scheduled tasks</title>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>blue — scheduled tasks</title>
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box }
-body { background: #111; color: #ccc; font: 13px/1.6 monospace; display: flex; height: 100vh; overflow: hidden }
-::-webkit-scrollbar { width: 8px; height: 8px }
-::-webkit-scrollbar-track { background: transparent }
-::-webkit-scrollbar-thumb { background: #2a2a2a }
-* { scrollbar-width: thin; scrollbar-color: #2a2a2a transparent }
-nav { width: 112px; flex-shrink: 0; padding: 40px 16px; border-right: 1px solid #1a1a1a }
-nav a { display: block; color: inherit; text-decoration: none; line-height: 2.4; opacity: .35 }
-nav a:hover, nav a.active { opacity: 1 }
-.content { flex: 1; padding: 40px; overflow-y: auto }
+
 h2 { font-size: 13px; font-weight: normal; opacity: .5; margin: 0 0 12px }
 .section { margin-bottom: 32px }
 .meta { opacity: .35; margin-bottom: 12px; word-break: break-all }
@@ -22,17 +13,15 @@ th { opacity: .4; font-weight: normal; white-space: nowrap }
 .bad { color: #c47f7f }
 .running { color: #c7b477 }
 .action { max-width: 420px; white-space: pre-wrap; word-break: break-word }
+.action-preview { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; line-height: 1.6; max-height: 4.8em; overflow: hidden; overflow-wrap: anywhere }
 button { background: none; border: 1px solid #333; color: #aaa; font: 12px monospace; padding: 2px 7px; cursor: pointer; margin-right: 4px }
 button:hover { border-color: #777; color: #ddd }
 .empty { padding: 14px; background: #1a1a1a; opacity: .35 }
-</style></head><body>
+</style>
+<%~ include("shell-style") %>
+</head><body class="page-scheduled">
 
-<nav>
-  <a href="/">Recent Chats</a>
-  <a href="/scheduled" class="active">Scheduled</a>
-  <a href="/logs">Logs</a>
-  <a href="/memory">Memory</a>
-</nav>
+<%~ include("shell-nav", { active: "scheduled" }) %>
 
 <div class="content">
   <div class="section">
@@ -41,7 +30,7 @@ button:hover { border-color: #777; color: #ddd }
 <% if (it.jobs.length === 0) { %>
     <div class="empty">no recurring jobs configured</div>
 <% } else { %>
-    <table>
+    <div class="table-wrap"><table>
       <thead><tr><th>job</th><th>schedule</th><th>next run</th><th>action</th><th>last result</th><th>controls</th></tr></thead>
       <tbody>
 <% it.jobs.forEach(function(job) { %>
@@ -49,7 +38,7 @@ button:hover { border-color: #777; color: #ddd }
           <td><%= job.name || job.id %><br><span class="dim"><%= job.enabled ? 'enabled' : 'paused' %><%= job.running ? ' / running' : '' %></span></td>
           <td><%= job.schedule %><br><span class="dim"><%= job.timezone %></span></td>
           <td><%= job.nextRunAt || '—' %></td>
-          <td class="action"><%= JSON.stringify(job.action) %></td>
+          <td class="action"><div class="action-preview" title="<%= JSON.stringify(job.action) %>"><%= JSON.stringify(job.action) %></div></td>
           <td class="<%= job.lastRun && job.lastRun.status === 'success' ? 'good' : job.lastRun ? 'bad' : 'dim' %>">
             <%= job.lastRun ? job.lastRun.status : 'never' %><br>
             <span class="dim"><%= job.lastRun ? job.lastRun.finishedAt || job.lastRun.startedAt : '' %></span>
@@ -61,7 +50,7 @@ button:hover { border-color: #777; color: #ddd }
         </tr>
 <% }) %>
       </tbody>
-    </table>
+    </table></div>
 <% } %>
   </div>
 
@@ -71,7 +60,7 @@ button:hover { border-color: #777; color: #ddd }
 <% if (visibleReminders.length === 0) { %>
     <div class="empty">no reminders</div>
 <% } else { %>
-    <table>
+    <div class="table-wrap"><table>
       <thead><tr><th>status</th><th>scheduled</th><th>chat</th><th>text</th><th>result</th></tr></thead>
       <tbody>
 <% visibleReminders.forEach(function(reminder) { %>
@@ -84,7 +73,7 @@ button:hover { border-color: #777; color: #ddd }
         </tr>
 <% }) %>
       </tbody>
-    </table>
+    </table></div>
 <% } %>
   </div>
 
@@ -93,7 +82,7 @@ button:hover { border-color: #777; color: #ddd }
 <% if (it.runs.length === 0) { %>
     <div class="empty">no runs recorded</div>
 <% } else { %>
-    <table>
+    <div class="table-wrap"><table>
       <thead><tr><th>job</th><th>trigger</th><th>status</th><th>started</th><th>finished / error</th></tr></thead>
       <tbody>
 <% it.runs.slice(0, 50).forEach(function(run) { %>
@@ -106,7 +95,7 @@ button:hover { border-color: #777; color: #ddd }
         </tr>
 <% }) %>
       </tbody>
-    </table>
+    </table></div>
 <% } %>
   </div>
 </div>
@@ -126,6 +115,5 @@ async function toggleJob(id, enabled) {
 }
 const es = new EventSource('/events');
 es.addEventListener('update', () => location.reload());
-setInterval(() => location.reload(), 30000);
 </script>
 </body></html>

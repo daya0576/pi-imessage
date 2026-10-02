@@ -107,6 +107,40 @@ describe("createDropSelfEchoTask", () => {
 // ── start: commandHandler ─────────────────────────────────────────────────────
 
 describe("createCommandHandlerTask", () => {
+	it("sends only session status after /new", async () => {
+		const agent = {
+			newSession: vi.fn(async () => {}),
+			getSessionStatus: vi.fn(async () => "session status"),
+		};
+		const task = createCommandHandlerTask(agent as unknown as Parameters<typeof createCommandHandlerTask>[0]);
+		const outgoing = makeOutgoing();
+		const dispatch = vi.fn();
+		await task(makeChat(), makeMessage({ text: "/new" }), outgoing, dispatch);
+		expect(agent.newSession).toHaveBeenCalledWith(makeChat().chatGuid);
+		expect(dispatch).toHaveBeenCalledTimes(1);
+		expect(dispatch).toHaveBeenCalledWith(
+			expect.objectContaining({ reply: { type: "message", text: "session status" } })
+		);
+		expect(outgoing.shouldContinue).toBe(false);
+	});
+
+	it("sends only session status after /reload", async () => {
+		const agent = {
+			reload: vi.fn(async () => {}),
+			getSessionStatus: vi.fn(async () => "session status"),
+		};
+		const task = createCommandHandlerTask(agent as unknown as Parameters<typeof createCommandHandlerTask>[0]);
+		const outgoing = makeOutgoing();
+		const dispatch = vi.fn();
+		await task(makeChat(), makeMessage({ text: "/reload" }), outgoing, dispatch);
+		expect(agent.reload).toHaveBeenCalledWith(makeChat().chatGuid);
+		expect(dispatch).toHaveBeenCalledTimes(1);
+		expect(dispatch).toHaveBeenCalledWith(
+			expect.objectContaining({ reply: { type: "message", text: "session status" } })
+		);
+		expect(outgoing.shouldContinue).toBe(false);
+	});
+
 	it("lists commands for /help and skips the agent", async () => {
 		const agent = {
 			processMessage: vi.fn(async () => {}),
@@ -115,7 +149,7 @@ describe("createCommandHandlerTask", () => {
 			reload: vi.fn(async () => {}),
 			stop: vi.fn(async () => {}),
 			compact: vi.fn(async () => "compacted"),
-			invalidateSessions: vi.fn(),
+			setChatThinking: vi.fn(async () => "max"),
 		};
 		const task = createCommandHandlerTask(agent);
 		const outgoing = makeOutgoing();
@@ -145,7 +179,7 @@ describe("createCallAgentTask", () => {
 			reload: vi.fn(async () => {}),
 			stop: vi.fn(async () => {}),
 			compact: vi.fn(async () => "compacted"),
-			invalidateSessions: vi.fn(),
+			setChatThinking: vi.fn(async () => "max"),
 		};
 		const task = createCallAgentTask(agent);
 		const dispatched: OutgoingMessage[] = [];
@@ -168,7 +202,7 @@ describe("createCallAgentTask", () => {
 			reload: vi.fn(async () => {}),
 			stop: vi.fn(async () => {}),
 			compact: vi.fn(async () => "compacted"),
-			invalidateSessions: vi.fn(),
+			setChatThinking: vi.fn(async () => "max"),
 		};
 		const task = createCallAgentTask(agent);
 		const dispatch = vi.fn();

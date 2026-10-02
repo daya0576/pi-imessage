@@ -1,0 +1,13 @@
+<article class="card">
+<div class="row-head"><span><%= it.row.item.namespace %> / <%= it.row.item.kind || '类型未知' %></span><span>[<%= it.statusLabel(it.row.effective) %>]</span></div>
+<p class="text"><%= it.row.item.text %></p>
+<p>主体：<%= it.row.item.subjects.join(' / ') || '未知' %></p>
+<p>事实日期：<%= it.row.item.event_time || '未知' %> · 创建：<%= it.row.item.created_at || '未知' %></p>
+<details <% if (it.expanded) { %>open<% } %>><summary>来源与记录详情</summary>
+<dl class="meta"><dt>ID</dt><dd><%= it.row.item.id %></dd><dt>置信度 / 重要性</dt><dd><%= it.row.item.confidence ?? '未知' %> / <%= it.row.item.importance ?? '未知' %></dd><dt>原始状态</dt><dd><%= it.row.item.status %>（不等于当前有效）</dd><dt>替代前驱 →</dt><dd><%= it.row.item.supersedes_id || '无' %></dd><dt>存储位置</dt><dd><%= it.row.file %>:<%= it.row.line %></dd></dl>
+<% if (!it.row.item.sources.length) { %><p>来源未知</p><% } %>
+<% it.row.item.sources.forEach(function(source) { %><dl class="meta"><dt>来源</dt><dd><%= source.type %> / <%= source.label %></dd><dt>路径</dt><dd><%= source.path || '未知' %></dd><dt>行号</dt><dd><%= source.line_start ?? '未知' %> - <%= source.line_end ?? '未知' %></dd><dt>block hash</dt><dd><%= source.block_hash || '未知' %></dd></dl><% }) %>
+</details>
+<% it.row.diagnostics.forEach(function(message) { %><p class="notice">! <%= message %></p><% }) %>
+<a href="<%= it.link(it.query, {record: it.row.key}) %>#history">查看此记录的更正历史</a>
+</article>

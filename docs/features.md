@@ -19,16 +19,16 @@
 
 ## Events (Scheduled Wake-ups)
 - [x] Persistent one-time reminders
-- [x] Nightly reflection scheduler (local hour, catch-up on restart)
+- [x] Independent checkpointed nightly reflection skill/host job (existing deployments retained; no duplicate service runner)
 
 ## Skills
-- [x] Skill catalog listed in system prompt
-- [x] Nightly reflection can create/update/delete `SKILL.md`
+- [x] Enabled domain skills discovered through the shared Pi resource loader
+- [x] Existing domain reflection workflows retained
 
 ## Memory
 - [x] Structured memory v2
-- [x] Nightly reflection over chat logs + Atom feeds + GitHub events
-- [x] `SYSTEM.md` prompt notes + harness snapshots
+- [x] Reflection and ordinary memory writes share the canonical structured-memory backend
+- [x] Bounded current `SYSTEM.md` summary and separate operational history
 
 ## Sandbox
 

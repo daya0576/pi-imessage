@@ -7,7 +7,7 @@ A minimal and self-managing iMessage bot — powered by [pi](https://github.com/
 # Features
 - **Minimal**: No BlueBubble, no webhooks, no extra dependencies
 - **Self-managing**: Turn the agent into whatever you need. He builds his own tools without pre-built assumptions
-- **Transparent**: tool calls and reasoning are sent to your iMessage chat, so you can see exactly what it's doing and why
+- **Observable**: local logs retain operational diagnostics; chat messages focus on results, without timeout/retry notifications.
 - **iMessage Integration**: Responds to DMs, SMS, and group chats; identifies who sent each message; understands quoted/reply-to messages
 - **Web UI**: browse chat history, scheduled tasks, logs, and memory — disable with WEB_ENABLED=false and let the agent build your own web UI
 
@@ -18,7 +18,7 @@ A minimal and self-managing iMessage bot — powered by [pi](https://github.com/
 > - The agent runs with Full Disk Access and can read/write your filesystem as part of its tool use
 > - The web UI has no authentication and is accessible to anyone on your local network; set `WEB_ENABLED=false` if that's a concern
 
-Prerequisites: macOS with Messages.app, Full Disk Access for the terminal, [Pi Coding Agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start) authenticated
+Prerequisites: macOS with Messages.app, Node.js 22.22.0 or newer, Python 3 (shared memory writer), Full Disk Access for the terminal, [Pi Coding Agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start) authenticated
 
 ```bash
 npm install -g @kingcrab/pi-imessage
@@ -36,9 +36,16 @@ Available at `http://localhost:7750` (configurable via `WEB_HOST` and `WEB_PORT`
 - Chat history with live updates
 - Scheduled recurring jobs, one-time reminders, and recent run results
 - Logs (tail -f style)
-- Memory tab: personality, system prompt, structured memory, skills
+- Memory: structured records/corrections, core memory, agent rules, system configuration and read-only archives
 
 P.S. Disable with `WEB_ENABLED=false` and let the agent build your own web UI
+
+## Shared Extensions
+
+Headless sessions load only reviewed, enabled Pi capabilities, never the full
+terminal extension set. Domain skills and the message transport remain local;
+shared tools must not introduce cross-chat state or a second autonomous runner.
+See [extension boundaries and acceptance](docs/extensions.md).
 
 ## Structured Memory
 
@@ -54,26 +61,6 @@ supersedes the old ID, preserving an auditable history instead of silently
 rewriting it. Legacy global and per-chat `MEMORY.md` files remain read-only
 archives. See [the structured memory flow](docs/structured-memory-sequence.md)
 for migration, retrieval, and write behavior.
-
-## Nightly Reflection
-
-Each night (local 03:00 by default) the bot reviews new signals from:
-
-- chat `log.jsonl` files
-- optional Atom/RSS feeds (`settings.reflection.atomFeeds`)
-- optional GitHub public events (`settings.reflection.githubUser`)
-
-Empty `atomFeeds` / `githubUser` skips that source. It applies small evidence-backed
-updates:
-
-- durable facts → structured memory (`save_memory`)
-- standing instructions → `# Prompt Notes` in `SYSTEM.md`
-- reusable workflows → `skills/<name>/SKILL.md`
-
-Each source has its own checkpoint under `WORKING_DIR/harness/`. Note/skill
-edits are snapshotted and can be rolled back. First pass for chats and GitHub
-only reviews the last 48 hours; a new Atom feed with no checkpoint ingests the
-full history currently in that feed.
 
 ## Recurring Jobs
 
@@ -121,7 +108,6 @@ The agent is aware of these endpoints via its system prompt and can use them as 
 | `POST /cron/jobs/:id/run` | Run a configured recurring job immediately | `curl -X POST localhost:7750/cron/jobs/morning-message/run` |
 | `POST /cron/jobs/:id/enabled` | Pause or resume a recurring job and atomically update the workspace config | `curl -X POST localhost:7750/cron/jobs/morning-message/enabled -d '{"enabled":false}'` |
 | `GET /health/model` | Make a live request to the configured default AI model; returns HTTP 200 when healthy or 503 on failure | `curl localhost:7750/health/model`<br>→ `{"ok":true,"model":"openai/gpt-5","latencyMs":842,"checkedAt":"..."}` |
-| `POST /reflect/rollback` | Restore `SYSTEM.md` notes and skills from a snapshot | `curl -X POST localhost:7750/reflect/rollback -d '{"snapshotId":"snap_..."}'` |
 
 ## Commands
 
@@ -130,11 +116,12 @@ Send these as iMessage to interact with the bot:
 | Command | Description | Example Reply |
 |---|---|---|
 | `/help` | List available slash commands | `Commands:`<br>`/help — list commands` |
-| `/new` | Reset the session, starting a fresh conversation | `✓ New session started` |
+| `/new` | Cancel safely and start a fresh conversation | Session status after safe replacement; no separate progress message. |
 | `/status` | Show session stats: tokens, context, model | `💬 3 msgs - ↑7.2k ↓505 1.1%/128k`<br>`🤖 anthropic/claude-sonnet-4 • 💭 minimal` |
-| `/compact` | Compress session context to free up token space | `✓ Compacted: 15.2k → 2.1k tokens` |
-| `/stop` | Steer the agent to stop after current tool calls finish, then process the next queued message | |
-| `/reload` | Reload models and clear all sessions | `✓ Models reloaded` |
+| `/compact` | Compress context without replaying prior work | No routine progress notification. |
+| `/stop` | Abort current work and pause the focused goal; retain later queued inputs until cancellation settles | `已停止当前执行并暂停目标；普通消息不会自动恢复目标。` |
+| `/goal [status/pause/resume/clear/list/focus/unfocus/objective]` | Installed `pi-goal-x` commands; status works while busy, explicit resume required for imported goals | Native goal status/notification; see [goal compatibility](docs/extensions.md#goals). |
+| `/reload` | Cancel safely and reload this chat model under ownership | Updated session status; no separate progress message. |
 
 ## Settings (`WORKING_DIR/settings.json`)
 
@@ -149,12 +136,6 @@ All fields are optional.
   "richText": {
     "enabled": false,
     "markdown": true
-  },
-  "reflection": {
-    "enabled": true,
-    "hour": 3,
-    "atomFeeds": [],
-    "githubUser": ""
   }
 }
 ```
@@ -162,8 +143,6 @@ All fields are optional.
 **Chat allowlist** controls which chats receive replies (messages are always logged). By default, replies are **off** for all chats (`blacklist: ["*"]`) — opt in specific chats via the web UI or by adding their guid to `whitelist`. Resolution priority: `blacklist[guid]` > `whitelist[guid]` > `blacklist["*"]` > `whitelist["*"]`.
 
 **Rich text** is optional and disabled by default. When enabled, pi-imessage uses a UI automation fallback to open the target conversation, paste an RTF payload, and send it. Currently this is intended for direct-message iMessage chats. With `markdown: true`, pi-imessage interprets `**bold**` spans and renders them as actual bold text in Messages.
-
-**Reflection** runs nightly at the local `hour` (0–23, default 3). Set `enabled` to `false` to pause it. Set `atomFeeds` to a list of Atom/RSS URLs and/or `githubUser` to a GitHub login to include those sources; leave empty to skip.
 
 ## Environment Variables
 
@@ -178,10 +157,9 @@ All fields are optional.
 
 # Development
 
-```bash
-npm run check        # typecheck + lint (run after code changes)
-npm test             # run tests
-```
+See [AGENTS.md](AGENTS.md) for the authoritative development and delivery workflow,
+validation commands, and safety boundaries. Requested code changes include safe
+deployment and live verification by default; the guarded release process remains mandatory.
 
 # How It Works
 
@@ -230,3 +208,15 @@ npm test             # run tests
         ▼
   iMessage (user receives reply via Messages.app)
 ```
+
+### Compaction lifecycle
+
+Automatic and manual compaction retain lifecycle diagnostics in local logs without
+routine chat notifications. The SDK continues unfinished prompts itself; completed replies are never submitted again.
+Compression has a separate bounded deadline (default 10 minutes); normal foreground
+idle/maximum-duration clocks do not run during compression. Failed or unconfirmed
+cancellation pauses work instead of guessing that it is safe to replay. `/stop` and
+`/new` cancel; `/new` refuses to replace state until cancellation settles.
+
+See [compaction lifecycle notes](docs/compaction-lifecycle.md) for SDK semantics,
+queue ownership, validation, and limitations.

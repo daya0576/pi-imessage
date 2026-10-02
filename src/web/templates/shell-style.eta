@@ -1,0 +1,33 @@
+<style data-app-shell="v1">
+:root { color-scheme: dark; --nav-width: 160px; --page-space: 32px; --bg: #111; --surface: #1a1a1a; --border: #292929; --text: #ccc; --muted: #888 }
+*, *::before, *::after { box-sizing: border-box }
+body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.6 monospace; display: flex; height: 100vh; height: 100dvh; overflow: hidden }
+* { scrollbar-width: thin; scrollbar-color: #333 transparent }
+::-webkit-scrollbar { width: 8px; height: 8px }
+::-webkit-scrollbar-track { background: transparent }
+::-webkit-scrollbar-thumb { background: #333 }
+::-webkit-scrollbar-thumb:hover { background: #444 }
+.app-nav { width: var(--nav-width); flex: 0 0 var(--nav-width); padding: var(--page-space) 12px; border-right: 1px solid var(--border); overflow-y: auto }
+.app-nav a { display: block; margin: 0 0 4px; padding: 8px 12px; color: var(--muted); font: inherit; line-height: 24px; white-space: nowrap; text-decoration: none; border-radius: 4px; opacity: 1 }
+.app-nav a:hover { color: #eee; background: #191919 }
+.app-nav a.active { color: #eee; background: #222 }
+.app-nav a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid #aaa; outline-offset: 2px }
+body > main, body > .content { flex: 1; min-width: 0; min-height: 0; padding: var(--page-space); overflow: auto }
+body.page-logs > .content { overflow: hidden }
+body > .chat-list, body > .sidebar { width: 220px; flex: 0 0 220px; padding: var(--page-space) 16px; border-left: 1px solid var(--border); overflow-y: auto }
+h1, h2, h3 { font: inherit; font-weight: normal }
+main > h1 { margin: 0 0 16px; color: #eee }
+.card { background: var(--surface) }
+.card-header { border-bottom-color: var(--border) }
+.table-wrap, .card-messages { max-width: 100%; overflow-x: auto }
+.page-sources .row { border-color: var(--border) }
+button { border-radius: 3px }
+@media (max-width: 900px) { body > .chat-list, body > .sidebar { display: none } }
+@media (max-width: 600px) {
+  :root { --page-space: 16px }
+  body { flex-direction: column }
+  .app-nav { width: 100%; flex: 0 0 57px; display: flex; align-items: center; gap: 4px; padding: 8px 12px; border-right: 0; border-bottom: 1px solid var(--border); overflow-x: auto; overflow-y: hidden }
+  .app-nav a { flex: 0 0 auto; margin: 0; padding: 8px 12px; line-height: 24px }
+  .card-header { gap: 8px; overflow-wrap: anywhere }
+}
+</style>

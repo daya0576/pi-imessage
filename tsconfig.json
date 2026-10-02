@@ -12,7 +12,8 @@
 		"outDir": "./dist",
 		"rootDir": "./src",
 		"esModuleInterop": true,
-		"resolveJsonModule": true
+		"resolveJsonModule": true,
+		"rewriteRelativeImportExtensions": true
 	},
 	"include": ["src"],
 	"exclude": ["node_modules", "dist"]

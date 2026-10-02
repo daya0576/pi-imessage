@@ -3,19 +3,22 @@
 import { existsSync, readFileSync, watch } from "node:fs";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
 import { join } from "node:path";
-import { type AgentManager, BASE_PERSONALITY, buildSystemPrompt, resolveSessionStorage } from "../agent.js";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { type AgentManager, resolveSessionStorage } from "../agent.js";
+import type { AutomationService } from "../automation.js";
 import type { CronService } from "../cron.js";
-import { listSkillCatalog } from "../harness.js";
-import { activeMemoryItems, listMemoryNamespaces, loadAllMemoryItems, readCoreMemory } from "../memory.js";
 import type { ModelHealthChecker } from "../model-health.js";
-import { rollbackSnapshot } from "../reflection.js";
+import { allowsNightlyReset, createNightlyReset } from "../nightly-reset.js";
 import { REMINDER_STATUSES, type ReminderService, type ReminderStatus } from "../reminders.js";
 import type { SelfEchoFilter } from "../self-echo.js";
 import type { MessageSender } from "../send.js";
 import type { Settings } from "../settings.js";
 import type { AgentReply } from "../types.js";
+import { handleAutomationRequest } from "./automation.js";
 import { getChatBlocks } from "./data.js";
-import { type MemoryPageData, renderLogsPage, renderMemoryPage, renderPage, renderScheduledPage } from "./render.js";
+import { handleMemoryRequest } from "./memory.js";
+import { renderLogsPage, renderPage, renderScheduledPage } from "./render.js";
+import { handleSourcesRequest } from "./sources.js";
 
 export interface WebServerConfig {
 	workingDir: string;
@@ -29,6 +32,7 @@ export interface WebServerConfig {
 	checkModelHealth: ModelHealthChecker;
 	reminders: ReminderService;
 	cron: CronService;
+	automation?: AutomationService;
 }
 
 export interface WebServer {
@@ -64,56 +68,6 @@ function parseJsonBody(request: IncomingMessage): Promise<Record<string, unknown
 	});
 }
 
-/** Read harness view for the Memory tab: personality, prompt, memory, skills. */
-function readMemories(workingDir: string): MemoryPageData {
-	const activeByNamespace = new Map<string, ReturnType<typeof activeMemoryItems>>();
-	for (const item of activeMemoryItems(loadAllMemoryItems(workingDir))) {
-		const list = activeByNamespace.get(item.namespace) ?? [];
-		list.push(item);
-		activeByNamespace.set(item.namespace, list);
-	}
-
-	const namespaces = listMemoryNamespaces(workingDir).map((entry) => {
-		const items = (activeByNamespace.get(entry.namespace) ?? [])
-			.slice()
-			.sort(
-				(a, b) => (b.event_time ?? "").localeCompare(a.event_time ?? "") || b.created_at.localeCompare(a.created_at)
-			)
-			.map((item) => ({
-				id: item.id,
-				kind: item.kind,
-				text: item.text,
-				subjects: item.subjects,
-				event_time: item.event_time,
-				created_at: item.created_at,
-				importance: item.importance,
-				confidence: item.confidence,
-			}));
-		return {
-			namespace: entry.namespace,
-			active: entry.active,
-			total: entry.total,
-			items,
-		};
-	});
-
-	const skills = listSkillCatalog(workingDir).map((skill) => ({
-		name: skill.name,
-		description: skill.description,
-		scope: skill.scope,
-		chatGuid: skill.chatGuid,
-		instructions: skill.instructions,
-	}));
-
-	return {
-		personality: BASE_PERSONALITY,
-		prompt: buildSystemPrompt(workingDir),
-		core: readCoreMemory(workingDir),
-		namespaces,
-		skills,
-	};
-}
-
 export function createWebServer(config: WebServerConfig): WebServer {
 	const {
 		workingDir,
@@ -128,6 +82,9 @@ export function createWebServer(config: WebServerConfig): WebServer {
 		reminders,
 		cron,
 	} = config;
+	const nightlyReset = agent.getRuntimeStatus
+		? createNightlyReset(workingDir, { newSession: agent.newSession, getRuntimeStatus: agent.getRuntimeStatus })
+		: undefined;
 	const sseClients = new Set<ServerResponse>();
 	let fsWatcher: ReturnType<typeof watch> | null = null;
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -182,7 +139,40 @@ export function createWebServer(config: WebServerConfig): WebServer {
 	}
 
 	async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+		if (handleMemoryRequest(request, response, workingDir, getAgentDir())) return;
+		if (handleSourcesRequest(request, response, workingDir)) return;
+		if (await handleAutomationRequest(request, response, config.automation)) return;
 		const url = new URL(request.url ?? "/", `http://localhost:${port}`);
+
+		if (url.pathname === "/maintenance/nightly-reset") {
+			if (
+				!allowsNightlyReset(request.socket.remoteAddress, request.headers.origin, request.headers["x-session-reset"])
+			) {
+				jsonResponse(response, 403, { error: "Local maintenance only" });
+				return;
+			}
+			if (!nightlyReset || process.env.WORKER_ENABLED === "false") {
+				jsonResponse(response, 503, { error: "Session reset unavailable on an inactive worker" });
+				return;
+			}
+			try {
+				if (request.method === "GET") {
+					const receipt = nightlyReset.inspect(url.searchParams.get("runId") ?? "");
+					jsonResponse(response, receipt ? 200 : 404, receipt ?? { error: "No receipt" });
+				} else if (request.method === "POST") {
+					const body = await parseJsonBody(request);
+					if (typeof body.runId !== "string") throw new Error("runId required");
+					const receipt = await nightlyReset.reset(body.runId);
+					jsonResponse(response, receipt.status === "completed" ? 200 : 409, receipt);
+				} else {
+					jsonResponse(response, 405, { error: "Method not allowed" });
+				}
+			} catch {
+				console.error("[nightly-reset] request failed; inspect durable receipt, do not replay");
+				jsonResponse(response, 409, { error: "Reset unconfirmed; inspect receipt before further action" });
+			}
+			return;
+		}
 
 		// SSE
 		if (url.pathname === "/events") {
@@ -194,20 +184,6 @@ export function createWebServer(config: WebServerConfig): WebServer {
 			response.write("retry: 5000\n\n");
 			sseClients.add(response);
 			request.on("close", () => sseClients.delete(response));
-			return;
-		}
-
-		// Memory page
-		if (url.pathname === "/memory" && request.method === "GET") {
-			const html = renderMemoryPage(readMemories(workingDir));
-			response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-			response.end(html);
-			return;
-		}
-
-		// Memory data API (JSON)
-		if (url.pathname === "/memory/data" && request.method === "GET") {
-			jsonResponse(response, 200, readMemories(workingDir));
 			return;
 		}
 
@@ -279,7 +255,12 @@ export function createWebServer(config: WebServerConfig): WebServer {
 		// GET /health/runtime — lightweight readiness/drain state for deployment.
 		if (request.method === "GET" && url.pathname === "/health/runtime") {
 			const runtime = agent.getRuntimeStatus?.() ?? { activePrompts: 0, sessions: 0, lastAgentActivityAt: null };
-			jsonResponse(response, 200, { ok: true, ...runtime });
+			jsonResponse(response, 200, {
+				ok: true,
+				...runtime,
+				nodeExecutable: process.execPath,
+				nodeVersion: process.versions.node,
+			});
 			return;
 		}
 
@@ -287,27 +268,6 @@ export function createWebServer(config: WebServerConfig): WebServer {
 		if (request.method === "GET" && url.pathname === "/health/model") {
 			const result = await checkModelHealth();
 			jsonResponse(response, result.ok ? 200 : 503, result);
-			return;
-		}
-
-		// POST /reflect/rollback — restore SYSTEM.md notes and skills from a snapshot
-		if (request.method === "POST" && url.pathname === "/reflect/rollback") {
-			try {
-				const body = await parseJsonBody(request);
-				const snapshotId = body.snapshotId as string;
-				if (!snapshotId) {
-					jsonResponse(response, 400, { error: "snapshotId required" });
-					return;
-				}
-				console.log(`[web] /reflect/rollback start: ${snapshotId}`);
-				const manifest = await rollbackSnapshot(workingDir, snapshotId);
-				agent.invalidateSessions();
-				console.log(`[web] /reflect/rollback done: ${snapshotId} files=${manifest.files.length}`);
-				jsonResponse(response, 200, { ok: true, snapshotId, files: manifest.files.length });
-			} catch (error) {
-				console.error("[web] /reflect/rollback error:", error);
-				jsonResponse(response, 500, { error: String(error) });
-			}
 			return;
 		}
 

@@ -12,6 +12,16 @@ LAUNCH_DIR="${HOME}/Library/LaunchAgents"
 SERVICE_PLIST="${LAUNCH_DIR}/${LABEL}.plist"
 WATCHDOG_PLIST="${LAUNCH_DIR}/${WATCHDOG_LABEL}.plist"
 STABLE_WATCHDOG="${IMESSAGE_DIR}/watchdog/pi-imessage-watchdog.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NODE_BIN="$(/usr/bin/python3 "${SCRIPT_DIR}/service_runtime.py" node)"
+export NODE_BIN
+DYLD_FALLBACK_LIBRARY_PATH="$(/usr/bin/python3 "${SCRIPT_DIR}/service_runtime.py" libraries)"
+export DYLD_FALLBACK_LIBRARY_PATH
+export PATH="$(dirname "${NODE_BIN}"):${PATH}"
+if [[ "$(/usr/bin/python3 "${SCRIPT_DIR}/service_runtime.py" needs-reload)" == "true" ]]; then
+  echo "Loaded runtime configuration must change; use guarded ops/deploy-detached.sh, not an installer restart." >&2
+  exit 1
+fi
 
 [[ -x "${CURRENT_LINK}/dist/main.js" || -f "${CURRENT_LINK}/dist/main.js" ]] || {
   echo "Missing built immutable release at ${CURRENT_LINK}" >&2
@@ -47,6 +57,7 @@ cat >"${SERVICE_PLIST}.new" <<PLIST
 </dict></plist>
 PLIST
 plutil -lint "${SERVICE_PLIST}.new" >/dev/null
+/usr/bin/python3 "${SCRIPT_DIR}/service_runtime.py" pin --plist "${SERVICE_PLIST}.new" >/dev/null
 mv "${SERVICE_PLIST}.new" "${SERVICE_PLIST}"
 
 cat >"${WATCHDOG_PLIST}.new" <<PLIST
@@ -79,8 +90,8 @@ bootstrap_with_retry() {
   return 1
 }
 
-# Never unload a healthy main service during installation. The program path is
-# stable (`releases/current`), so a kickstart picks up the selected release.
+# Never unload a healthy main service during installation. Runtime configuration
+# changes are rejected above and must use blue-green's validated idle handoff.
 if launchctl print "${DOMAIN}/${LABEL}" >/dev/null 2>&1; then
   launchctl kickstart -k "${DOMAIN}/${LABEL}"
 else

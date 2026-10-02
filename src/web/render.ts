@@ -3,10 +3,14 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Eta } from "eta";
+import type { AutomationRun, AutomationView } from "../automation.js";
 import type { CronJobView, CronRun } from "../cron.js";
+import { MEMORY_STATUSES, MEMORY_VIEWS, type MemoryViewData, memoryLink } from "../memory-view.js";
+import { MEMORY_KINDS } from "../memory.js";
 import type { Reminder } from "../reminders.js";
 import { isReplyEnabled } from "../settings.js";
 import type { Settings } from "../settings.js";
+import type { SourcesData } from "../sources.js";
 import { firstLinePreview, senderLabel } from "../store.js";
 import type { MessageType } from "../types.js";
 import type { ChatBlock } from "./data.js";
@@ -90,40 +94,21 @@ export function renderScheduledPage(data: ScheduledPageData): string {
 	return eta.render("scheduled", data);
 }
 
-export interface MemoryItemView {
-	id: string;
-	kind: string;
-	text: string;
-	subjects: string[];
-	event_time: string | null;
-	created_at: string;
-	importance: number;
-	confidence: number;
+export function renderTasksPage(data: { tasks: AutomationView[]; runs: AutomationRun[] }): string {
+	return eta.render("tasks", data);
 }
 
-export interface MemoryNamespaceView {
-	namespace: string;
-	active: number;
-	total: number;
-	items: MemoryItemView[];
+export function renderSourcesPage(data: SourcesData): string {
+	return eta.render("sources", data);
 }
 
-export interface SkillView {
-	name: string;
-	description: string;
-	scope: "global" | "chat";
-	chatGuid?: string;
-	instructions: string;
-}
-
-export interface MemoryPageData {
-	personality: string;
-	prompt: string;
-	core: string;
-	namespaces: MemoryNamespaceView[];
-	skills: SkillView[];
-}
-
-export function renderMemoryPage(data: MemoryPageData): string {
-	return eta.render("memory", data);
+export function renderMemoryPage(data: MemoryViewData): string {
+	return eta.render("memory", {
+		...data,
+		views: MEMORY_VIEWS,
+		statuses: MEMORY_STATUSES,
+		kinds: MEMORY_KINDS,
+		link: memoryLink,
+		statusLabel: (status: string) => MEMORY_STATUSES.find(({ id }) => id === status)?.label || "无法确认",
+	});
 }

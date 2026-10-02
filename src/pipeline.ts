@@ -12,6 +12,7 @@
  *            Receives ChatContext (not IncomingMessage) — only chat-level identity.
  */
 
+import { joinTextBatch } from "./message-batch.js";
 import type { ChatContext, IncomingMessage, OutgoingMessage } from "./types.js";
 import { createOutgoingMessage, toChatContext } from "./types.js";
 
@@ -27,7 +28,9 @@ export type StartTask = (
 	chat: ChatContext,
 	incoming: IncomingMessage,
 	outgoing: OutgoingMessage,
-	emit: EmitFn
+	emit: EmitFn,
+	/** Release control-command admission after synchronous fencing, before cancellation/delivery settlement. */
+	admitted?: () => void
 ) => Promise<void>;
 
 export type EndTask = (chat: ChatContext, outgoing: OutgoingMessage) => Promise<OutgoingMessage> | OutgoingMessage;
@@ -36,7 +39,8 @@ export interface MessagePipeline {
 	before(task: BeforeTask): void;
 	start(task: StartTask): void;
 	end(task: EndTask): void;
-	process(incoming: IncomingMessage): Promise<OutgoingMessage>;
+	process(incoming: IncomingMessage, admitted?: () => void): Promise<OutgoingMessage>;
+	processBatch(incoming: IncomingMessage[]): Promise<void>;
 }
 
 export function createMessagePipeline(): MessagePipeline {
@@ -47,20 +51,31 @@ export function createMessagePipeline(): MessagePipeline {
 	async function runEndTasks(chat: ChatContext, outgoing: OutgoingMessage): Promise<void> {
 		let result = outgoing;
 		for (const task of endTasks) {
+			if (result.isCurrent && !result.isCurrent()) {
+				console.log("[pipeline] stale reply suppressed before delivery");
+				return;
+			}
 			result = await task(chat, result);
 			if (!result.shouldContinue) return;
 		}
 	}
 
-	async function process(incoming: IncomingMessage): Promise<OutgoingMessage> {
+	async function prepare(incoming: IncomingMessage): Promise<OutgoingMessage> {
 		const chat = toChatContext(incoming);
 		let outgoing = createOutgoingMessage();
-
 		for (const task of beforeTasks) {
 			outgoing = await task(chat, incoming, outgoing);
-			if (!outgoing.shouldContinue) return outgoing;
+			if (!outgoing.shouldContinue) break;
 		}
+		return outgoing;
+	}
 
+	async function run(
+		incoming: IncomingMessage,
+		outgoing: OutgoingMessage,
+		admitted?: () => void
+	): Promise<OutgoingMessage> {
+		const chat = toChatContext(incoming);
 		// emit() is sync — queues end tasks onto endChain for serialized execution
 		let endChain = Promise.resolve();
 		const emit: EmitFn = (out) => {
@@ -70,13 +85,52 @@ export function createMessagePipeline(): MessagePipeline {
 					console.error(`[pipeline] end task error for ${chat.chatGuid}:`, error);
 				});
 		};
-		for (const task of startTasks) {
-			await task(chat, incoming, outgoing, emit);
-			if (!outgoing.shouldContinue) break;
+		try {
+			for (const task of startTasks) {
+				await task(chat, incoming, outgoing, emit, admitted);
+				if (!outgoing.shouldContinue) break;
+			}
+		} finally {
+			// Drain emitted replies even on timeout/error before releasing the transport queue.
+			await endChain;
 		}
-		await endChain;
 
 		return outgoing;
+	}
+
+	async function process(incoming: IncomingMessage, admitted?: () => void): Promise<OutgoingMessage> {
+		try {
+			const outgoing = await prepare(incoming);
+			return outgoing.shouldContinue ? await run(incoming, outgoing, admitted) : outgoing;
+		} finally {
+			// Dropped/invalid commands and failures must also release admission.
+			admitted?.();
+		}
+	}
+
+	async function processBatch(messages: IncomingMessage[]): Promise<void> {
+		if (messages.length === 0) return;
+		if (messages.length === 1) {
+			await process(messages[0]);
+			return;
+		}
+		// Validate before any task can mutate an input or produce a side effect.
+		joinTextBatch(messages);
+		const prepared: IncomingMessage[] = [];
+		let firstOutgoing: OutgoingMessage | undefined;
+		for (const message of messages) {
+			try {
+				// Log/store/filter each ORIGINAL message, never the synthetic joined text.
+				const outgoing = await prepare(message);
+				if (outgoing.shouldContinue) {
+					prepared.push(message);
+					firstOutgoing ??= outgoing;
+				}
+			} catch (error: unknown) {
+				console.error(`[pipeline] before task error for ${message.chatGuid}:`, error);
+			}
+		}
+		if (firstOutgoing) await run(joinTextBatch(prepared), firstOutgoing);
 	}
 
 	return {
@@ -84,5 +138,6 @@ export function createMessagePipeline(): MessagePipeline {
 		start: (task) => startTasks.push(task),
 		end: (task) => endTasks.push(task),
 		process,
+		processBatch,
 	};
 }
