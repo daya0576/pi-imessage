@@ -38,8 +38,20 @@ finish first:
 DEPLOY_CHAT_GUID='iMessage;-;+...' ops/deploy-detached.sh
 ```
 
+Before detaching, the wrapper atomically registers a `deploy-*.status.json`
+receipt beside its log. It transitions through `queued` and `running` to
+`completed` only after the blue-green script exits successfully (including its
+post-switch probes), or `failed` after repair is attempted. Inspect the explicit
+status and exit code; the existence of a log/marker is never success evidence.
+
 Manual deployment outside the agent can call `ops/deploy-blue-green.sh`
 directly.
+
+Dependency locks are generated with npm 12, which ignores dependency-published
+shrinkwraps; otherwise the SDK's shrinkwrap defeats the security override for
+`brace-expansion`. The committed lock is compatible with production npm 10
+`npm ci`. Keep the production audit gate enabled. The three Pi SDK packages
+move together, and the service requires Node.js >=22.22.2.
 
 ## Remote review and automatic deployment
 

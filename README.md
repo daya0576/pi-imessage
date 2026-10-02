@@ -20,7 +20,7 @@ A minimal and self-managing iMessage bot — powered by [pi](https://github.com/
 > - The agent runs with Full Disk Access and can read/write your filesystem as part of its tool use
 > - The web UI has no authentication and is accessible to anyone on your local network; set `WEB_ENABLED=false` if that's a concern
 
-Prerequisites: macOS with Messages.app, Full Disk Access for the terminal, [Pi Coding Agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start) authenticated
+Prerequisites: macOS with Messages.app, Node.js 22.22.2 or newer, Python 3 (shared memory writer), Full Disk Access for the terminal, [Pi Coding Agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start) authenticated
 
 ```bash
 npm install -g @kingcrab/pi-imessage
@@ -41,6 +41,13 @@ Available at `http://localhost:7750` (configurable via `WEB_HOST` and `WEB_PORT`
 - Memory (global & per-chat)
 
 P.S. Disable with `WEB_ENABLED=false` and let the agent build your own web UI
+
+## Shared Extensions
+
+Headless sessions load only reviewed, enabled Pi capabilities, never the full
+terminal extension set. Domain skills and the message transport remain local;
+shared tools must not introduce cross-chat state or a second autonomous runner.
+See [extension boundaries and acceptance](docs/extensions.md).
 
 ## Structured Memory
 
@@ -106,18 +113,17 @@ The agent is aware of these endpoints via its system prompt and can use them as 
 
 ## Commands
 
-`/goal <objective>` starts bounded work in the normal chat session. `/goal` or `/goal status` shows live state without a model call, even while busy. `/goal pause`, `/goal resume`, and `/goal clear` control it. The fixed lifetime budget is **4 outer prompt calls** (not SDK tool turns or tokens); resume never renews it. Restart never automatically resumes. See [goal semantics and limitations](docs/goals.md). Source support is not a claim that a running deployment has been updated.
-
 Send these as iMessage to interact with the bot:
 
 | Command | Description | Example Reply |
 |---|---|---|
 | `/help` | List available slash commands | `Commands:`<br>`/help — list commands` |
-| `/new` | Cancel safely, start a fresh conversation, keep the old goal paused for inspection | Session status after safe replacement; no separate progress message. |
+| `/new` | Cancel safely and start a fresh conversation | Session status after safe replacement; no separate progress message. |
 | `/status` | Show session stats: tokens, context, model | `💬 3 msgs - ↑7.2k ↓505 1.1%/128k`<br>`🤖 anthropic/claude-sonnet-4 • 💭 minimal` |
 | `/compact` | Compress context without replaying prior work | No routine progress notification. |
-| `/stop` | Abort current work and pause the goal; retain later queued inputs until cancellation settles | `已停止当前执行并暂停目标；普通消息不会自动恢复目标。` |
-| `/reload` | Cancel safely, pause the goal, reload this chat model under ownership | Updated session status; no separate progress message. |
+| `/stop` | Abort current work and pause the focused goal; retain later queued inputs until cancellation settles | `已停止当前执行并暂停目标；普通消息不会自动恢复目标。` |
+| `/goal [status/pause/resume/clear/list/focus/unfocus/objective]` | Installed `pi-goal-x` commands; status works while busy, explicit resume required for imported goals | Native goal status/notification; see [goal compatibility](docs/extensions.md#goals). |
+| `/reload` | Cancel safely and reload this chat model under ownership | Updated session status; no separate progress message. |
 
 ## Settings (`WORKING_DIR/settings.json`)
 

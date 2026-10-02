@@ -73,6 +73,41 @@ sequenceDiagram
 
 ## 3. Runtime write
 
+### Shared backend (issue #28)
+
+`src/memory.ts` preserves its exported read functions and async `saveMemory(workingDir, input)` API.
+It retains the public input guards, but no longer implements IDs, deduplication, locking,
+supersedes checks, or JSONL appends. Those operations call `append_item` in the exact
+`memory_cli.py` backend used by the terminal `pi-memory` wrapper. Python 3 is required
+on the service PATH; failures reject the write rather than falling back to another writer.
+The shared backend also validates actual calendar dates, not only the `YYYY-MM-DD` shape.
+
+- Authoritative source: `daya0576/dotfile`, `pi-config/agent/memory/memory_cli.py`.
+- Source file revision: `6bef3d978af37c0ceb0c59587c071eee140ff004` (2026-09-06).
+- Uncompressed SHA-256: `df63bf7bc028636803bd7f14914a71d38e569d92006435bfdd71efb66a910dd4`.
+- Vendoring: byte-exact gzip/base64 snapshot embedded in `src/memory.ts`, so the existing
+  TypeScript build includes it in `dist/memory.js` without package/build changes.
+  The regression test decompresses it and pins the hash. Refresh from the authoritative
+  file with Python `base64.b64encode(gzip.compress(source_bytes, mtime=0))`, then update
+  the revision/hash and run the compatibility tests; never hand-edit backend behavior.
+
+The Python bridge transports JSON over stdin (no shell or CLI-option interpolation),
+compiles the unchanged source with a virtual script filename under
+`WORKING_DIR/skills/file-memory/`, and invokes its `append_item` function.
+That source resolves its store relative to `__file__`, not the process cwd, HOME,
+or the terminal wrapper's personal store. It does not create or overwrite a runtime
+`memory_cli.py`. All data remains at **`WORKING_DIR/skills/file-memory/namespaces/`**,
+and all writers use the existing `.write-lock` in that store.
+Existing records and IDs are not migrated or rewritten; content-based backend deduplication
+recognizes records produced by the former TS writer even when their hash format differs.
+TS continues to provide the thin read/active-view/search adapter, retaining its existing
+read ordering and search behavior. Runtime tools and reflection still enter through
+`save_memory`; neither gets an independent writer.
+
+Audit: issue #24 and fetched origin/claw history did not contain a completed shared-writer
+consolidation commit to port. The completed row in #28 was not evidence of an implementation
+in `origin/main`; the authoritative shared CLI was reused instead of inventing a new backend.
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -97,8 +132,8 @@ sequenceDiagram
             A->>A: Set supersedes_id
         end
         A->>M: save_memory(structured record)
-        M->>M: Validate schema, deduplication, and supersedes
-        M->>S: Append JSONL
+        M->>M: Public guards, then shared CLI append_item<br/>validation + dedup + supersedes + lock
+        M->>S: Shared CLI appends JSONL + fsync
         S-->>M: Stored record ID
         M-->>A: Stored / already exists
         A-->>P: Answer
@@ -132,8 +167,8 @@ sequenceDiagram
 
     loop Each durable memory candidate
         R->>M: save_memory(structured record)
-        M->>M: Validate schema, deduplication, and supersedes
-        M->>S: Append JSONL
+        M->>M: Same shared CLI append_item<br/>validation + dedup + supersedes + lock
+        M->>S: Shared CLI appends JSONL + fsync
         S-->>M: Stored / already exists
         M-->>R: Result
     end
@@ -157,7 +192,7 @@ Reflection rules:
 
 - Main LLM: understand natural language, select namespaces, decide whether to remember, and produce structured fields.
 - Reflection LLM: inspect unprocessed conversations nightly, catch omissions, deduplicate, and identify facts that emerge across messages.
-- Memory Tool: read, validate, deduplicate, append, and apply superseding corrections without interpreting natural language through keyword lists.
+- Memory Tool: thin TS reads and write transport; the shared `memory_cli.py` exclusively validates writes, deduplicates, locks, appends, and checks superseding corrections. Neither interprets natural language through keyword lists.
 - v2 JSONL: the sole structured-memory source of truth.
 - Coverage Manifest: proves that no legacy `MEMORY.md` source block was silently skipped.
 - Reflection Checkpoint: makes nightly processing retryable and prevents silent message loss.

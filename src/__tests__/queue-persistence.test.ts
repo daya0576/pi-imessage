@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -15,7 +15,10 @@ afterEach(() => {
 	rmSync(dir, { recursive: true, force: true });
 });
 
-const read = () => JSON.parse(readFileSync(path, "utf-8")) as { pending: string[]; inflight: string[] };
+const read = () => {
+	const { pending, inflight } = JSON.parse(readFileSync(path, "utf-8")) as { pending: string[]; inflight: string[] };
+	return { pending, inflight };
+};
 
 describe("AsyncQueue persistence + ack replay", () => {
 	it("keeps a pulled-but-unacked item in-flight and replays it on restart", async () => {
@@ -85,6 +88,32 @@ describe("AsyncQueue persistence + ack replay", () => {
 		const q = createAsyncQueue<string>(path);
 		expect(await q.pull()).toBe("legacy1");
 		expect(await q.pull()).toBe("legacy2");
+	});
+
+	it("persists durable acceptance keys through handoff, ack and restart", async () => {
+		const queue = createAsyncQueue<string>(path);
+		const waiting = queue.pull();
+		expect(queue.pushDurable("scheduled", "run-1")).toBe(true);
+		expect(await waiting).toBe("scheduled");
+		queue.ack("scheduled");
+		const restarted = createAsyncQueue<string>(path);
+		expect(restarted.pushDurable("duplicate", "run-1")).toBe(false);
+		expect(read()).toEqual({ pending: [], inflight: [] });
+		expect(JSON.parse(readFileSync(path, "utf-8")).acceptedKeys).toEqual(["run-1"]);
+		expect(restarted.pushDurable("next", "run-2")).toBe(true);
+		expect(await restarted.pull()).toBe("next");
+	});
+
+	it("does not accept or wake a consumer when durable persistence fails", async () => {
+		const directory = join(dir, "missing");
+		const queue = createAsyncQueue<string>(join(directory, "queue.json"));
+		const waiting = queue.pull();
+		expect(() => queue.pushDurable("retry", "run-1")).toThrow();
+		mkdirSync(directory);
+		expect(queue.pushDurable("retry", "run-1")).toBe(true);
+		expect(await waiting).toBe("retry");
+		queue.close();
+		expect(() => queue.pushDurable("late", "run-2")).toThrow("Queue closed");
 	});
 
 	it("does not create a file when no persistPath is given", async () => {

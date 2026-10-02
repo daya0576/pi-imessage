@@ -71,6 +71,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 			},
 		},
 		SettingsManager: {
+			inMemory: sdk.SettingsManager.inMemory,
 			create: () =>
 				sdk.SettingsManager.inMemory({
 					defaultThinkingLevel: "high",

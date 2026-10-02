@@ -30,6 +30,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { AgentManager } from "./agent.js";
+import { goalCommand } from "./goal-compat.js";
 import type { DigestLogger } from "./logger.js";
 import type { BeforeTask, EmitFn, EndTask, StartTask } from "./pipeline.js";
 import type { SelfEchoFilter } from "./self-echo.js";
@@ -54,11 +55,11 @@ function formatIncomingTarget(chat: ChatContext, incoming: IncomingMessage): str
 const HELP_TEXT = [
 	"Commands:",
 	"/help — list commands",
-	"/goal <目标> — 开始目标（最多 4 轮）；/goal [status|pause|resume|clear]",
 	"/new — reset this chat session",
 	"/status — show session stats",
 	"/compact [instructions] — compress session context",
 	"/stop — 停止当前执行并暂停目标；普通消息不会恢复",
+	"/goal [status|pause|resume|clear|list|focus|unfocus|objective] — shared native goals",
 	"/reload — reload model settings for this chat",
 	"/thinking <level|default> — set thinking for this chat only",
 ].join("\n");
@@ -290,6 +291,23 @@ export function createCommandHandlerTask(
 ): StartTask {
 	return async (chat, incoming, outgoing, emit, admitted) => {
 		const text = incoming.text?.trim();
+
+		if (goalCommand(text ?? "")) {
+			outgoing.shouldContinue = false;
+			await agent.processMessage(
+				incoming,
+				async (reply) => {
+					emit({
+						...outgoing,
+						shouldContinue: true,
+						isCurrent: () => outgoing.isCurrent?.() !== false && reply.isCurrent?.() !== false,
+						reply: { type: "message", text: formatAgentReply(reply) },
+					});
+				},
+				{ onAdmitted: admitted, hasQueuedInput: () => hasQueuedInput?.(chat.chatGuid) ?? false }
+			);
+			return;
+		}
 
 		if (text === "/help") {
 			console.log(`[sid] /help command: ${chat.chatGuid} → listed commands`);

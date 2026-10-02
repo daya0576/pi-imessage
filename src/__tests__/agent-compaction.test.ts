@@ -4,6 +4,23 @@ import { join } from "node:path";
 import type * as CodingAgent from "@earendil-works/pi-coding-agent";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { HeadlessExtensionsOptions } from "../headless-extensions.js";
+
+// This suite owns SDK lifecycle simulation; resource discovery/isolation is
+// independently covered by real-SDK headless-extensions tests.
+vi.mock("../headless-extensions.js", () => ({
+	createHeadlessResourceLoader: (options: HeadlessExtensionsOptions) => {
+		options.settingsManager.applyOverrides({
+			defaultTools: options.readOnly ? ["read"] : ["read", "bash", "edit", "write"],
+		});
+		return {
+			reload: async () => {},
+			getExtensions: () => ({ errors: [], extensions: [] }),
+			getHeadlessAudit: () => ({ loaded: [], skipped: [] }),
+			disposeArtifacts: () => {},
+		};
+	},
+}));
 import { AGENT_COMPACT_TIMEOUT_MS, createAgentManager, runWithActivityTimeout } from "../agent.js";
 import { createMessagePipeline } from "../pipeline.js";
 import { AgentPromptTimeoutError } from "../prompt-timeout.js";
@@ -44,6 +61,10 @@ class FakeSession {
 		}),
 	};
 	setThinkingLevel = vi.fn();
+	bindExtensions = async () => {};
+	extensionRunner = { emit: async () => {} };
+	getActiveToolNames = () => ["read", "bash", "edit", "write"];
+	getAllTools = () => [];
 	dispose = vi.fn();
 	clearQueue = vi.fn();
 	getContextUsage = () => ({ tokens: control.mode === "plain" || this.prompt.mock.calls.length > 1 ? 0 : 256000 });

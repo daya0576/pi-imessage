@@ -2,6 +2,23 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { HeadlessExtensionsOptions } from "../headless-extensions.js";
+
+// This suite owns SDK lifecycle simulation; resource discovery/isolation is
+// independently covered by real-SDK headless-extensions tests.
+vi.mock("../headless-extensions.js", () => ({
+	createHeadlessResourceLoader: (options: HeadlessExtensionsOptions) => {
+		options.settingsManager.applyOverrides({
+			defaultTools: options.readOnly ? ["read"] : ["read", "bash", "edit", "write"],
+		});
+		return {
+			reload: async () => {},
+			getExtensions: () => ({ errors: [], extensions: [] }),
+			getHeadlessAudit: () => ({ loaded: [], skipped: [] }),
+			disposeArtifacts: () => {},
+		};
+	},
+}));
 type SessionView = {
 	thinkingLevel: string;
 	setThinkingLevel: ReturnType<typeof vi.fn<(level: string, options?: { persist: boolean }) => void>>;
@@ -53,6 +70,11 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 					session.thinkingLevel = level;
 				}),
 				setModel: async () => {},
+				reload: async () => {},
+				bindExtensions: async () => {},
+				extensionRunner: { emit: async () => {} },
+				getActiveToolNames: () => options.tools ?? [],
+				getAllTools: () => [],
 				dispose: vi.fn(),
 				subscribe: (fn: (event: Record<string, unknown>) => void) => {
 					listeners.add(fn);
@@ -120,7 +142,6 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 });
 import { type AgentManager, createAgentManager } from "../agent.js";
 import { writeChatThinking } from "../chat-thinking.js";
-import { createGoalController } from "../goal.js";
 import { AgentPromptTimeoutError } from "../prompt-timeout.js";
 import { createCallAgentTask } from "../tasks.js";
 import { type AgentReply, type IncomingMessage, createOutgoingMessage, toChatContext } from "../types.js";
@@ -214,20 +235,6 @@ describe("agent pause regression", () => {
 		expect(replies.filter((r) => r.kind === "assistant").map((r) => r.text)).toEqual([
 			"自动续接再次超时，已停止，不会反复重试。",
 		]);
-	});
-	it("does not continue ordinary work through a paused goal", async () => {
-		vi.useFakeTimers();
-		fake.hang = true;
-		fake.recoverable = true;
-		const goals = createGoalController(root);
-		goals.command("chat-a", "authorized goal");
-		const manager = await createAgentManager({ workingDir: root, goals });
-		const pending = manager.processMessage(msg(), async () => {});
-		const rejected = expect(pending).rejects.toBeInstanceOf(AgentPromptTimeoutError);
-		await vi.advanceTimersByTimeAsync(120001);
-		await rejected;
-		expect(fake.promptCalls).toHaveLength(1);
-		expect(goals.status("chat-a")).toContain("状态：已暂停");
 	});
 	it("keeps repeated model timeouts silent and delivers the later successful response", async () => {
 		fake.modelErrors = ["Request timed out.", "Request timed out."];

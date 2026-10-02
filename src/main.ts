@@ -4,6 +4,7 @@
 
 import "dotenv/config";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createAgentManager } from "./agent.js";
@@ -11,12 +12,13 @@ import { createAutomationNotifier } from "./automation-send.js";
 import { createAutomationService } from "./automation.js";
 import { createBackgroundService } from "./background.js";
 import { type CronJobConfig, createCronService } from "./cron.js";
-import { createGoalController } from "./goal.js";
 import { createIMessageBot } from "./imessage.js";
 import { createAppLogger, createDigestLogger } from "./logger.js";
 import { createModelHealthChecker } from "./model-health.js";
 import { createAsyncQueue } from "./queue.js";
 import { createReminderService } from "./reminders.js";
+import { createSchedulerDelivery } from "./scheduler-delivery.js";
+import { createSchedulerService } from "./scheduler.js";
 import { createSelfEchoFilter } from "./self-echo.js";
 import { checkEnvironment, createMessageSender } from "./send.js";
 import { readSettings, writeSettings } from "./settings.js";
@@ -68,13 +70,19 @@ async function main() {
 			return summary.trim();
 		},
 	});
-	const goals = createGoalController(workingDir);
-	const agent = await createAgentManager({ workingDir, background, goals });
+	const queue = createAsyncQueue<IncomingMessage>(join(workingDir, "queue.json"));
+	const scheduler = createSchedulerService({ workingDir, deliver: createSchedulerDelivery(queue, getSettings) });
+	const agent = await createAgentManager({
+		workingDir,
+		background,
+		scheduler,
+		// A shadow worker never runs pi-goal-x continuations.
+		deliverGoalReply: workerEnabled ? (chatGuid, reply) => bot.deliverGoalReply(chatGuid, reply) : undefined,
+	});
 	const checkModelHealth = createModelHealthChecker(workingDir);
 	const store = createChatStore({ workingDir });
-	const queue = createAsyncQueue<IncomingMessage>(join(workingDir, "queue.json"));
 	const watcher = createWatcher({ queue });
-	const bot = createIMessageBot({ queue, agent, goals, sender, echoFilter, store, getSettings, digestLogger });
+	const bot = createIMessageBot({ queue, agent, sender, echoFilter, store, getSettings, digestLogger });
 	const reminders = createReminderService({
 		workingDir,
 		deliver: async (reminder) => {
@@ -103,11 +111,15 @@ async function main() {
 					images: [],
 				},
 				async (reply) => {
-					if (reply.kind !== "assistant") return;
+					if (reply.kind !== "assistant" || signal.aborted || reply.isCurrent?.() === false) return;
 					echoFilter.remember(action.chatGuid, reply.text);
 					await sender.sendMessage(action.chatGuid, reply.text);
 				},
-				{ streamingBehavior: "followUp" }
+				{
+					streamingBehavior: "followUp",
+					sessionKey: `cron-${createHash("sha256").update(job.id).digest("hex").slice(0, 32)}`,
+					signal,
+				}
 			);
 			return;
 		}
@@ -173,6 +185,8 @@ async function main() {
 		cron.start();
 		automation.start();
 		background.start();
+		scheduler.start();
+		console.log("[scheduler] shared durable worker started; conversation lifecycle does not own timers");
 	}
 	if (web) web.start();
 
@@ -183,10 +197,11 @@ async function main() {
 		console.log("[sid] Shutting down…");
 		if (workerEnabled) {
 			watcher.stop();
+			await scheduler.stop();
 			bot.stop();
 			await Promise.all([reminders.stop(), cron.stop(), automation.stop()]);
 		}
-		await Promise.all([web?.stop(), automation.stop(), background.stop()]);
+		await Promise.all([web?.stop(), automation.stop(), background.stop(), scheduler.stop()]);
 		digestLogger.close();
 		appLogger.close();
 		console.log("[sid] Shutdown complete");

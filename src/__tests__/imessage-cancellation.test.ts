@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AgentManager } from "../agent.js";
+import type { AgentManager, ProcessMessageOptions } from "../agent.js";
 import { createIMessageBot } from "../imessage.js";
 import type { DigestLogger } from "../logger.js";
 import { createAsyncQueue } from "../queue.js";
 import { createSelfEchoFilter } from "../self-echo.js";
 import type { MessageSender } from "../send.js";
 import type { ChatStore } from "../store.js";
-import type { IncomingMessage } from "../types.js";
+import type { AgentReply, IncomingMessage } from "../types.js";
 
 const message: IncomingMessage = {
 	chatGuid: "synthetic-chat",
@@ -20,6 +20,67 @@ const message: IncomingMessage = {
 };
 
 describe("cancellation admission through the real bot consumer", () => {
+	it("admits native goal controls while busy and retains ordinary goal reply formatting, logs and storage", async () => {
+		const queue = createAsyncQueue<IncomingMessage>();
+		let finish = () => {};
+		const gate = new Promise<void>((resolve) => {
+			finish = resolve;
+		});
+		const processMessage = vi.fn(
+			async (
+				incoming: IncomingMessage,
+				handler: (reply: AgentReply) => Promise<void>,
+				options?: ProcessMessageOptions
+			) => {
+				options?.onAdmitted?.();
+				if (incoming.text === "busy") await gate;
+				else await handler({ kind: "assistant", text: "Native status" });
+			}
+		);
+		const sendMessage = vi.fn(async () => {});
+		const log = vi.fn(async () => {});
+		const digest = vi.fn();
+		let enabled = true;
+		const richText = { enabled: true, markdown: false };
+		const bot = createIMessageBot({
+			queue,
+			agent: { processMessage } as unknown as AgentManager,
+			echoFilter: createSelfEchoFilter(),
+			sender: { sendMessage } as unknown as MessageSender,
+			store: { archiveImages: async () => [], log } as unknown as ChatStore,
+			digestLogger: { log: digest, close: () => {} },
+			getSettings: () => ({ chatAllowlist: { whitelist: enabled ? ["*"] : [], blacklist: [] }, richText }),
+		});
+		bot.start();
+		try {
+			queue.push({ ...message, text: "busy" });
+			await vi.waitFor(() => expect(processMessage).toHaveBeenCalledTimes(1));
+			queue.push({ ...message, text: "/goal status" });
+			queue.push({ ...message, text: "/goal pause" });
+			await vi.waitFor(() => expect(processMessage).toHaveBeenCalledTimes(3));
+			expect(processMessage.mock.calls.map(([incoming]) => incoming.text)).toEqual([
+				"busy",
+				"/goal status",
+				"/goal pause",
+			]);
+			const before = sendMessage.mock.calls.length;
+			await bot.deliverGoalReply(message.chatGuid, { kind: "assistant", text: "Goal result", isCurrent: () => false });
+			expect(sendMessage).toHaveBeenCalledTimes(before);
+			await bot.deliverGoalReply(message.chatGuid, { kind: "assistant", text: "Goal result" });
+			expect(sendMessage).toHaveBeenLastCalledWith(message.chatGuid, "Goal result", richText);
+			expect(digest).toHaveBeenLastCalledWith(expect.stringContaining("Goal result"));
+			expect(log).toHaveBeenLastCalledWith(
+				message.chatGuid,
+				expect.objectContaining({ fromAgent: true, text: "Goal result" })
+			);
+			enabled = false;
+			await bot.deliverGoalReply(message.chatGuid, { kind: "assistant", text: "Disabled result" });
+			expect(sendMessage).toHaveBeenCalledTimes(before + 1);
+		} finally {
+			finish();
+			bot.stop();
+		}
+	});
 	it("drops disabled and self-echo commands, but admits /stop without waiting for an active prompt", async () => {
 		const queue = createAsyncQueue<IncomingMessage>();
 		const echoFilter = createSelfEchoFilter();

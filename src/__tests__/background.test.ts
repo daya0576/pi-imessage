@@ -63,7 +63,12 @@ describe("durable background completion", () => {
 		service.start();
 		await service.tick();
 		expect(f.summarize).not.toHaveBeenCalled();
-		writeFileSync(f.file, "{}");
+		for (const marker of [{}, { status: "running" }, { status: "unknown" }]) {
+			writeFileSync(f.file, JSON.stringify(marker));
+			await service.tick();
+			expect(f.summarize).not.toHaveBeenCalled();
+		}
+		writeFileSync(f.file, JSON.stringify({ status: "completed" }));
 		await service.tick();
 		expect(f.summarize).toHaveBeenCalledOnce();
 	});
@@ -71,7 +76,7 @@ describe("durable background completion", () => {
 		const f = setup();
 		let service = f.make();
 		service.create(f.input);
-		writeFileSync(f.file, "{}");
+		writeFileSync(f.file, JSON.stringify({ status: "success" }));
 		f.deliver.mockRejectedValueOnce(new Error("uncertain send"));
 		service.start();
 		await service.tick();
@@ -89,7 +94,7 @@ describe("durable background completion", () => {
 		const f = setup();
 		const service = f.make();
 		service.create(f.input);
-		writeFileSync(f.file, "{}");
+		writeFileSync(f.file, JSON.stringify({ status: "failed" }));
 		f.summarize.mockRejectedValue(new Error("provider failure"));
 		service.start();
 		await service.tick();
@@ -100,7 +105,7 @@ describe("durable background completion", () => {
 		f.setTime(131_000);
 		await service.tick();
 		expect(f.summarize).toHaveBeenCalledTimes(3);
-		expect(f.deliver).toHaveBeenCalledWith("chat-a", expect.stringContaining("未重跑原任务"));
+		expect(f.deliver).toHaveBeenCalledWith("chat-a", expect.stringContaining("未重跑原任务"), expect.any(String));
 		expect(service.list()[0].state).toBe("done");
 	});
 	it("has a lifetime single-worker fence", async () => {
@@ -126,7 +131,7 @@ describe("durable background completion", () => {
 		const f = setup();
 		const service = f.make();
 		service.create({ ...f.input, waitMinutes: 1 });
-		writeFileSync(f.file, "{}");
+		writeFileSync(f.file, JSON.stringify({ status: "completed" }));
 		f.setTime(90_000);
 		service.start();
 		await service.tick();
@@ -142,7 +147,7 @@ describe("durable background completion", () => {
 		service.start();
 		await service.tick();
 		expect(f.summarize).not.toHaveBeenCalled();
-		expect(f.deliver).toHaveBeenCalledWith("chat-a", expect.stringContaining("尚未确认完成"));
+		expect(f.deliver).toHaveBeenCalledWith("chat-a", expect.stringContaining("尚未确认完成"), expect.any(String));
 	});
 	it("reports an expired wait without claiming the background process stopped", async () => {
 		const f = setup();
@@ -152,6 +157,6 @@ describe("durable background completion", () => {
 		service.start();
 		await service.tick();
 		expect(f.summarize).not.toHaveBeenCalled();
-		expect(f.deliver).toHaveBeenCalledWith("chat-a", expect.stringContaining("尚未确认完成"));
+		expect(f.deliver).toHaveBeenCalledWith("chat-a", expect.stringContaining("尚未确认完成"), expect.any(String));
 	});
 });
