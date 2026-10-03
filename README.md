@@ -154,6 +154,7 @@ All fields are optional.
 | `WORKING_DIR` | no | `~/.pi/imessage` | Workspace directory |
 | `AGENT_IDLE_TIMEOUT_MS` | no | `120000` | Abort only after this much continuous agent inactivity; model and tool events reset the timer |
 | `AGENT_MAX_PROMPT_DURATION_MS` | no | `1800000` | Absolute ceiling for one prompt, independent of activity |
+| `PI_IMESSAGE_DURABLE_CHATS` | no | — | Comma-separated chat GUIDs (or `*`) to run on [Pi Durable](https://github.com/daya0576/pi-imessage/issues/31) with coding tools only; state in `<chatId>/durable.sqlite` |
 
 # Development
 

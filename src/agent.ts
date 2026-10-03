@@ -25,7 +25,8 @@ import {
 	getAgentDir,
 } from "@earendil-works/pi-coding-agent";
 import type { BackgroundService } from "./background.js";
-import { applyChatThinking, isThinkingLevel, writeChatThinking } from "./chat-thinking.js";
+import { applyChatThinking, isThinkingLevel, readChatThinking, writeChatThinking } from "./chat-thinking.js";
+import { type DurableChat, isDurableChat, openDurableChat } from "./durable.js";
 import { goalCommand, runGoalCommand } from "./goal-compat.js";
 import {
 	type GoalCheckpointMessage,
@@ -790,6 +791,59 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		modelsPath: join(agentDir, "models.json"),
 	});
 
+	const durableChats = new Map<string, Promise<DurableChat>>();
+	function durableChat(chatGuid: string): Promise<DurableChat> {
+		let chat = durableChats.get(chatGuid);
+		if (!chat) {
+			const chatDir = join(workingDir, sanitizeChatGuid(chatGuid));
+			chat = openDurableChat({
+				models: modelRuntime,
+				chatDir,
+				cwd: workingDir,
+				systemPrompt: () => buildSystemPrompt(workingDir, chatDir),
+				agent: async () => {
+					const settings = SettingsManager.create(workingDir, agentDir);
+					const model = await resolveDefaultModel(
+						modelRuntime,
+						settings.getDefaultProvider(),
+						settings.getDefaultModel()
+					);
+					return {
+						model: { provider: model.provider, modelId: model.id },
+						thinkingLevel: readChatThinking(workingDir, chatGuid) ?? settings.getDefaultThinkingLevel() ?? "off",
+					};
+				},
+			});
+			chat.catch(() => durableChats.delete(chatGuid));
+			durableChats.set(chatGuid, chat);
+		}
+		return chat;
+	}
+
+	async function processDurable(
+		msg: IncomingMessage,
+		handler: (reply: AgentReply) => Promise<void>,
+		options?: ProcessMessageOptions
+	): Promise<void> {
+		const chat = await durableChat(msg.chatGuid);
+		activePrompts += 1;
+		lastAgentActivityAt = Date.now();
+		try {
+			const answer = await chat.prompt(
+				[{ type: "text", text: formatPromptText(msg) }, ...msg.images],
+				msg.id,
+				options?.onAdmitted
+			);
+			const text = answer && extractMessageText(answer);
+			if (text) await handler({ kind: "assistant", text });
+			const failure = answer && modelFailureNotice(answer.stopReason, undefined, answer.errorMessage);
+			if (failure) await handler({ kind: "assistant", text: failure });
+		} finally {
+			activePrompts -= 1;
+			lastAgentActivityAt = Date.now();
+		}
+	}
+
 	/** Create a new AgentSession for a chat or isolated task, persisted to its own context.jsonl. */
 	async function createSession(
 		sessionMapKey: string,
@@ -940,6 +994,7 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		if (options?.signal && !storage.isolated) throw new Error("Task cancellation requires an isolated session");
 		options?.signal?.throwIfAborted();
 		if (options?.readOnly && !storage.isolated) throw new Error("Read-only completion requires an isolated session");
+		if (!storage.isolated && isDurableChat(msg.chatGuid)) return processDurable(msg, handler, options);
 		const command = !storage.isolated ? goalCommand(msg.text ?? "") : undefined;
 		if (command) {
 			const queue = queueFor(storage.mapKey);
@@ -1378,12 +1433,18 @@ export async function createAgentManager(config: AgentManagerConfig) {
 	}
 
 	async function stop(chatGuid: string): Promise<void> {
+		if (isDurableChat(chatGuid)) return (await durableChat(chatGuid)).stop();
 		queueFor(chatGuid).cancellationEpoch++;
 		await withOwnership(chatGuid, () => stopEntry(chatGuid));
 	}
 
 	/** Never unlink persistent state while an old SDK operation can still append to it. */
 	async function newSession(chatGuid: string): Promise<void> {
+		if (isDurableChat(chatGuid)) {
+			const chat = await durableChat(chatGuid);
+			await chat.stop();
+			return chat.reset();
+		}
 		queueFor(chatGuid).cancellationEpoch++;
 		await withOwnership(chatGuid, async () => {
 			await stopEntry(chatGuid);
@@ -1481,6 +1542,12 @@ export async function createAgentManager(config: AgentManagerConfig) {
 		if (value !== "default" && !isThinkingLevel(value))
 			throw new Error("Use /thinking off|minimal|low|medium|high|xhigh|max|default");
 		writeChatThinking(workingDir, chatGuid, value === "default" ? undefined : value);
+		if (isDurableChat(chatGuid)) {
+			const level =
+				value === "default" ? SettingsManager.create(workingDir, agentDir).getDefaultThinkingLevel() : value;
+			await (await durableChat(chatGuid)).configure({ thinkingLevel: level ?? "off" });
+			return `Thinking override: ${value} (this chat only)`;
+		}
 		await queueFor(chatGuid).chain;
 		await withOwnership(chatGuid, async () => {
 			const entry = sessionMap.get(chatGuid);

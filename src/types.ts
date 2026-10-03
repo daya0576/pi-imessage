@@ -56,6 +56,8 @@ export interface Attachment {
  * by the downloadImages pipeline task.
  */
 export interface IncomingMessage {
+	/** Stable transport ID (Messages ROWID); Durable dedupes replayed input with it. */
+	id?: string;
 	chatGuid: string;
 	text: string | null;
 	sender: string;
