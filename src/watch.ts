@@ -205,6 +205,7 @@ export function createWatcher(config: WatcherConfig) {
 				const replyToText = row.thread_originator_guid ? getReplyToText(row.thread_originator_guid) : null;
 
 				const msg: IncomingMessage = {
+					id: `messages:${row.rowid}`,
 					chatGuid: row.chat_guid,
 					text: resolvedText,
 					sender: row.sender ?? "unknown",
