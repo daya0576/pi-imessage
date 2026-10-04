@@ -46,8 +46,11 @@ export async function startService(options: {
 	// Installed auth and models; an isolated test runtime has nothing to reload.
 	let installed: Awaited<ReturnType<typeof openModels>> | undefined;
 	if (!runtime) {
-		installed = await openModels();
-		runtime = { models: installed, defaults: await readDefaults(installed, options.workingDir) };
+		installed = await openModels(options.agentDir);
+		runtime = {
+			models: installed,
+			defaults: await readDefaults(installed, options.workingDir, options.agentDir),
+		};
 	}
 	const defaults = { ...runtime.defaults, model: { ...runtime.defaults.model } };
 	if (!runtime.models.getModel(defaults.model.provider, defaults.model.modelId))
@@ -78,7 +81,8 @@ export async function startService(options: {
 
 	/** Running calls keep the code they started with; later requests and new chats use the reloaded state. */
 	async function reload() {
-		if (installed) Object.assign(defaults, await readDefaults(installed, options.workingDir));
+		if (installed)
+			Object.assign(defaults, await readDefaults(installed, options.workingDir, options.agentDir));
 		await settings.reload();
 		for (const extension of await loadExtensions()) owner.registry.install(extension);
 		return { ...defaults, model: { ...defaults.model } };

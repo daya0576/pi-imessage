@@ -1,11 +1,10 @@
 import { join } from "node:path";
 import type { Models, ModelsSimpleStreamOptions } from "@earendil-works/pi-ai";
-import { getAgentDir, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { HarnessSettings } from "@earendil-works/pi-durable";
 import type { AgentDefaults } from "./chats.ts";
 
-export function openModels() {
-	const agentDir = getAgentDir();
+export function openModels(agentDir: string) {
 	return ModelRuntime.create({
 		authPath: join(agentDir, "auth.json"),
 		modelsPath: join(agentDir, "models.json"),
@@ -13,8 +12,12 @@ export function openModels() {
 }
 
 /** Read defaults on every call; the only permitted fallback is Codex Astra. */
-export async function readDefaults(runtime: ModelRuntime, workingDir: string): Promise<AgentDefaults> {
-	const settings = SettingsManager.create(workingDir, getAgentDir());
+export async function readDefaults(
+	runtime: ModelRuntime,
+	workingDir: string,
+	agentDir: string,
+): Promise<AgentDefaults> {
+	const settings = SettingsManager.create(workingDir, agentDir);
 	const provider = settings.getDefaultProvider();
 	const modelId = settings.getDefaultModel();
 	const thinkingLevel = settings.getDefaultThinkingLevel();

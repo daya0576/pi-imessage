@@ -17,6 +17,7 @@ import { pathToFileURL } from "node:url";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { AssistantMessage, UserMessage } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { AssistantEntry, UserEntry } from "@earendil-works/pi-durable";
 import { type AgentDefaults, chatConversation, WatchCursor } from "../agent/chats.ts";
 import { openHarness } from "../agent/harness.ts";
@@ -219,7 +220,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
 		}
 		if (!["source", "target", "backup", "cursor"].every((key) => values[key]))
 			throw new Error("Source, target, backup and cursor are required");
-		const models = await openModels();
+		const agentDir = getAgentDir();
+		const models = await openModels(agentDir);
 		console.log(
 			JSON.stringify(
 				await migrate({
@@ -227,7 +229,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
 					target: values.target,
 					backup: values.backup,
 					cursor: Number(values.cursor),
-					defaults: await readDefaults(models, values.source),
+					defaults: await readDefaults(models, values.source, agentDir),
 				}),
 			),
 		);

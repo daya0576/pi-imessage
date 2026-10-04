@@ -1,4 +1,4 @@
-import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -10,6 +10,7 @@ import {
 	fauxProvider,
 	fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
+import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { defineExtension, defineTool, Harness, type Submission, UserEntry } from "@earendil-works/pi-durable";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Chats } from "../src/agent/chats.ts";
@@ -580,11 +581,12 @@ it("starts quietly and wires default coding/image tools, model defaults and work
 	expect(textCalls()).toEqual([["chat", "read complete"]]);
 });
 
-// #33 Phase 1: failed startup must not strand the host's storage lock.
-it("rejects unavailable models and releases ownership after a failed harness open", async () => {
+// #33: explicit agent configuration and failed startup must not escape the host's ownership boundary.
+it("uses supplied agent configuration and releases ownership after startup failure", async () => {
 	await agent.close();
 	const models = vi.spyOn(modelConfig, "openModels").mockRejectedValueOnce(new Error("auth unavailable"));
 	await expect(startService({ ...options, runtime: undefined })).rejects.toThrow("auth unavailable");
+	expect(models).toHaveBeenCalledWith(options.agentDir);
 	models.mockRestore();
 	await expect(
 		startService({
@@ -596,9 +598,75 @@ it("rejects unavailable models and releases ownership after a failed harness ope
 	await expect(startService(options)).rejects.toThrow("startup failed");
 	open.mockRestore();
 	await expect(access(join(directory, "durable", "owner.lock"))).rejects.toMatchObject({ code: "ENOENT" });
-	agent = await startService(options);
-	expect(faux.state.callCount).toBe(0);
+	// #33: validate explicit paths BEFORE any SDK disk access; fake requests never reach paid providers.
+	await mkdir(options.agentDir, { recursive: true });
+	await writeFile(join(options.agentDir, "auth.json"), "{}");
+	await writeFile(join(options.agentDir, "models.json"), "{}");
+	await writeFile(
+		join(options.agentDir, "settings.json"),
+		JSON.stringify({
+			defaultProvider: "faux",
+			defaultModel: "faux-1",
+			defaultThinkingLevel: "high",
+		}),
+	);
+	const createRuntime = ModelRuntime.create;
+	let installed: ModelRuntime | undefined;
+	const create = vi.spyOn(ModelRuntime, "create").mockImplementation(async (config) => {
+		expect(config).toEqual({
+			authPath: join(options.agentDir, "auth.json"),
+			modelsPath: join(options.agentDir, "models.json"),
+		});
+		installed = await createRuntime.call(ModelRuntime, { ...config, refreshOnCreate: false });
+		vi.spyOn(installed, "refresh").mockResolvedValue({ aborted: false, errors: new Map() });
+		vi.spyOn(installed, "getModel").mockImplementation((provider, modelId) =>
+			provider === "faux" && modelId === "faux-1" ? faux.getModel() : undefined,
+		);
+		vi.spyOn(installed, "hasConfiguredAuth").mockImplementation((provider) => provider === "faux");
+		vi.spyOn(installed, "streamSimple").mockImplementation(() => {
+			throw new Error("Unexpected model request");
+		});
+		return installed;
+	});
+	const createSettings = SettingsManager.create;
+	vi.spyOn(SettingsManager, "create").mockImplementation((workingDir, agentDir, settingsOptions) => {
+		expect(workingDir).toBe(directory);
+		expect(agentDir).toBe(options.agentDir);
+		return createSettings.call(SettingsManager, workingDir, agentDir, settingsOptions);
+	});
+	agent = await startService({ ...options, runtime: undefined });
 	expect(send).not.toHaveBeenCalled();
+	await agent.command({ chatGuid: "chat", guid: "status-scoped", text: "/status" });
+	const chat = (await agent.harness.snapshot(Chats, BACKGROUND_CONTEXT))?.items[0];
+	if (!chat) throw new Error("Missing scoped chat");
+	const conversation = await agent.harness.conversation(chat.conversationId, BACKGROUND_CONTEXT);
+	expect((await conversation?.agent(BACKGROUND_CONTEXT))?.thinkingLevel).toBe("high");
+	await writeFile(
+		join(options.agentDir, "settings.json"),
+		JSON.stringify({
+			defaultProvider: "faux",
+			defaultModel: "faux-1",
+			defaultThinkingLevel: "low",
+		}),
+	);
+	await agent.command({ chatGuid: "chat", guid: "reload-scoped", text: "/reload" });
+	expect((await conversation?.agent(BACKGROUND_CONTEXT))?.thinkingLevel).toBe("high"); // Preserve chat thinking.
+	await agent.command({ chatGuid: "new-chat", guid: "status-reloaded", text: "/status" });
+	const reloaded = (await agent.harness.snapshot(Chats, BACKGROUND_CONTEXT))?.items.find(
+		(item) => item.chatGuid === "new-chat",
+	);
+	if (!reloaded) throw new Error("Missing reloaded chat");
+	expect(
+		(
+			await (
+				await agent.harness.conversation(reloaded.conversationId, BACKGROUND_CONTEXT)
+			)?.agent(BACKGROUND_CONTEXT)
+		)?.thinkingLevel,
+	).toBe("low");
+	expect(create).toHaveBeenCalledTimes(1);
+	expect(installed?.refresh).toHaveBeenCalledTimes(2);
+	expect(installed?.streamSimple).not.toHaveBeenCalled();
+	expect(faux.state.callCount).toBe(0);
 });
 
 // #33 Phase 1: shutting down must cancel active model work before releasing ownership.
