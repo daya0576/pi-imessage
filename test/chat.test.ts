@@ -396,10 +396,13 @@ it("marks an unfinished send unknown on reopen without sending it", async () => 
 	expect(faux.state.callCount).toBe(1);
 });
 
-// #33 Phase 2: use current rich-text settings, without retrying a possibly completed rich send.
-it("passes live rich-text settings and does not retry a sender that throws after a possible effect", async () => {
+// #33 Phase 2: reread delivery settings without retrying a possibly completed rich send.
+it("passes live delivery settings and does not retry a sender that throws after a possible effect", async () => {
 	faux.setResponses([fauxAssistantMessage("uncertain")]);
 	const record = await answered(await agent.submit({ chatGuid: "chat", guid: "1", text: "hello" }));
+	await writeFile(join(directory, "settings.json"), "{}");
+	await agent.deliver();
+	expect(send).not.toHaveBeenCalled();
 	await writeFile(
 		join(directory, "settings.json"),
 		JSON.stringify({
@@ -419,14 +422,6 @@ it("passes live rich-text settings and does not retry a sender that throws after
 			String(record.answer)
 		],
 	).toBe("unknown");
-});
-
-it("checks the allowlist again before delivery", async () => {
-	faux.setResponses([fauxAssistantMessage("saved")]);
-	await answered(await agent.submit({ chatGuid: "chat", guid: "1", text: "hello" }));
-	await writeFile(join(directory, "settings.json"), "{}");
-	await agent.deliver();
-	expect(send).not.toHaveBeenCalled();
 });
 
 it("holds the storage lock and joins an in-flight send before closing", async () => {

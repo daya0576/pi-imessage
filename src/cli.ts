@@ -1,4 +1,4 @@
-#!/usr/bin/env -S node --experimental-strip-types
+#!/usr/bin/env -S node --use-env-proxy --experimental-strip-types
 import { execFile } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -32,13 +32,20 @@ export async function main(args = process.argv.slice(2)) {
 			"PI_SCHEDULER_SERVICE_PATH",
 			"BRAVE_API_KEY",
 			"BRAVE_SEARCH_API_KEY",
+			"HTTP_PROXY",
+			"HTTPS_PROXY",
+			"NO_PROXY",
+			"http_proxy",
+			"https_proxy",
+			"no_proxy",
+			"NODE_OPTIONS",
 		]
 			.filter((key) => process.env[key] !== undefined)
 			.map((key) => `<key>${key}</key><string>${xml(process.env[key] ?? "")}</string>`)
 			.join("");
 		await writeFile(
 			path,
-			`<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>Label</key><string>me.changchen.pi-imessage-durable</string><key>ProgramArguments</key><array><string>${xml(process.execPath)}</string><string>--experimental-strip-types</string><string>${xml(fileURLToPath(import.meta.url))}</string><string>serve</string></array><key>EnvironmentVariables</key><dict><key>WORKING_DIR</key><string>${xml(workingDir)}</string><key>PATH</key><string>${xml(process.env.PATH ?? "/usr/bin:/bin")}</string>${environment}</dict><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>StandardOutPath</key><string>${xml(join(workingDir, "service.log"))}</string><key>StandardErrorPath</key><string>${xml(join(workingDir, "service.log"))}</string></dict></plist>`,
+			`<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>Label</key><string>me.changchen.pi-imessage-durable</string><key>ProgramArguments</key><array><string>${xml(process.execPath)}</string><string>--use-env-proxy</string><string>--experimental-strip-types</string><string>${xml(fileURLToPath(import.meta.url))}</string><string>serve</string></array><key>EnvironmentVariables</key><dict><key>WORKING_DIR</key><string>${xml(workingDir)}</string><key>PATH</key><string>${xml(process.env.PATH ?? "/usr/bin:/bin")}</string>${environment}</dict><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>StandardOutPath</key><string>${xml(join(workingDir, "service.log"))}</string><key>StandardErrorPath</key><string>${xml(join(workingDir, "service.log"))}</string></dict></plist>`,
 			{ flag: "wx", mode: 0o600 },
 		);
 		console.log(

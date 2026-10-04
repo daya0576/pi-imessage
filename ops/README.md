@@ -27,8 +27,15 @@ node --experimental-strip-types src/cli.ts --help
 ```
 
 `WORKING_DIR`, `WEB_HOST`, `WEB_PORT`, `WEB_ENABLED`, `MESSAGES_DB_PATH` and
-`PI_SCHEDULER_SERVICE_PATH` are explicit host configuration. Web defaults to
-localhost:7750 and has no authentication. Never expose it to untrusted networks.
+`PI_SCHEDULER_SERVICE_PATH` are explicit host configuration. `npm start`, the
+executable CLI and the generated launchd job enable Node's environment proxy
+support. `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` (and their lowercase forms) and
+`NODE_OPTIONS` are retained when generating the job; review them before install.
+No proxy credentials are printed by installation. If invoking Node directly for
+`serve`, include `--use-env-proxy`. This does not implement Pi's separate
+`httpProxy` setting or the old host activity/duration timeout policy.
+
+Web defaults to localhost:7750 and has no authentication. Never expose it to untrusted networks.
 
 ## Authorized one-shot cutover
 
@@ -56,7 +63,7 @@ required capabilities/remaining gaps in #33 have been verified.
 5. Inspect `backup-manifest.json` and `import-receipt.json`; rehearse restoration
    from the backup. Retain old SDK artifacts until a separate cleanup approval.
 6. Set `WORKING_DIR` to the imported target. Start the new service yourself,
-   initially in foreground (`node --experimental-strip-types src/cli.ts serve`).
+   initially in foreground (`npm start`).
    A brand-new, unimported workspace intentionally skips existing Messages rows.
 7. Run the explicitly live smoke only after approval:
 
