@@ -15,6 +15,7 @@ import { openHarness } from "./agent/harness.ts";
 import { openModels, readDefaults, withCodexFast } from "./agent/models.ts";
 import { loadPrompt } from "./agent/prompt.ts";
 import { isReplyEnabled, readSettings } from "./config/settings.ts";
+import { memoryExtension } from "./extensions/memory.ts";
 import { archiveAttachments } from "./transport/attachments.ts";
 import type { MessageSender } from "./transport/send.ts";
 import { createWatcher } from "./transport/watch.ts";
@@ -24,8 +25,8 @@ export async function startService(options: {
 	workingDir: string;
 	agentDir: string;
 	runtime?: { models: Models; defaults: AgentDefaults };
-	/** Called at startup and on /reload; the same names replace installed extensions in place. */
-	extensions: () => readonly Extension[] | Promise<readonly Extension[]>;
+	/** Optional tool selection for isolated callers; rebuilt at startup and on /reload. */
+	extensions?: () => readonly Extension[] | Promise<readonly Extension[]>;
 	send: SendText;
 	sendAttachment: MessageSender["sendAttachment"];
 }) {
@@ -41,7 +42,10 @@ export async function startService(options: {
 	if (!runtime.models.getModel(defaults.model.provider, defaults.model.modelId))
 		throw new Error(`Model is unavailable: ${defaults.model.provider}/${defaults.model.modelId}`);
 	async function loadExtensions() {
-		return [await loadPrompt(options.workingDir, options.agentDir), ...(await options.extensions())];
+		return [
+			await loadPrompt(options.workingDir, options.agentDir),
+			...(options.extensions ? await options.extensions() : [await memoryExtension(options.workingDir)]),
+		];
 	}
 	const owner = await openHarness(options.workingDir, withCodexFast(runtime.models), await loadExtensions());
 	const { harness, storage } = owner;
