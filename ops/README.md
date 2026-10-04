@@ -31,6 +31,15 @@ node --experimental-strip-types src/cli.ts --help
 executable CLI and the generated launchd job enable Node's environment proxy
 support. `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` (and their lowercase forms) and
 `NODE_OPTIONS` are retained when generating the job; review them before install.
+CLI execution loads the current directory's `.env` using Node's parser; existing
+environment values take precedence and a missing file is allowed. Set
+`DOTENV_CONFIG_PATH` for another file. Module imports and `--help` do not load it.
+Other read errors stop startup without printing file contents. `.env` is trusted
+operator configuration, not a message attachment. Keep it private and out of Git.
+Installation pins its current directory as the job's working directory, so the
+same configuration path is used at launch. Selected environment values in the
+plist are a snapshot; regenerate a reviewed job to change those overrides.
+
 No proxy credentials are printed by installation. If invoking Node directly for
 `serve`, include `--use-env-proxy`. This does not implement Pi's separate
 `httpProxy` setting or the old host activity/duration timeout policy.

@@ -1,17 +1,18 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Duplex } from "node:stream";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
 
 const execute = promisify(execFile);
 
-// #33: launchd preparation retains proxy settings without loading a job or accessing Messages/models.
-it("retains proxy configuration in the installed job and routes native fetch with NO_PROXY bypass", async () => {
-	const directory = await mkdtemp(join(tmpdir(), "imessage-cli-"));
+// #33: CLI configuration/installation runs under a temp HOME without Messages, models or launchctl.
+it("loads CLI environment without overriding explicit values and retains proxy configuration in the job", async () => {
+	const directory = await realpath(await mkdtemp(join(tmpdir(), "imessage-cli-")));
 	const sockets = new Set<Duplex>();
 	let proxyRequests = 0;
 	let directRequests = 0;
@@ -76,7 +77,9 @@ it("retains proxy configuration in the installed job and routes native fetch wit
 		const job = JSON.parse(parsed.stdout) as {
 			ProgramArguments: string[];
 			EnvironmentVariables: Record<string, string>;
+			WorkingDirectory: string;
 		};
+		expect(job.WorkingDirectory).toBe(directory);
 		expect(job.ProgramArguments).toEqual([
 			process.execPath,
 			"--use-env-proxy",
@@ -116,6 +119,75 @@ it("retains proxy configuration in the installed job and routes native fetch wit
 			}),
 		).rejects.toThrow();
 		expect(await readFile(plist, "utf8")).toBe(original);
+		const fixtureSecret = "fake env value # & < >";
+		await writeFile(
+			join(directory, ".env"),
+			`WORKING_DIR="${join(directory, "wrong-workspace")}"
+WEB_PORT='7766'
+BRAVE_API_KEY="${fixtureSecret}"
+HTTP_PROXY="${proxyUrl}"
+NO_PROXY="127.0.0.1,localhost"
+`,
+		);
+		const explicit = {
+			HOME: directory,
+			PATH: process.env.PATH,
+			WORKING_DIR: environment.WORKING_DIR,
+			WEB_PORT: "7788",
+		};
+		await rm(plist);
+		const fromFile = await execute(process.execPath, ["--experimental-strip-types", cli, "install"], {
+			cwd: directory,
+			env: explicit,
+			timeout: 10_000,
+		});
+		expect(fromFile.stdout + fromFile.stderr).not.toContain(fixtureSecret);
+		const fileJob = JSON.parse(
+			(await execute("python3", [parser, plist], { env: explicit })).stdout,
+		) as typeof job;
+		expect(fileJob.EnvironmentVariables).toMatchObject({
+			WORKING_DIR: environment.WORKING_DIR,
+			WEB_PORT: "7788",
+			BRAVE_API_KEY: fixtureSecret,
+			HTTP_PROXY: proxyUrl,
+			NO_PROXY: "127.0.0.1,localhost",
+		});
+		expect(fileJob.WorkingDirectory).toBe(directory);
+		const probe = join(directory, "import-probe.mjs");
+		await writeFile(
+			probe,
+			`import { main } from ${JSON.stringify(pathToFileURL(cli).href)};\nif (process.env.BRAVE_API_KEY !== undefined) throw new Error("Import loaded configuration");\nawait main(["--help"]);\nif (process.env.BRAVE_API_KEY !== undefined) throw new Error("Help loaded configuration");\nconsole.log("Import and help remained quiet");\n`,
+		);
+		const quiet = await execute(process.execPath, ["--experimental-strip-types", probe], {
+			cwd: directory,
+			env: explicit,
+			timeout: 10_000,
+		});
+		expect(quiet.stdout).toContain("Import and help remained quiet");
+		const overridePath = join(directory, "alternate & config.env");
+		await writeFile(overridePath, 'WEB_PORT="7799"\nBRAVE_API_KEY="alternate fixture value"\n');
+		const override = { ...explicit, WEB_PORT: undefined, DOTENV_CONFIG_PATH: overridePath };
+		await rm(plist);
+		await execute(process.execPath, ["--experimental-strip-types", cli, "install"], {
+			cwd: directory,
+			env: override,
+			timeout: 10_000,
+		});
+		const overrideJob = JSON.parse(
+			(await execute("python3", [parser, plist], { env: explicit })).stdout,
+		) as typeof job;
+		expect(overrideJob.EnvironmentVariables).toMatchObject({
+			WEB_PORT: "7799",
+			BRAVE_API_KEY: "alternate fixture value",
+			DOTENV_CONFIG_PATH: overridePath,
+		});
+		await expect(
+			execute(process.execPath, ["--experimental-strip-types", cli, "install"], {
+				cwd: directory,
+				env: { ...explicit, DOTENV_CONFIG_PATH: join(overridePath, "not-a-file") },
+				timeout: 10_000,
+			}),
+		).rejects.toThrow("Unable to load environment configuration");
 	} finally {
 		for (const socket of sockets) socket.destroy();
 		proxy.closeAllConnections();
@@ -126,4 +198,4 @@ it("retains proxy configuration in the installed job and routes native fetch wit
 		]);
 		await rm(directory, { recursive: true, force: true });
 	}
-}, 15_000);
+}, 20_000);

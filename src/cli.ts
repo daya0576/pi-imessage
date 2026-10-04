@@ -1,10 +1,10 @@
 #!/usr/bin/env -S node --use-env-proxy --experimental-strip-types
 import { execFile } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { promisify } from "node:util";
+import { parseEnv, promisify } from "node:util";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { startApplication } from "./main.ts";
 import { createMessageSender } from "./transport/send.ts";
@@ -15,6 +15,16 @@ export async function main(args = process.argv.slice(2)) {
 			"pi-imessage [serve]\npi-imessage import --source PATH --target PATH --backup PATH --cursor NUMBER\npi-imessage install (write launchd job only)\nSee ops/README.md for operator-only installation, cutover and rollback.",
 		);
 		return;
+	}
+	try {
+		// Like the old dotenv entry point: cwd .env, with existing environment values taking priority.
+		for (const [name, value] of Object.entries(
+			parseEnv(await readFile(process.env.DOTENV_CONFIG_PATH ?? ".env", "utf8")),
+		))
+			if (process.env[name] === undefined && value !== undefined) process.env[name] = value;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+			throw new Error("Unable to load environment configuration", { cause: error });
 	}
 	const workingDir = resolve(process.env.WORKING_DIR ?? join(homedir(), ".pi", "imessage"));
 	if (args[0] === "install") {
@@ -39,13 +49,14 @@ export async function main(args = process.argv.slice(2)) {
 			"https_proxy",
 			"no_proxy",
 			"NODE_OPTIONS",
+			"DOTENV_CONFIG_PATH",
 		]
 			.filter((key) => process.env[key] !== undefined)
 			.map((key) => `<key>${key}</key><string>${xml(process.env[key] ?? "")}</string>`)
 			.join("");
 		await writeFile(
 			path,
-			`<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>Label</key><string>me.changchen.pi-imessage-durable</string><key>ProgramArguments</key><array><string>${xml(process.execPath)}</string><string>--use-env-proxy</string><string>--experimental-strip-types</string><string>${xml(fileURLToPath(import.meta.url))}</string><string>serve</string></array><key>EnvironmentVariables</key><dict><key>WORKING_DIR</key><string>${xml(workingDir)}</string><key>PATH</key><string>${xml(process.env.PATH ?? "/usr/bin:/bin")}</string>${environment}</dict><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>StandardOutPath</key><string>${xml(join(workingDir, "service.log"))}</string><key>StandardErrorPath</key><string>${xml(join(workingDir, "service.log"))}</string></dict></plist>`,
+			`<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>Label</key><string>me.changchen.pi-imessage-durable</string><key>ProgramArguments</key><array><string>${xml(process.execPath)}</string><string>--use-env-proxy</string><string>--experimental-strip-types</string><string>${xml(fileURLToPath(import.meta.url))}</string><string>serve</string></array><key>WorkingDirectory</key><string>${xml(process.cwd())}</string><key>EnvironmentVariables</key><dict><key>WORKING_DIR</key><string>${xml(workingDir)}</string><key>PATH</key><string>${xml(process.env.PATH ?? "/usr/bin:/bin")}</string>${environment}</dict><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>StandardOutPath</key><string>${xml(join(workingDir, "service.log"))}</string><key>StandardErrorPath</key><string>${xml(join(workingDir, "service.log"))}</string></dict></plist>`,
 			{ flag: "wx", mode: 0o600 },
 		);
 		console.log(

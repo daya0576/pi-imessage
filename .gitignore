@@ -1,3 +1,6 @@
 node_modules/
 dist/
 .drafts/
+.env
+.env.*
+!.env.example
