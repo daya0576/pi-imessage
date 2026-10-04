@@ -49,6 +49,7 @@ export async function openHarness(workingDir: string, models: Models, extensions
 			return {
 				harness,
 				storage,
+				registry,
 				close() {
 					closing ??= (async () => {
 						await harness.close(BACKGROUND_CONTEXT);

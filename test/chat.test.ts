@@ -46,8 +46,9 @@ beforeEach(async () => {
 	vi.spyOn(console, "warn").mockImplementation(() => {});
 	options = {
 		workingDir: directory,
+		agentDir: join(directory, "agent"),
 		runtime: { models, defaults: { model: { provider: model.provider, modelId: model.id } } },
-		extensions: [],
+		extensions: () => [],
 		send,
 		sendAttachment,
 	};
@@ -136,7 +137,7 @@ it("admits all busy-chat additions at the next tool boundary without repeating c
 			}),
 		],
 	});
-	agent = await startService({ ...options, extensions: [tools] });
+	agent = await startService({ ...options, extensions: () => [tools] });
 	const gate = Promise.withResolvers<void>();
 	const started = Promise.withResolvers<void>();
 	const additions = [
@@ -563,7 +564,7 @@ it("starts quietly and wires explicit tools, model defaults and working director
 	await agent.close();
 	await writeFile(join(directory, "fixture.txt"), "isolated tool result");
 	const stream = vi.spyOn(options.runtime.models, "streamSimple");
-	agent = await startService({ ...options, extensions: [CodingTools] });
+	agent = await startService({ ...options, extensions: () => [CodingTools] });
 	expect(stream).not.toHaveBeenCalled();
 	expect(send).not.toHaveBeenCalled();
 	faux.setResponses([

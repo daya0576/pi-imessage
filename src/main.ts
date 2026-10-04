@@ -13,6 +13,7 @@ import { deliverReplies, recoverSending, type SendText } from "./agent/deliver.t
 import { type DirectSendInput, deliverDirect } from "./agent/direct-send.ts";
 import { openHarness } from "./agent/harness.ts";
 import { openModels, readDefaults, withCodexFast } from "./agent/models.ts";
+import { loadPrompt } from "./agent/prompt.ts";
 import { isReplyEnabled, readSettings } from "./config/settings.ts";
 import { archiveAttachments } from "./transport/attachments.ts";
 import type { MessageSender } from "./transport/send.ts";
@@ -21,12 +22,13 @@ import { createWatcher } from "./transport/watch.ts";
 /** Explicit startup; pass an isolated runtime in tests instead of opening installed auth. */
 export async function startService(options: {
 	workingDir: string;
+	agentDir: string;
 	runtime?: { models: Models; defaults: AgentDefaults };
-	extensions: readonly Extension[];
+	/** Called at startup and on /reload; the same names replace installed extensions in place. */
+	extensions: () => readonly Extension[] | Promise<readonly Extension[]>;
 	send: SendText;
 	sendAttachment: MessageSender["sendAttachment"];
 }) {
-	const extensions = [...options.extensions];
 	let runtime = options.runtime;
 	await readSettings(options.workingDir);
 	// Installed auth and models; an isolated test runtime has nothing to reload.
@@ -38,7 +40,10 @@ export async function startService(options: {
 	const defaults = { ...runtime.defaults, model: { ...runtime.defaults.model } };
 	if (!runtime.models.getModel(defaults.model.provider, defaults.model.modelId))
 		throw new Error(`Model is unavailable: ${defaults.model.provider}/${defaults.model.modelId}`);
-	const owner = await openHarness(options.workingDir, withCodexFast(runtime.models), extensions);
+	async function loadExtensions() {
+		return [await loadPrompt(options.workingDir, options.agentDir), ...(await options.extensions())];
+	}
+	const owner = await openHarness(options.workingDir, withCodexFast(runtime.models), await loadExtensions());
 	const { harness, storage } = owner;
 	try {
 		await recoverSending(harness);
@@ -47,9 +52,10 @@ export async function startService(options: {
 		throw error;
 	}
 
-	/** New chats use the reloaded default; Durable reads models at each request. */
+	/** Running calls keep the code they started with; later requests and new chats use the reloaded state. */
 	async function reload() {
 		if (installed) Object.assign(defaults, await readDefaults(installed, options.workingDir));
+		for (const extension of await loadExtensions()) owner.registry.install(extension);
 		return { ...defaults, model: { ...defaults.model } };
 	}
 

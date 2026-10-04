@@ -38,8 +38,8 @@ Send these commands as iMessages:
 | `/status` | Show tokens, context usage, and model |
 | `/compact` | Compress context without replaying prior work |
 | `/stop` | Abort current work and stop `/run`; later messages are still answered |
-| `/run <duration> [task]` | Keep working for up to the given time, e.g. `/run 1h`; `/run-stop` ends it early |
-| `/reload` | Cancel current work and reload this chat's model |
+| `/run <duration> [task]` | Keep working for up to the given time, e.g. `/run 1h`; `/stop` ends it early |
+| `/reload` | Refresh models/auth, AGENTS, skills and extensions without cancelling work |
 
 ## Configuration
 

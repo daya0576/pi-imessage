@@ -61,11 +61,12 @@ beforeEach(async () => {
 	vi.spyOn(console, "warn").mockImplementation(() => {});
 	options = {
 		workingDir: directory,
+		agentDir: join(directory, "agent"),
 		dbPath,
 		intervalMs: 10,
 		onError,
 		runtime: { models, defaults: { model: { provider: model.provider, modelId: model.id } } },
-		extensions: [],
+		extensions: () => [],
 		send,
 		sendAttachment: vi.fn().mockRejectedValue(new Error("Unexpected attachment send")),
 	};
@@ -118,7 +119,8 @@ it("automatically routes DM, group and SMS, archives attachments and logs disabl
 	const reaction = insert("reaction", "do not answer a reaction");
 	database.prepare("UPDATE message SET associated_message_type=2000 WHERE ROWID=?").run(reaction);
 	const last = insert("empty", "");
-	await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(3));
+	// Concurrent full-suite JSONL/fsync work can exceed the default one-second wait.
+	await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(3), { timeout: 5000 });
 	await service.poll();
 	expect(textCalls()).toEqual(
 		expect.arrayContaining([
@@ -147,7 +149,7 @@ it("automatically routes DM, group and SMS, archives attachments and logs disabl
 
 // #33 Phase 2: exercise real local HEIC conversion and image reading without storing image bytes.
 it("retries a broken HEIC, archives JPEG and reads the image only in the model request", async () => {
-	options.extensions = [ImageRead];
+	options.extensions = () => [ImageRead];
 	options.intervalMs = 60_000;
 	const source = join(directory, "photo.HEIC");
 	await writeFile(source, "incomplete HEIC");

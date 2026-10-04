@@ -35,8 +35,9 @@ beforeEach(async () => {
 	vi.spyOn(console, "warn").mockImplementation(() => {});
 	agent = await startService({
 		workingDir: directory,
+		agentDir: join(directory, "agent"),
 		runtime: { models, defaults: { model: { provider: model.provider, modelId: model.id } } },
-		extensions: [],
+		extensions: () => [],
 		send,
 		sendAttachment: vi.fn().mockRejectedValue(new Error("Unexpected attachment send")),
 	});
