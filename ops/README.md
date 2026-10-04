@@ -35,7 +35,17 @@ No proxy credentials are printed by installation. If invoking Node directly for
 `serve`, include `--use-env-proxy`. This does not implement Pi's separate
 `httpProxy` setting or the old host activity/duration timeout policy.
 
-Web defaults to localhost:7750 and has no authentication. Never expose it to untrusted networks.
+Pi settings in the agent directory and `WORKING_DIR/.pi/settings.json` supply
+request policy; `/reload` refreshes it. `retry.provider.timeoutMs` overrides the
+provider request timeout, otherwise `httpIdleTimeoutMs` supplies that default
+(300000 ms; 0 uses Pi's effectively unlimited value). This forwards a request
+option to supporting providers, not a socket-inactivity timer. Provider retry
+limits/delay caps and `retry` generation policy are executed by Pi/Durable;
+transport remains SSE. These do not replace the old host inactivity, prompt
+maximum-duration or compaction-deadline behavior.
+
+Web defaults to localhost:7750 and has no authentication. Never expose it to
+untrusted networks.
 
 ## Authorized one-shot cutover
 

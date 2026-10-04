@@ -1,5 +1,6 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
+import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { Extension, Submission } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import {
@@ -15,7 +16,7 @@ import { deliverReplies, recoverSending, type SendText } from "./agent/deliver.t
 import { type DirectSendInput, deliverDirect } from "./agent/direct-send.ts";
 import { openHarness } from "./agent/harness.ts";
 import { type PromptInput, submitIsolated } from "./agent/isolated.ts";
-import { openModels, readDefaults, withCodexFast } from "./agent/models.ts";
+import { openModels, readDefaults, requestSettings, withCodexFast } from "./agent/models.ts";
 import { loadPrompt } from "./agent/prompt.ts";
 import { createAutomationService } from "./automation/service.ts";
 import { isReplyEnabled, readSettings } from "./config/settings.ts";
@@ -60,7 +61,13 @@ export async function startService(options: {
 				: [CodingTools, ImageRead, await memoryExtension(options.workingDir), webExtension(), Subagent]),
 		];
 	}
-	const owner = await openHarness(options.workingDir, withCodexFast(runtime.models), await loadExtensions());
+	const settings = SettingsManager.create(options.workingDir, options.agentDir);
+	const owner = await openHarness(
+		options.workingDir,
+		withCodexFast(runtime.models),
+		await loadExtensions(),
+		requestSettings(settings),
+	);
 	const { harness, storage } = owner;
 	try {
 		await recoverSending(harness);
@@ -72,6 +79,7 @@ export async function startService(options: {
 	/** Running calls keep the code they started with; later requests and new chats use the reloaded state. */
 	async function reload() {
 		if (installed) Object.assign(defaults, await readDefaults(installed, options.workingDir));
+		await settings.reload();
 		for (const extension of await loadExtensions()) owner.registry.install(extension);
 		return { ...defaults, model: { ...defaults.model } };
 	}

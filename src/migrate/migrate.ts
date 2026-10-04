@@ -97,7 +97,7 @@ export async function migrate(options: {
 	let chats = 0;
 	try {
 		await cp(backup, stage, { recursive: true, force: false, errorOnExist: true });
-		owner = await openHarness(stage, createModels(), []);
+		owner = await openHarness(stage, createModels(), [], {});
 		for (const entry of await readdir(backup, { withFileTypes: true })) {
 			if (!entry.isDirectory()) continue;
 			const log = join(backup, entry.name, "log.jsonl");

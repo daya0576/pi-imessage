@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import type { Models, ModelsSimpleStreamOptions } from "@earendil-works/pi-ai";
 import { getAgentDir, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
+import type { HarnessSettings } from "@earendil-works/pi-durable";
 import type { AgentDefaults } from "./chats.ts";
 
 export function openModels() {
@@ -26,6 +27,24 @@ export async function readDefaults(runtime: ModelRuntime, workingDir: string): P
 		);
 	console.warn(`Default model ${provider}/${modelId} unavailable; using openai-codex/gpt-6-astra`);
 	return { model: { provider: "openai-codex", modelId: "gpt-6-astra" }, thinkingLevel };
+}
+
+/** Match Pi's experimental Durable request policy; execution and retries remain native. */
+export function requestSettings(settings: SettingsManager): Pick<HarnessSettings, "stream" | "retry"> {
+	return {
+		get stream() {
+			const provider = settings.getProviderRetrySettings();
+			const idle = settings.getHttpIdleTimeoutMs();
+			return {
+				timeoutMs: provider.timeoutMs ?? (idle === 0 ? 2_147_483_647 : idle),
+				maxRetryDelayMs: provider.maxRetryDelayMs,
+				...(provider.maxRetries === undefined ? {} : { maxRetries: provider.maxRetries }),
+			};
+		},
+		get retry() {
+			return settings.getRetrySettings();
+		},
+	};
 }
 
 /** Codex GPT models run in the priority (fast) service tier. */

@@ -9,8 +9,8 @@ import { expect, it, vi } from "vitest";
 import { Chats } from "../src/agent/chats.ts";
 import { startService } from "../src/main.ts";
 
-// #33: product resources stay stable until /reload; skills and references are read by real tools, not injected whole.
-it("loads AGENTS and installed user skills, then refreshes their prompt sections on /reload", async () => {
+// #33: resources and request policy stay cached until /reload; Durable executes tools and retries.
+it("loads skills and request settings, then refreshes resources and native policy on /reload", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "imessage-prompt-"));
 	const agentDir = join(directory, "agent");
 	const packageDir = join(directory, "polish-package");
@@ -25,7 +25,20 @@ it("loads AGENTS and installed user skills, then refreshes their prompt sections
 			join(directory, "settings.json"),
 			JSON.stringify({ chatAllowlist: { whitelist: ["*"], blacklist: [] } }),
 		);
-		await writeFile(join(agentDir, "settings.json"), JSON.stringify({ packages: [packageDir] }));
+		await writeFile(
+			join(agentDir, "settings.json"),
+			JSON.stringify({
+				packages: [packageDir],
+				httpIdleTimeoutMs: 2500,
+				transport: "websocket",
+				retry: {
+					enabled: false,
+					maxRetries: 1,
+					baseDelayMs: 1,
+					provider: { timeoutMs: 1234, maxRetries: 0, maxRetryDelayMs: 17 },
+				},
+			}),
+		);
 		await writeFile(join(agentDir, "AGENTS.md"), "Global fixture instructions.");
 		await writeFile(join(directory, "AGENTS.md"), "Workspace instructions v1.");
 		await writeFile(
@@ -44,6 +57,7 @@ it("loads AGENTS and installed user skills, then refreshes their prompt sections
 		const faux = fauxProvider();
 		const models = createModels();
 		models.setProvider(faux.provider);
+		const stream = vi.spyOn(models, "streamSimple");
 		const model = faux.getModel();
 		const extensions = vi.fn(() => [CodingTools]);
 		const send = vi.fn().mockResolvedValue(undefined);
@@ -89,19 +103,45 @@ it("loads AGENTS and installed user skills, then refreshes their prompt sections
 				),
 			);
 		expect(await systemEntries()).toHaveLength(1);
+		expect(stream.mock.calls[0][2]).toMatchObject({
+			transport: "sse",
+			timeoutMs: 1234,
+			maxRetries: 0,
+			maxRetryDelayMs: 17,
+		});
+		await writeFile(
+			join(agentDir, "settings.json"),
+			JSON.stringify({
+				packages: [packageDir],
+				httpIdleTimeoutMs: 0,
+				retry: {
+					enabled: true,
+					maxRetries: 1,
+					baseDelayMs: 1,
+					maxAgentDelayMs: 20,
+					provider: { maxRetries: 2, maxRetryDelayMs: 27 },
+				},
+			}),
+		);
 		await writeFile(join(directory, "AGENTS.md"), "Workspace instructions v2.");
 		await writeFile(join(directory, "SYSTEM.md"), "Current system v2.");
 		await writeFile(skillPath, skill("v2"));
 		await writeFile(referencePath, "Reference style v2.");
-		faux.setResponses([fauxAssistantMessage("Still cached.")]);
-		await (await agent.submit({ chatGuid: "chat", guid: "cached", text: "One more." })).wait(
+		faux.setResponses([
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: "429 rate limit fixture" }),
+		]);
+		const cached = await (await agent.submit({ chatGuid: "chat", guid: "cached", text: "One more." })).wait(
 			BACKGROUND_CONTEXT,
 		);
+		expect(cached).toMatchObject({ status: "unanswered", reason: "model_error" });
+		expect(faux.state.callCount).toBe(4); // Cached disabled retry is honored despite the changed file.
+		expect(stream.mock.calls[3][2]).toMatchObject({ timeoutMs: 1234, maxRetries: 0, maxRetryDelayMs: 17 });
 		expect(await systemEntries()).toHaveLength(1);
 		expect(extensions).toHaveBeenCalledTimes(1);
 		await agent.command({ chatGuid: "chat", guid: "reload", text: "/reload" });
 		expect(extensions).toHaveBeenCalledTimes(2);
 		faux.setResponses([
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: "429 rate limit fixture" }),
 			(context) => {
 				const changes = context.messages.filter((message) => message.role === "system");
 				const latest = JSON.stringify(
@@ -123,7 +163,23 @@ it("loads AGENTS and installed user skills, then refreshes their prompt sections
 		).wait(BACKGROUND_CONTEXT);
 		expect(settled.status).toBe("done");
 		expect(await systemEntries()).toHaveLength(2);
-		expect(faux.state.callCount).toBe(7);
+		expect(faux.state.callCount).toBe(8); // One native retry, then the skill/reference reads and answer.
+		expect(stream.mock.calls[4][2]).toMatchObject({
+			transport: "sse",
+			timeoutMs: 2_147_483_647,
+			maxRetries: 2,
+			maxRetryDelayMs: 27,
+		});
+		expect(stream.mock.calls[5][2]).toMatchObject({ timeoutMs: 2_147_483_647, maxRetries: 2 });
+		faux.setResponses([
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: "429 rate limit fixture" }),
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: "429 rate limit fixture" }),
+		]);
+		const exhausted = await (
+			await agent.submit({ chatGuid: "chat", guid: "exhausted", text: "Retry limit." })
+		).wait(BACKGROUND_CONTEXT);
+		expect(exhausted).toMatchObject({ status: "unanswered", reason: "model_error" });
+		expect(faux.state.callCount).toBe(10); // The configured one-retry cap, not Durable's default cap.
 		// No automatic message or model work is started by resource loading itself.
 		expect(send.mock.calls.map(([, text]) => text)).toEqual([expect.stringContaining("Reloaded.")]);
 	} finally {

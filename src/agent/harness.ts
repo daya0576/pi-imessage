@@ -2,13 +2,18 @@ import { mkdir, open, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
-import { createRegistry, type Extension, Harness } from "@earendil-works/pi-durable";
+import { createRegistry, type Extension, Harness, type HarnessSettings } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeJsonlStorage } from "@earendil-works/pi-durable/storage/jsonl/node";
 import { chatBehavior } from "./behavior.ts";
 import { RunExtension } from "./run.ts";
 
-export async function openHarness(workingDir: string, models: Models, extensions: readonly Extension[]) {
+export async function openHarness(
+	workingDir: string,
+	models: Models,
+	extensions: readonly Extension[],
+	policy: Pick<HarnessSettings, "stream" | "retry">,
+) {
 	const directory = join(workingDir, "durable");
 	await mkdir(directory, { recursive: true });
 	const lockPath = join(directory, "owner.lock");
@@ -32,7 +37,12 @@ export async function openHarness(workingDir: string, models: Models, extensions
 					env: () => env,
 					// Consume all admitted corrections at the next native boundary, not one per turn.
 					settings: {
-						stream: { transport: "sse" },
+						get stream() {
+							return { ...policy.stream, transport: "sse" as const };
+						},
+						get retry() {
+							return policy.retry;
+						},
 						steeringMode: "all",
 						// Only run conversations select the run extension; reread so reinstalls apply.
 						get extensions() {

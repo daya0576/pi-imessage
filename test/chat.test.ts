@@ -569,7 +569,11 @@ it("starts quietly and wires default coding/image tools, model defaults and work
 	expect(resolved?.tools.find((tool) => tool.name === "read")?.description).toContain(
 		"Images are kept as file references",
 	);
-	expect(stream.mock.calls[0][2]?.transport).toBe("sse");
+	expect(stream.mock.calls[0][2]).toMatchObject({
+		transport: "sse",
+		timeoutMs: 300_000,
+		maxRetryDelayMs: 60_000,
+	});
 	expect(JSON.stringify(stream.mock.calls[0][1])).toContain("original.txt");
 	expect(JSON.stringify(stream.mock.calls[0][1])).not.toContain("mutated.txt");
 	await agent.deliver();
