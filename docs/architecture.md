@@ -29,7 +29,7 @@ cannot import each other; imports within a package are allowed.
 |---|---|---|
 | 1 | `main.ts`, `cli.ts` | Startup, wiring and installation. |
 | 1 | `migrate/` | One-time history import; writes directly to Durable storage. |
-| 2 | `web/` | HTTP API, chat history, live state and controls. No actions on page load. |
+| 2 | `web/` | HTTP API; read-only pages for chat history and live state. |
 | 2 | `scheduler/` | Cron jobs and one-time reminders. |
 | 2 | `automation/` | PT browser tasks. |
 | 3 | `agent/` | Harness, models, chat mapping, commands, delivery, prompt, `/run` and scheduled compaction. |

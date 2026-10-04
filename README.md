@@ -25,8 +25,7 @@ pi-imessage             # run in foreground
 pi-imessage install     # install as launchd service (auto-start on boot, restart on crash)
 ```
 
-Open `http://localhost:7750` and enable replies for your chats in the web UI,
-or add their GUIDs to the [settings allowlist](#settings).
+Enable replies for your chats by adding their GUIDs to the [settings allowlist](#settings).
 
 ## Commands
 
