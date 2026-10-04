@@ -1,0 +1,100 @@
+#!/usr/bin/env -S node --experimental-strip-types
+import { execFile } from "node:child_process";
+import { mkdir, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { promisify } from "node:util";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { startApplication } from "./main.ts";
+import { createMessageSender } from "./transport/send.ts";
+
+export async function main(args = process.argv.slice(2)) {
+	if (args.includes("--help") || args[0] === "help") {
+		console.log(
+			"pi-imessage [serve]\npi-imessage import --source PATH --target PATH --backup PATH --cursor NUMBER\npi-imessage install (write launchd job only)\nSee ops/README.md for operator-only installation, cutover and rollback.",
+		);
+		return;
+	}
+	const workingDir = resolve(process.env.WORKING_DIR ?? join(homedir(), ".pi", "imessage"));
+	if (args[0] === "install") {
+		const directory = join(homedir(), "Library", "LaunchAgents");
+		await mkdir(directory, { recursive: true });
+		await mkdir(workingDir, { recursive: true, mode: 0o700 });
+		const xml = (value: string) =>
+			value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+		const path = join(directory, "me.changchen.pi-imessage-durable.plist");
+		const environment = [
+			"WEB_HOST",
+			"WEB_PORT",
+			"WEB_ENABLED",
+			"MESSAGES_DB_PATH",
+			"PI_SCHEDULER_SERVICE_PATH",
+			"BRAVE_API_KEY",
+			"BRAVE_SEARCH_API_KEY",
+		]
+			.filter((key) => process.env[key] !== undefined)
+			.map((key) => `<key>${key}</key><string>${xml(process.env[key] ?? "")}</string>`)
+			.join("");
+		await writeFile(
+			path,
+			`<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>Label</key><string>me.changchen.pi-imessage-durable</string><key>ProgramArguments</key><array><string>${xml(process.execPath)}</string><string>--experimental-strip-types</string><string>${xml(fileURLToPath(import.meta.url))}</string><string>serve</string></array><key>EnvironmentVariables</key><dict><key>WORKING_DIR</key><string>${xml(workingDir)}</string><key>PATH</key><string>${xml(process.env.PATH ?? "/usr/bin:/bin")}</string>${environment}</dict><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>StandardOutPath</key><string>${xml(join(workingDir, "service.log"))}</string><key>StandardErrorPath</key><string>${xml(join(workingDir, "service.log"))}</string></dict></plist>`,
+			{ flag: "wx", mode: 0o600 },
+		);
+		console.log(
+			`Wrote ${path}. Not loaded. Follow ops/README.md for authorized one-shot cutover; do not run both services.`,
+		);
+		return;
+	}
+	if (args[0] === "import") {
+		const result = await promisify(execFile)(
+			process.execPath,
+			[
+				"--experimental-strip-types",
+				fileURLToPath(new URL("./migrate/migrate.ts", import.meta.url)),
+				...args.slice(1),
+			],
+			{ maxBuffer: 1024 * 1024 },
+		);
+		console.log(result.stdout.trim());
+		return;
+	}
+	if (args.length && args[0] !== "serve") throw new Error("Unknown command; see --help");
+	const dbPath = process.env.MESSAGES_DB_PATH ?? join(homedir(), "Library", "Messages", "chat.db");
+	const sender = createMessageSender({ attachmentsRoot: join(workingDir, "attachments"), dbPath });
+	const app = await startApplication({
+		workingDir,
+		agentDir: getAgentDir(),
+		dbPath,
+		send: sender.sendMessage,
+		sendAttachment: sender.sendAttachment,
+		onError: (error) => console.error("Messaging poll failed", error),
+		web:
+			process.env.WEB_ENABLED === "false"
+				? false
+				: { host: process.env.WEB_HOST ?? "localhost", port: Number(process.env.WEB_PORT ?? 7750) },
+	});
+	console.log("pi-imessage started", workingDir);
+	let closing = false;
+	const stop = () => {
+		if (closing) return;
+		closing = true;
+		void app.close().then(
+			() => {
+				console.log("pi-imessage stopped");
+			},
+			(error) => {
+				console.error("Shutdown failed", error);
+				process.exitCode = 1;
+			},
+		);
+	};
+	process.once("SIGINT", stop);
+	process.once("SIGTERM", stop);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)
+	void main().catch((error) => {
+		console.error(error instanceof Error ? error.message : error);
+		process.exitCode = 1;
+	});

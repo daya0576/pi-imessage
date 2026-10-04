@@ -22,10 +22,12 @@ Prerequisites: macOS with Messages.app, Node.js 22.22.0 or newer, Python 3
 npm install -g @kingcrab/pi-imessage
 
 pi-imessage             # run in foreground
-pi-imessage install     # install as launchd service (auto-start on boot, restart on crash)
+pi-imessage install     # write a launchd job; loading it is a separate operator action
 ```
 
 Enable replies for your chats by adding their GUIDs to the [settings allowlist](#settings).
+Installation, history import, authorized cutover and rollback follow [ops/README.md](ops/README.md);
+do not run old and new pipelines together.
 
 ## Commands
 
@@ -36,6 +38,7 @@ Send these commands as iMessages:
 | `/help` | List commands |
 | `/new` | Cancel current work and start a fresh conversation |
 | `/status` | Show tokens, context usage, and model |
+| `/thinking <level\|default>` | Set thinking for this chat or follow the default |
 | `/compact` | Compress context without replaying prior work |
 | `/stop` | Abort current work and stop `/run`; later messages are still answered |
 | `/run <duration> [task]` | Keep working for up to the given time, e.g. `/run 1h`; `/stop` ends it early |

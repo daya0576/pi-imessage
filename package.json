@@ -3,6 +3,9 @@
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
+	"bin": {
+		"pi-imessage": "src/cli.ts"
+	},
 	"engines": {
 		"node": ">=22.22.2"
 	},
