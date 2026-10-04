@@ -5,6 +5,8 @@ import type { Models } from "@earendil-works/pi-ai";
 import { createRegistry, type Extension, Harness } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeJsonlStorage } from "@earendil-works/pi-durable/storage/jsonl/node";
+import { chatBehavior } from "./behavior.ts";
+import { RunExtension } from "./run.ts";
 
 export async function openHarness(workingDir: string, models: Models, extensions: readonly Extension[]) {
 	const directory = join(workingDir, "durable");
@@ -17,12 +19,30 @@ export async function openHarness(workingDir: string, models: Models, extensions
 		const storage = await openNodeJsonlStorage(directory, BACKGROUND_CONTEXT, { fsync: true });
 		try {
 			const registry = createRegistry();
+			registry.install(chatBehavior(storage));
+			registry.install(RunExtension);
 			for (const extension of extensions) registry.install(extension);
 			const env = new NodeExecutionEnv({ cwd: workingDir });
 			const harness = await Harness.open(
 				storage,
 				// Large Codex contexts exceed WebSocket frame limits; force SSE.
-				{ models, registry, env: () => env, settings: { stream: { transport: "sse" } } },
+				{
+					models,
+					registry,
+					env: () => env,
+					// Consume all admitted corrections at the next native boundary, not one per turn.
+					settings: {
+						stream: { transport: "sse" },
+						steeringMode: "all",
+						// Only run conversations select the run extension; reread so reinstalls apply.
+						get extensions() {
+							return registry
+								.snapshot()
+								.installed()
+								.filter((extension) => extension.name !== RunExtension.name);
+						},
+					},
+				},
 				BACKGROUND_CONTEXT,
 			);
 			let closing: Promise<void> | undefined;

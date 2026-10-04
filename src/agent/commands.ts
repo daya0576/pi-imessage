@@ -1,19 +1,18 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
-import type { Harness } from "@earendil-works/pi-durable";
+import type { Models, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import { type AgentChange, type Harness, type TaskId, UsageDoc } from "@earendil-works/pi-durable";
 import { type AgentDefaults, chatConversation } from "./chats.ts";
-import type { Runs } from "./run.ts";
+import { activeRun, Runs, startRun } from "./run.ts";
 
 const help = [
 	"/help - list commands",
-	"/new - start an empty context",
-	"/stop - stop current work",
-	"/status - show model and run state",
+	"/new - stop current work and start an empty context",
+	"/status - show messages, tokens, context usage, model and run",
 	"/compact [instructions] - compress context",
 	"/thinking <level|default> - set thinking for this chat",
-	"/reload - apply the default model to this chat",
-	"/run <duration> [task] - keep working until done, blocked or the deadline",
-	"/run-stop - end the current run",
+	"/reload - reload models, instructions and skills; apply the default model to this chat",
+	"/run <duration> [task] - keep working until done, blocked or the deadline, e.g. /run 1h",
+	"/stop - stop the current /run",
 ].join("\n");
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
@@ -27,72 +26,118 @@ export function parseDuration(value: string) {
 	return (Number(match[1] ?? 0) * 60 + Number(match[2] ?? 0)) * 60000;
 }
 
-/** Runs a slash command and returns the text to send back; command replies bypass the model. */
-export async function runCommand(
-	harness: Harness,
-	defaults: () => Promise<AgentDefaults>,
-	runs: Runs,
-	chatGuid: string,
-	text: string,
-	startRun: (task: string) => Promise<void>,
-) {
-	const [name, ...rest] = text.trim().split(/\s+/);
+function tokens(count: number) {
+	return count >= 1000 ? `${(count / 1000).toFixed(1)}k` : String(count);
+}
+
+/** `wait` names a task whose end the reply should follow, so the watcher is not blocked on it. */
+export type CommandResult = { reply?: string; wait?: TaskId };
+
+/** Runs a slash command through Durable APIs; command replies bypass the model. */
+export async function runCommand(options: {
+	harness: Harness;
+	models: Models;
+	defaults: AgentDefaults;
+	reload: () => Promise<AgentDefaults>;
+	chatGuid: string;
+	guid: string;
+	text: string;
+}): Promise<CommandResult> {
+	const { harness, chatGuid } = options;
+	const [name, ...rest] = options.text.trim().split(/\s+/);
 	const argument = rest.join(" ");
-	const conversation = await chatConversation(harness, await defaults(), chatGuid);
-	const id = String(conversation.id);
-	switch (name) {
-		case "/help":
-			return help;
-		case "/stop":
-		case "/new":
-			runs.delete(id);
-			await conversation.abort(BACKGROUND_CONTEXT);
-			if (name === "/stop") return "Stopped.";
-			await conversation.reset(undefined, BACKGROUND_CONTEXT);
-			return "Started an empty context.";
-		case "/status": {
-			const agent = await conversation.agent(BACKGROUND_CONTEXT);
-			const run = runs.get(id);
-			return [
-				`Model: ${agent.model ? `${agent.model.provider}/${agent.model.modelId}` : "unset"}`,
-				`Thinking: ${agent.thinkingLevel}`,
-				`Run: ${run ? `until ${new Date(run.deadline).toISOString()}` : "none"}`,
-			].join("\n");
-		}
-		case "/compact":
-			await harness.waitForTask(
-				await conversation.compact(argument || undefined, BACKGROUND_CONTEXT),
+	const conversation = await chatConversation(harness, options.defaults, chatGuid);
+	const run = activeRun((await harness.snapshot(Runs, BACKGROUND_CONTEXT))?.items, conversation.id);
+	// Agent settings apply to the chat and to its active run.
+	const configure = async (change: AgentChange) => {
+		await conversation.configure(change, BACKGROUND_CONTEXT);
+		if (run)
+			await (await harness.conversation(run.conversationId, BACKGROUND_CONTEXT))?.configure(
+				change,
 				BACKGROUND_CONTEXT,
 			);
-			return "Compacted.";
+	};
+	switch (name) {
+		case "/help":
+			return { reply: help };
+		case "/stop":
+			if (!run) return { reply: "Nothing is running." };
+			await harness.abortTask(run.taskId, BACKGROUND_CONTEXT);
+			await harness.waitForTask(run.taskId, BACKGROUND_CONTEXT);
+			return { reply: "Stopped." };
+		case "/new":
+			// The run task belongs to the chat conversation, so this abort stops it too.
+			await conversation.abort(BACKGROUND_CONTEXT);
+			await conversation.reset(undefined, BACKGROUND_CONTEXT);
+			return { reply: "Started an empty context." };
+		case "/status": {
+			const agent = await conversation.agent(BACKGROUND_CONTEXT);
+			const context = await conversation.context(BACKGROUND_CONTEXT);
+			const usage = Object.values(
+				(await harness.snapshot(UsageDoc, conversation.id, BACKGROUND_CONTEXT))?.models ?? {},
+			);
+			const last = context.messages.findLast(
+				(message) => message.role === "assistant" && message.usage.totalTokens > 0,
+			);
+			const window =
+				agent.model && options.models.getModel(agent.model.provider, agent.model.modelId)?.contextWindow;
+			const used = last?.role === "assistant" ? last.usage.totalTokens : 0;
+			return {
+				reply: [
+					[
+						`${context.messages.filter((message) => message.role === "user").length} msgs -`,
+						`in ${tokens(usage.reduce((sum, item) => sum + item.input, 0))}`,
+						`out ${tokens(usage.reduce((sum, item) => sum + item.output, 0))}`,
+						window ? `${((used / window) * 100).toFixed(1)}%/${tokens(window)}` : "",
+					]
+						.join(" ")
+						.trim(),
+					`Model: ${agent.model ? `${agent.model.provider}/${agent.model.modelId}` : "unset"}, thinking: ${agent.thinkingLevel}`,
+					`Run: ${run ? `until ${new Date(run.deadline).toISOString()}` : "none"}`,
+				].join("\n"),
+			};
+		}
+		case "/compact":
+			return {
+				reply: "Compacted.",
+				wait: await conversation.compact(argument || undefined, BACKGROUND_CONTEXT),
+			};
 		case "/thinking":
 			if (argument === "default") {
-				await conversation.configure(
-					{ thinkingLevel: (await defaults()).thinkingLevel ?? null },
-					BACKGROUND_CONTEXT,
-				);
-				return "Thinking follows the default.";
+				await configure({ thinkingLevel: options.defaults.thinkingLevel ?? null });
+				return { reply: "Thinking follows the default." };
 			}
-			if (!thinkingLevels.includes(argument)) return `Usage: /thinking <${thinkingLevels.join("|")}|default>`;
-			await conversation.configure({ thinkingLevel: argument as ModelThinkingLevel }, BACKGROUND_CONTEXT);
-			return `Thinking: ${argument} (this chat only)`;
+			if (!thinkingLevels.includes(argument))
+				return { reply: `Usage: /thinking <${thinkingLevels.join("|")}|default>` };
+			await configure({ thinkingLevel: argument as ModelThinkingLevel });
+			return { reply: `Thinking: ${argument} (this chat only)` };
 		case "/reload": {
-			const current = await defaults();
-			await conversation.configure({ model: current.model }, BACKGROUND_CONTEXT);
-			return `Model: ${current.model.provider}/${current.model.modelId}`;
+			const current = await options.reload();
+			await configure({ model: current.model });
+			return { reply: `Reloaded. Model: ${current.model.provider}/${current.model.modelId}` };
 		}
 		case "/run": {
 			const duration = parseDuration(rest[0] ?? "");
-			if (!duration) return "Usage: /run <duration, e.g. 30m or 2h> [task]";
-			if (runs.has(id)) return "A run is already active. Use /run-stop first.";
-			const task = rest.slice(1).join(" ") || "Continue the current task.";
-			runs.set(id, { deadline: Date.now() + duration, task });
-			await startRun(task);
-			return;
+			if (!duration) return { reply: "Usage: /run <duration, e.g. 30m or 2h> [task]" };
+			const task = rest.slice(1).join(" ");
+			const started = await startRun(
+				conversation,
+				chatGuid,
+				Date.now() + duration,
+				task || "Continue the current task.",
+			);
+			if (started.status === "busy") return { reply: "Busy. Send /run again when the current work is done." };
+			if (started.status === "started") return {};
+			if (task) {
+				const target = await harness.conversation(started.run.conversationId, BACKGROUND_CONTEXT);
+				await target?.submit(
+					{ type: "input", content: task, requestId: options.guid, whenBusy: "steer" },
+					BACKGROUND_CONTEXT,
+				);
+			}
+			return { reply: `Run extended until ${new Date(started.run.deadline).toISOString()}.` };
 		}
-		case "/run-stop":
-			return runs.delete(id) ? "Run ended." : "No active run.";
 		default:
-			return `Unknown command. ${help}`;
+			return { reply: `Unknown command.\n${help}` };
 	}
 }

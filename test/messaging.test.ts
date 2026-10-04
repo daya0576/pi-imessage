@@ -15,7 +15,8 @@ import Database from "better-sqlite3";
 import sharp from "sharp";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Chats, WatchCursor } from "../src/agent/chats.ts";
-import { Deliveries, type SendText } from "../src/agent/deliver.ts";
+import type { SendText } from "../src/agent/deliver.ts";
+import { Deliveries } from "../src/agent/replies.ts";
 import { ImageRead } from "../src/extensions/read-image.ts";
 import { startMessaging, startService } from "../src/main.ts";
 import { createWatcher } from "../src/transport/watch.ts";
@@ -66,6 +67,7 @@ beforeEach(async () => {
 		runtime: { models, defaults: { model: { provider: model.provider, modelId: model.id } } },
 		extensions: [],
 		send,
+		sendAttachment: vi.fn().mockRejectedValue(new Error("Unexpected attachment send")),
 	};
 });
 
@@ -202,6 +204,26 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 	expect(history).not.toContain(imageData);
 	expect(history).not.toContain('"type":"image"');
 	expect((await service.harness.snapshot(WatchCursor, BACKGROUND_CONTEXT))?.rowid).toBe(rowid);
+});
+
+// #33 Phase 3: command rows must settle without becoming model input or blocking following source rows.
+it("routes commands separately and advances to the following ordinary message", async () => {
+	faux.setResponses([fauxAssistantMessage("ordinary reply")]);
+	service = await startMessaging(options);
+	insert("help", "/help");
+	insert("stop", "/stop");
+	insert("thinking", "/thinking high");
+	const last = insert("after-commands", "Ordinary question after commands.");
+	await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(4));
+	expect(textCalls().map(([, text]) => text)).toEqual([
+		expect.stringContaining("/help"),
+		"Nothing is running.",
+		"Thinking: high (this chat only)",
+		"ordinary reply",
+	]);
+	expect(faux.state.callCount).toBe(1);
+	expect((await service.harness.snapshot(WatchCursor, BACKGROUND_CONTEXT))?.rowid).toBe(last);
+	expect(onError).not.toHaveBeenCalled();
 });
 
 // #33 Phase 2: save the initial high-water mark even if no row has been accepted yet.

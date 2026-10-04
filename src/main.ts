@@ -1,13 +1,21 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
 import type { Extension } from "@earendil-works/pi-durable";
-import { type AgentDefaults, type MessageInput, submitMessage, WatchCursor } from "./agent/chats.ts";
-import { isCommand } from "./agent/commands.ts";
+import {
+	type AgentDefaults,
+	chatConversation,
+	type MessageInput,
+	submitMessage,
+	WatchCursor,
+} from "./agent/chats.ts";
+import { isCommand, runCommand } from "./agent/commands.ts";
 import { deliverReplies, recoverSending, type SendText } from "./agent/deliver.ts";
+import { type DirectSendInput, deliverDirect } from "./agent/direct-send.ts";
 import { openHarness } from "./agent/harness.ts";
 import { openModels, readDefaults, withCodexFast } from "./agent/models.ts";
 import { isReplyEnabled, readSettings } from "./config/settings.ts";
 import { archiveAttachments } from "./transport/attachments.ts";
+import type { MessageSender } from "./transport/send.ts";
 import { createWatcher } from "./transport/watch.ts";
 
 /** Explicit startup; pass an isolated runtime in tests instead of opening installed auth. */
@@ -16,13 +24,16 @@ export async function startService(options: {
 	runtime?: { models: Models; defaults: AgentDefaults };
 	extensions: readonly Extension[];
 	send: SendText;
+	sendAttachment: MessageSender["sendAttachment"];
 }) {
 	const extensions = [...options.extensions];
 	let runtime = options.runtime;
 	await readSettings(options.workingDir);
+	// Installed auth and models; an isolated test runtime has nothing to reload.
+	let installed: Awaited<ReturnType<typeof openModels>> | undefined;
 	if (!runtime) {
-		const models = await openModels();
-		runtime = { models, defaults: await readDefaults(models, options.workingDir) };
+		installed = await openModels();
+		runtime = { models: installed, defaults: await readDefaults(installed, options.workingDir) };
 	}
 	const defaults = { ...runtime.defaults, model: { ...runtime.defaults.model } };
 	if (!runtime.models.getModel(defaults.model.provider, defaults.model.modelId))
@@ -34,6 +45,12 @@ export async function startService(options: {
 	} catch (error) {
 		await owner.close();
 		throw error;
+	}
+
+	/** New chats use the reloaded default; Durable reads models at each request. */
+	async function reload() {
+		if (installed) Object.assign(defaults, await readDefaults(installed, options.workingDir));
+		return { ...defaults, model: { ...defaults.model } };
 	}
 
 	let closed = false;
@@ -55,10 +72,69 @@ export async function startService(options: {
 				const settings = await readSettings(options.workingDir);
 				const enabled = isReplyEnabled(settings, snapshot.chatGuid);
 				if (!enabled && !logDisabled) throw new Error("Chat is disabled");
-				if (enabled && isCommand(snapshot.text))
-					throw new Error("Commands are not supported by this entry point yet");
+				if (enabled && isCommand(snapshot.text)) throw new Error("Slash commands go through command()");
 				return submitMessage(harness, defaults, snapshot, enabled);
 			});
+		},
+		/** Records the command once by its source GUID, then runs it; an interrupted command is not replayed. */
+		command(input: MessageInput) {
+			const snapshot = { ...input, attachments: input.attachments ? [...input.attachments] : undefined };
+			return track(async () => {
+				if (!isCommand(snapshot.text)) throw new Error("A slash command is required");
+				const settings = await readSettings(options.workingDir);
+				if (!isReplyEnabled(settings, snapshot.chatGuid)) {
+					await submitMessage(harness, defaults, snapshot, false);
+					return;
+				}
+				const conversation = await chatConversation(harness, defaults, snapshot.chatGuid);
+				if (
+					await harness.commit(
+						(tx) => tx.submissionByRequest(conversation.id, snapshot.guid),
+						BACKGROUND_CONTEXT,
+					)
+				)
+					return;
+				await conversation.submit(
+					{
+						type: "write",
+						requestId: snapshot.guid,
+						entry: { kind: "imessage.command", data: { text: snapshot.text } },
+					},
+					BACKGROUND_CONTEXT,
+				);
+				const result = await runCommand({
+					harness,
+					models: runtime.models,
+					defaults,
+					reload,
+					chatGuid: snapshot.chatGuid,
+					guid: snapshot.guid,
+					text: snapshot.text,
+				});
+				const reply = async () => {
+					if (result.wait !== undefined) await harness.waitForTask(result.wait, BACKGROUND_CONTEXT);
+					if (result.reply)
+						await deliverDirect(
+							harness,
+							{ chatGuid: snapshot.chatGuid, requestId: `command:${snapshot.guid}`, text: result.reply },
+							{ sendMessage: options.send, sendAttachment: options.sendAttachment },
+						);
+				};
+				// A long command (compaction) must not hold the watcher; its reply follows the task.
+				if (result.wait === undefined) await reply();
+				else void track(reply).catch((error) => console.warn("Command reply failed", snapshot.guid, error));
+				return result;
+			});
+		},
+		// Explicit operator/API sends bypass reply allowlists, as the old /send endpoint does.
+		sendDirect(input: DirectSendInput) {
+			const snapshot = { ...input };
+			return track(() =>
+				deliverDirect(harness, snapshot, {
+					sendMessage: options.send,
+					sendAttachment: options.sendAttachment,
+				}),
+			);
 		},
 		// Explicit host boundary; no model loop, timer or transport runs on import.
 		deliver() {
@@ -106,7 +182,8 @@ export async function startMessaging(
 					message.chatGuid,
 					message.attachments,
 				);
-				await service.submit({ ...message, attachments }, { logDisabled: true });
+				if (isCommand(message.text)) await service.command({ ...message, attachments });
+				else await service.submit({ ...message, attachments }, { logDisabled: true });
 			},
 			saveCursor: (rowid) =>
 				service.harness.commit(async (tx) => {
@@ -158,6 +235,10 @@ export async function startMessaging(
 	timer = setTimeout(tick, 0);
 	return {
 		harness: service.harness,
+		sendDirect(input: DirectSendInput) {
+			if (closed) return Promise.reject(new Error("Messaging is closed"));
+			return service.sendDirect(input);
+		},
 		poll,
 		close() {
 			closed = true;

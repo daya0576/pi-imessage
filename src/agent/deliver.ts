@@ -3,31 +3,48 @@ import {
 	AssistantEntry,
 	type ConversationId,
 	type Cursor,
-	defineDoc,
 	type EntryId,
 	type Harness,
 	type Storage,
 } from "@earendil-works/pi-durable";
 import type { MessageSender } from "../transport/send.ts";
 import { Chats } from "./chats.ts";
+import { DirectSends } from "./direct-send.ts";
+import { Deliveries, type DeliveryStatus, finalReplyText } from "./replies.ts";
+import { RUN_RECORD, Runs, runRecord } from "./run.ts";
 
 export type SendText = MessageSender["sendMessage"];
-export type DeliveryStatus = "sending" | "sent" | "unknown";
 
-export const Deliveries = defineDoc<{ answers: Record<string, DeliveryStatus> }>({
-	kind: "imessage.deliveries",
-	version: 1,
-	scope: "conversation",
-	history: "latest",
-	fork: "initial",
-	initial: () => ({ answers: {} }),
-});
+/** A conversation whose final answers go to a chat; a run also records sent replies in its chat conversation. */
+type Target = { conversationId: ConversationId; chatGuid: string; chat?: ConversationId };
+
+async function targets(harness: Harness): Promise<Target[]> {
+	const chats = (await harness.snapshot(Chats, BACKGROUND_CONTEXT))?.items ?? [];
+	const runs = (await harness.snapshot(Runs, BACKGROUND_CONTEXT))?.items ?? [];
+	return [
+		...chats,
+		...runs.map((run) => ({ conversationId: run.conversationId, chatGuid: run.chatGuid, chat: run.chat })),
+	];
+}
 
 export async function recoverSending(harness: Harness) {
-	const chats = await harness.snapshot(Chats, BACKGROUND_CONTEXT);
-	for (const chat of chats?.items ?? []) {
+	const directUnknown = await harness.commit(async (tx) => {
+		const sends = await tx.doc(DirectSends);
+		const changed: { chatGuid: string; requestId: string; part: string }[] = [];
+		for (const receipt of sends.requests) {
+			for (const part of ["textStatus", "fileStatus"] as const) {
+				if (receipt[part] !== "sending") continue;
+				receipt[part] = "unknown";
+				changed.push({ chatGuid: receipt.chatGuid, requestId: receipt.requestId, part });
+			}
+		}
+		return changed;
+	}, BACKGROUND_CONTEXT);
+	for (const { chatGuid, requestId, part } of directUnknown)
+		console.warn("Direct delivery unknown", chatGuid, requestId, part);
+	for (const { conversationId } of await targets(harness)) {
 		const unknown = await harness.commit(async (tx) => {
-			const deliveries = await tx.doc(Deliveries, chat.conversationId);
+			const deliveries = await tx.doc(Deliveries, conversationId);
 			const changed: string[] = [];
 			for (const [answerId, status] of Object.entries(deliveries.answers)) {
 				if (status === "sending") {
@@ -37,48 +54,64 @@ export async function recoverSending(harness: Harness) {
 			}
 			return changed;
 		}, BACKGROUND_CONTEXT);
-		for (const answerId of unknown) console.warn("Reply delivery unknown", chat.conversationId, answerId);
+		for (const answerId of unknown) console.warn("Reply delivery unknown", conversationId, answerId);
 	}
 }
 
+/** Returns false when the answer must wait for an earlier in-flight send. */
 async function deliverAnswer(
 	harness: Harness,
-	conversationId: ConversationId,
+	storage: Storage,
+	target: Target,
 	answerId: EntryId,
-	chatGuid: string,
 	send: SendText,
 ) {
-	const text = await harness.commit(async (tx) => {
+	const { conversationId } = target;
+	const claim = await harness.commit(async (tx) => {
 		const entry = await tx.entry(AssistantEntry, answerId);
-		if (!entry || entry.conversationId !== conversationId)
-			throw new Error("Reply entry is missing or belongs to another chat");
-		const message = entry.model?.[0];
-		if (message?.role !== "assistant" || !["stop", "length"].includes(message.stopReason)) return;
-		if (message.content.some((part) => part.type === "toolCall")) return;
-		const text = message.content
-			.filter((part) => {
-				if (part.type !== "text") return false;
-				try {
-					const signature = JSON.parse(part.textSignature ?? "null");
-					return !(signature?.v === 1 && signature.phase === "commentary");
-				} catch {
-					return true; // Opaque provider signatures are not channel labels.
-				}
-			})
-			.map((part) => (part.type === "text" ? part.text : ""))
-			.join("\n")
-			.trim();
-		if (!text) return;
+		const text = finalReplyText(entry?.model?.[0]);
 		const deliveries = await tx.doc(Deliveries, conversationId);
-		if (deliveries.answers[String(answerId)]) return;
-		deliveries.answers[String(answerId)] = "sending";
-		return text;
+		const key = String(answerId);
+		const decided = () => {
+			if (deliveries.scanned === undefined || deliveries.scanned < answerId) deliveries.scanned = answerId;
+			return true;
+		};
+		if (!text || deliveries.answers[key] || deliveries.drafts?.[key]) return { decided: decided() };
+
+		// The owning Session serializes admission with this claim. Read committed native submissions,
+		// not arbitrary user entries: passive logs and /run continuation text are not new human input.
+		let intervening = false;
+		let cursor: Cursor | undefined;
+		do {
+			const page = await storage.scanSubmissions({ conversationId }, 100, cursor, BACKGROUND_CONTEXT);
+			intervening = page.items.some(
+				(input) =>
+					input.type === "input" &&
+					(input.status === "queued" || (input.entry !== undefined && input.entry > answerId)),
+			);
+			cursor = page.next;
+		} while (cursor && !intervening);
+		if (intervening) {
+			deliveries.drafts ??= {};
+			deliveries.drafts[key] = { status: "held", reason: "newer_input" };
+			return { decided: decided() };
+		}
+		// Do not overtake an earlier in-flight send in this chat.
+		if (Object.values(deliveries.answers).includes("sending")) return { decided: false };
+
+		// Finals are claimed in order, so the only earlier unsent ones are held drafts; this answer replaces them.
+		const drafts = deliveries.drafts ?? {};
+		for (const [previous, draft] of Object.entries(drafts))
+			if (draft.status === "held" && Number(previous) < answerId)
+				drafts[previous] = { status: "superseded", replacement: answerId };
+		deliveries.answers[key] = "sending";
+		return { decided: decided(), text };
 	}, BACKGROUND_CONTEXT);
-	if (!text) return;
+	if (!claim.text) return claim.decided;
 
 	let status: DeliveryStatus = "sent";
 	try {
-		await send(chatGuid, text);
+		await send(target.chatGuid, claim.text);
 	} catch {
 		// A throwing transport may already have sent. Never retry it automatically.
 		status = "unknown";
@@ -87,26 +120,45 @@ async function deliverAnswer(
 		(await tx.doc(Deliveries, conversationId)).answers[String(answerId)] = status;
 	}, BACKGROUND_CONTEXT);
 	if (status === "unknown") console.warn("Reply delivery unknown", conversationId, String(answerId));
+	if (target.chat !== undefined) {
+		// A queued write never splits a turn that is running in the chat conversation.
+		const chat = await harness.conversation(target.chat, BACKGROUND_CONTEXT);
+		await chat?.submit(
+			{
+				type: "write",
+				requestId: `${RUN_RECORD}:${answerId}`,
+				entry: runRecord(`[/run reply, ${status}]\n${claim.text}`, Date.now()),
+			},
+			BACKGROUND_CONTEXT,
+		);
+	}
+	return true;
 }
 
+/** Sends committed final answers in order, including those a /run writes between continuations. */
 export async function deliverReplies(
 	harness: Harness,
 	storage: Storage,
 	send: SendText,
 	enabled: (chatGuid: string) => boolean,
 ) {
-	const chats = await harness.snapshot(Chats, BACKGROUND_CONTEXT);
-	const destinations = new Map(chats?.items.map((chat) => [chat.conversationId, chat.chatGuid]));
-	let cursor: Cursor | undefined;
-	do {
-		// Read settled inputs, not a transient watch: several inputs can share one answer.
-		const page = await storage.scanSubmissions({ status: "done" }, 100, cursor, BACKGROUND_CONTEXT);
-		for (const submission of page.items) {
-			const chatGuid = destinations.get(submission.conversationId);
-			if (submission.type === "input" && submission.status === "done" && chatGuid && enabled(chatGuid)) {
-				await deliverAnswer(harness, submission.conversationId, submission.answer, chatGuid, send);
-			}
-		}
-		cursor = page.next;
-	} while (cursor);
+	for (const target of await targets(harness)) {
+		if (!enabled(target.chatGuid)) continue;
+		const scanned = (await harness.snapshot(Deliveries, target.conversationId, BACKGROUND_CONTEXT))?.scanned;
+		const answers: EntryId[] = [];
+		let cursor: Cursor | undefined;
+		do {
+			const page = await storage.scanEntries(
+				{ conversationId: target.conversationId, ...(scanned === undefined ? {} : { minEntryId: scanned }) },
+				100,
+				cursor,
+				BACKGROUND_CONTEXT,
+			);
+			for (const entry of page.items)
+				if (AssistantEntry.is(entry) && finalReplyText(entry.model?.[0])) answers.push(entry.id);
+			cursor = page.next;
+		} while (cursor);
+		for (const answerId of answers.reverse())
+			if (!(await deliverAnswer(harness, storage, target, answerId, send))) break;
+	}
 }

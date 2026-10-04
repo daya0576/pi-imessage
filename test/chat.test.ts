@@ -2,7 +2,7 @@ import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { TranscriptContext } from "@earendil-works/pi-ai";
+import { type TranscriptContext, Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
 	type FauxProviderHandle,
@@ -10,19 +10,23 @@ import {
 	fauxProvider,
 	fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
-import { Harness, type Submission } from "@earendil-works/pi-durable";
+import { defineExtension, defineTool, Harness, type Submission, UserEntry } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Chats } from "../src/agent/chats.ts";
-import { Deliveries, type SendText } from "../src/agent/deliver.ts";
+import type { SendText } from "../src/agent/deliver.ts";
+import { DirectSends } from "../src/agent/direct-send.ts";
 import * as modelConfig from "../src/agent/models.ts";
+import { Deliveries } from "../src/agent/replies.ts";
 import { startService } from "../src/main.ts";
+import type { MessageSender } from "../src/transport/send.ts";
 
 let directory: string;
 let agent: Awaited<ReturnType<typeof startService>>;
 let faux: FauxProviderHandle;
 let options: Required<Parameters<typeof startService>[0]>;
 const send = vi.fn<SendText>();
+const sendAttachment = vi.fn<MessageSender["sendAttachment"]>();
 const textCalls = () => send.mock.calls.map(([chatGuid, text]) => [chatGuid, text]);
 
 beforeEach(async () => {
@@ -38,12 +42,14 @@ beforeEach(async () => {
 	models.setProvider(faux.provider);
 	const model = faux.getModel();
 	send.mockReset().mockResolvedValue(undefined);
+	sendAttachment.mockReset().mockResolvedValue(undefined);
 	vi.spyOn(console, "warn").mockImplementation(() => {});
 	options = {
 		workingDir: directory,
 		runtime: { models, defaults: { model: { provider: model.provider, modelId: model.id } } },
 		extensions: [],
 		send,
+		sendAttachment,
 	};
 	agent = await startService(options);
 });
@@ -87,6 +93,21 @@ it("maps chats separately, passes source GUIDs, and sends only final text", asyn
 			if (message.role === "system") expect(message.toolsAdded ?? []).toHaveLength(0);
 		}
 	}
+	// #33 / ADR 0011: a passive user entry is not an intervening ordinary input.
+	const conversation = await agent.harness.conversation(records[0].conversationId, BACKGROUND_CONTEXT);
+	if (!conversation) throw new Error("Missing conversation");
+	await (
+		await conversation.submit(
+			{
+				type: "write",
+				entry: {
+					kind: UserEntry.kind,
+					model: [{ role: "user", content: "Passive host note.", timestamp: Date.now() }],
+				},
+			},
+			BACKGROUND_CONTEXT,
+		)
+	).wait(BACKGROUND_CONTEXT);
 	await agent.deliver();
 	expect(textCalls()).toEqual(
 		expect.arrayContaining([
@@ -97,38 +118,260 @@ it("maps chats separately, passes source GUIDs, and sends only final text", asyn
 	expect(send).toHaveBeenCalledTimes(2);
 });
 
-it("admits originals while busy and delivers a shared steered answer once", async () => {
+// #33 Phase 2: configure native all-at-once steer and pass guidance without a host batch/replay loop.
+it("admits all busy-chat additions at the next tool boundary without repeating completed work", async () => {
+	await agent.close();
+	const lookup = vi.fn(async () => ({
+		content: [{ type: "text" as const, text: "Lookup completed: museum is open." }],
+	}));
+	const tools = defineExtension({
+		name: "fixture",
+		tools: [
+			defineTool({
+				name: "lookup",
+				description: "Read a fixture fact",
+				parameters: Type.Object({}),
+				replay: "safe",
+				execute: lookup,
+			}),
+		],
+	});
+	agent = await startService({ ...options, extensions: [tools] });
 	const gate = Promise.withResolvers<void>();
 	const started = Promise.withResolvers<void>();
+	const additions = [
+		"Include a museum.",
+		"Correction: three days instead of two.",
+		"Separately, what is 2 + 2?",
+		"What is finished so far?",
+	];
+	const reply = "Three-day plan with a museum. Separate answer: 4. Progress: lookup complete.";
 	faux.setResponses([
 		async () => {
 			started.resolve();
 			await gate.promise;
-			// An unavailable tool gives a round boundary without enabling any real tools.
-			return fauxAssistantMessage(fauxToolCall("not-installed", {}), { stopReason: "toolUse" });
+			return fauxAssistantMessage(fauxToolCall("lookup", {}), { stopReason: "toolUse" });
 		},
 		(context) => {
-			expect(JSON.stringify(context.messages)).toContain("second");
-			return fauxAssistantMessage("combined");
+			const messages = JSON.stringify(context.messages);
+			for (const text of additions) expect(messages).toContain(text);
+			expect(messages).toContain("Lookup completed: museum is open.");
+			const sections = context.messages
+				.filter((message) => message.role === "system")
+				.flatMap((message) => message.sections?.["chat-steer"] ?? []);
+			expect(sections).toHaveLength(1);
+			expect(sections[0]).toContain("newest explicit correction");
+			expect(sections[0]).toContain("Keep unrelated questions separate");
+			expect(sections[0]).toContain("Do not restart the task");
+			// A scripted answer verifies our wiring, not a real model's semantic judgment.
+			return fauxAssistantMessage(reply);
 		},
 	]);
-	const first = await agent.submit({ chatGuid: "chat", guid: "first-guid", text: "first" });
+	const first = await agent.submit({
+		chatGuid: "chat",
+		guid: "first-guid",
+		text: "Plan a trip for two days.",
+	});
 	await started.promise;
 	try {
-		const second = await agent.submit({ chatGuid: "chat", guid: "second-guid", text: "second" });
-		expect((await second.status(BACKGROUND_CONTEXT)).status).toBe("queued");
+		const pending = [];
+		for (const [index, text] of additions.entries()) {
+			const submission = await agent.submit({ chatGuid: "chat", guid: `addition-${index}`, text });
+			expect((await submission.status(BACKGROUND_CONTEXT)).status).toBe("queued");
+			pending.push(submission);
+		}
 		gate.resolve();
-		const [left, right] = await Promise.all([answered(first), answered(second)]);
-		expect(left.answer).toBe(right.answer);
+		const records = await Promise.all([first, ...pending].map(answered));
+		expect(new Set(records.map((record) => record.answer)).size).toBe(1);
 		await Promise.all([agent.deliver(), agent.deliver()]);
-		expect(textCalls()).toEqual([["chat", "combined"]]);
+		expect(textCalls()).toEqual([["chat", reply]]);
+		expect(lookup).toHaveBeenCalledTimes(1);
+		expect(faux.state.callCount).toBe(2);
 	} finally {
 		gate.resolve();
 	}
 });
 
+// #33 Phase 2: ordinary chat policy must not leak into isolated service conversations.
+it("omits chat steering guidance from an unmapped isolated conversation", async () => {
+	faux.setResponses([
+		(context) => {
+			expect(JSON.stringify(context.messages)).not.toContain("chat-steer");
+			expect(JSON.stringify(context.messages)).not.toContain("reply-delivery");
+			return fauxAssistantMessage("isolated answer");
+		},
+	]);
+	const conversation = await agent.harness.createConversation(
+		{
+			ownership: { kind: "ownerless" },
+			agent: options.runtime.defaults,
+		},
+		BACKGROUND_CONTEXT,
+	);
+	await answered(
+		await conversation.submit(
+			{ type: "input", content: "Summarize an isolated result." },
+			BACKGROUND_CONTEXT,
+		),
+	);
+	await agent.deliver();
+	expect(send).not.toHaveBeenCalled();
+	expect(await agent.harness.snapshot(Chats, BACKGROUND_CONTEXT)).toBeUndefined();
+});
+
+// #33 / ADR 0011: late input from another sender holds an unattempted draft until reconciliation.
+it("reconciles unsent answers with multiple senders and preserves the replaced draft", async () => {
+	const firstStarted = Promise.withResolvers<void>();
+	const finishFirst = Promise.withResolvers<void>();
+	const nextStarted = Promise.withResolvers<void>();
+	const finishNext = Promise.withResolvers<void>();
+	const oldText = "Alex: a two-day plan.";
+	const newText = "Alex: corrected four-day plan. Blair: separate three-day plan.";
+	faux.setResponses([
+		async () => {
+			firstStarted.resolve();
+			await finishFirst.promise;
+			return fauxAssistantMessage(oldText);
+		},
+		async (context) => {
+			const messages = JSON.stringify(context.messages);
+			expect(messages).toContain("from Alex]");
+			expect(messages).toContain("from Blair]");
+			expect(messages).toContain("Do not assume one person's message retracts another person's requirements");
+			const facts = context.messages
+				.filter((message) => message.role === "system")
+				.flatMap((message) => message.sections?.["reply-delivery"] ?? [])
+				.at(-1);
+			expect(facts).toContain(oldText);
+			expect(facts).toContain('"status":"unattempted"');
+			nextStarted.resolve();
+			await finishNext.promise;
+			return fauxAssistantMessage(newText);
+		},
+	]);
+	const source = {
+		chatGuid: "iMessage;+;shared",
+		groupName: "Shared",
+		sender: "Alex",
+		guid: "alex-1",
+		text: "My plan is two days.",
+	};
+	const first = await agent.submit(source);
+	await firstStarted.promise;
+	try {
+		const second = await agent.submit({
+			...source,
+			guid: "blair-1",
+			sender: "Blair",
+			text: "My separate plan is three days. Keep Alex's request too.",
+		});
+		const third = await agent.submit({
+			...source,
+			guid: "alex-2",
+			text: "Correction: my own trip is four days.",
+		});
+		finishFirst.resolve();
+		const original = await answered(first);
+		await nextStarted.promise;
+		await agent.deliver();
+		expect(send).not.toHaveBeenCalled();
+		expect(
+			(await agent.harness.snapshot(Deliveries, original.conversationId, BACKGROUND_CONTEXT))?.drafts?.[
+				String(original.answer)
+			],
+		).toEqual({ status: "held", reason: "newer_input" });
+		finishNext.resolve();
+		const [replacement, shared] = await Promise.all([answered(second), answered(third)]);
+		expect(replacement.answer).toBe(shared.answer);
+		await Promise.all([agent.deliver(), agent.deliver()]);
+		expect(textCalls()).toEqual([[source.chatGuid, newText]]);
+		const receipts = await agent.harness.snapshot(Deliveries, original.conversationId, BACKGROUND_CONTEXT);
+		expect(receipts?.drafts?.[String(original.answer)]).toEqual({
+			status: "superseded",
+			replacement: replacement.answer,
+		});
+		expect(receipts?.answers[String(original.answer)]).toBeUndefined();
+		expect(receipts?.answers[String(replacement.answer)]).toBe("sent");
+		const conversation = await agent.harness.conversation(original.conversationId, BACKGROUND_CONTEXT);
+		expect(JSON.stringify(await conversation?.entries({}, 100, undefined, BACKGROUND_CONTEXT))).toContain(
+			oldText,
+		);
+		expect(faux.state.callCount).toBe(2);
+	} finally {
+		finishFirst.resolve();
+		finishNext.resolve();
+	}
+});
+
+// #33 / ADR 0011: reconciliation failure is not permission to release the obsolete draft.
+it("retains a held draft after reconciliation fails and the service reopens", async () => {
+	faux.setResponses([fauxAssistantMessage("obsolete draft")]);
+	const first = await answered(await agent.submit({ chatGuid: "chat", guid: "old", text: "Old condition." }));
+	const started = Promise.withResolvers<void>();
+	const finish = Promise.withResolvers<void>();
+	faux.setResponses([
+		async () => {
+			started.resolve();
+			await finish.promise;
+			return fauxAssistantMessage("", { stopReason: "error", errorMessage: "invalid input" });
+		},
+	]);
+	const second = await agent.submit({
+		chatGuid: "chat",
+		guid: "correction",
+		text: "Use the corrected condition.",
+	});
+	await started.promise;
+	try {
+		await agent.deliver();
+		expect(send).not.toHaveBeenCalled();
+		finish.resolve();
+		expect(await second.wait(BACKGROUND_CONTEXT)).toMatchObject({ status: "unanswered" });
+		await agent.close();
+		agent = await startService(options);
+		await agent.deliver();
+		expect(send).not.toHaveBeenCalled();
+		expect(
+			(await agent.harness.snapshot(Deliveries, first.conversationId, BACKGROUND_CONTEXT))?.drafts?.[
+				String(first.answer)
+			],
+		).toEqual({ status: "held", reason: "newer_input" });
+	} finally {
+		finish.resolve();
+	}
+});
+
+// #33 / ADR 0011: input after a transport claim cannot retract that send or overtake it.
+it("keeps an already claimed reply and sends the subsequent answer only after it settles", async () => {
+	faux.setResponses([fauxAssistantMessage("claimed answer"), fauxAssistantMessage("new answer")]);
+	await answered(await agent.submit({ chatGuid: "chat", guid: "first", text: "Original." }));
+	const started = Promise.withResolvers<void>();
+	const finish = Promise.withResolvers<void>();
+	send.mockImplementationOnce(async () => {
+		started.resolve();
+		await finish.promise;
+	});
+	const sending = agent.deliver();
+	await started.promise;
+	try {
+		await answered(await agent.submit({ chatGuid: "chat", guid: "later", text: "Later request." }));
+		await agent.deliver();
+		expect(send).toHaveBeenCalledTimes(1);
+		finish.resolve();
+		await sending;
+		await agent.deliver();
+		expect(textCalls()).toEqual([
+			["chat", "claimed answer"],
+			["chat", "new answer"],
+		]);
+	} finally {
+		finish.resolve();
+		await sending;
+	}
+});
+
 it("rejects commands, empty source IDs and disabled chats before model admission", async () => {
-	await expect(agent.submit({ chatGuid: "chat", guid: "1", text: "/stop" })).rejects.toThrow("not supported");
+	await expect(agent.submit({ chatGuid: "chat", guid: "1", text: "/stop" })).rejects.toThrow("command()");
 	await expect(agent.submit({ chatGuid: "chat", guid: "", text: "hello" })).rejects.toThrow("required");
 	await writeFile(join(directory, "settings.json"), "{}");
 	await expect(agent.submit({ chatGuid: "chat", guid: "2", text: "hello" })).rejects.toThrow("disabled");
@@ -236,6 +479,80 @@ it("holds the storage lock and joins an in-flight send before closing", async ()
 		agent = await startService(options);
 		await agent.deliver();
 		expect(send).toHaveBeenCalledTimes(1);
+	} finally {
+		gate.resolve();
+	}
+});
+
+// #33 Phase 2: direct sends report each effect and reuse receipts, without an agent turn or retry queue.
+it("records direct text/file outcomes, rejects conflicting IDs and stops after uncertain text", async () => {
+	await writeFile(join(directory, "settings.json"), "{}"); // Explicit sends are not automatic replies.
+	const input = { chatGuid: "chat", requestId: "send-1", text: "report", filePath: "/fake/report.pdf" };
+	const sent = await agent.sendDirect(input);
+	expect(sent).toMatchObject({ textStatus: "sent", fileStatus: "sent" });
+	expect(await agent.sendDirect(input)).toEqual(sent);
+	await expect(agent.sendDirect({ ...input, text: "changed" })).rejects.toThrow("different content");
+	await expect(agent.sendDirect({ chatGuid: "chat", requestId: "empty" })).rejects.toThrow("required");
+	expect(send.mock.calls).toEqual([["chat", "report"]]);
+	expect(sendAttachment.mock.calls).toEqual([["chat", "/fake/report.pdf"]]);
+	await agent.sendDirect({ chatGuid: "other", requestId: input.requestId, filePath: "/fake/other.pdf" });
+	expect(sendAttachment).toHaveBeenCalledTimes(2);
+	send.mockRejectedValueOnce(new Error("text might already be sent"));
+	const uncertain = { ...input, requestId: "send-2" };
+	expect(await agent.sendDirect(uncertain)).toMatchObject({
+		textStatus: "unknown",
+		fileStatus: "not_attempted",
+	});
+	expect(await agent.sendDirect(uncertain)).toMatchObject({
+		textStatus: "unknown",
+		fileStatus: "not_attempted",
+	});
+	expect(send).toHaveBeenCalledTimes(2);
+	expect(sendAttachment).toHaveBeenCalledTimes(2);
+	expect(faux.state.callCount).toBe(0);
+	expect(await agent.harness.snapshot(Chats, BACKGROUND_CONTEXT)).toBeUndefined();
+});
+
+// #33 Phase 2: a partial direct send must not repeat successful or uncertain parts after close/reopen.
+it("joins a partial direct send and preserves per-part receipts across restart", async () => {
+	const sending = Promise.withResolvers<void>();
+	const gate = Promise.withResolvers<void>();
+	sendAttachment.mockImplementation(async () => {
+		sending.resolve();
+		await gate.promise;
+		throw new Error("attachment result unknown");
+	});
+	const input = { chatGuid: "chat", requestId: "partial", text: "report", filePath: "/fake/report.pdf" };
+	const delivery = agent.sendDirect({ ...input });
+	await sending.promise;
+	try {
+		expect(await agent.sendDirect(input)).toMatchObject({ textStatus: "sent", fileStatus: "sending" });
+		const closing = agent.close();
+		await expect(agent.sendDirect(input)).rejects.toThrow("closed");
+		await expect(startService(options)).rejects.toMatchObject({ code: "EEXIST" });
+		gate.resolve();
+		expect(await delivery).toMatchObject({ textStatus: "sent", fileStatus: "unknown" });
+		await closing;
+		agent = await startService(options);
+		expect(await agent.sendDirect(input)).toMatchObject({ textStatus: "sent", fileStatus: "unknown" });
+		// Seed only our receipt state, not a Durable subprocess/crash simulation.
+		await agent.harness.commit(async (tx) => {
+			(await tx.doc(DirectSends)).requests.push({
+				...input,
+				requestId: "interrupted",
+				textStatus: "sent",
+				fileStatus: "sending",
+			});
+		}, BACKGROUND_CONTEXT);
+		await agent.close();
+		agent = await startService(options);
+		expect(await agent.sendDirect({ ...input, requestId: "interrupted" })).toMatchObject({
+			textStatus: "sent",
+			fileStatus: "unknown",
+		});
+		expect(send).toHaveBeenCalledTimes(1);
+		expect(sendAttachment).toHaveBeenCalledTimes(1);
+		expect(faux.state.callCount).toBe(0);
 	} finally {
 		gate.resolve();
 	}

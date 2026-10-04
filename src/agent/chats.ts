@@ -8,6 +8,7 @@ import {
 	type ModelRef,
 	UserEntry,
 } from "@earendil-works/pi-durable";
+import { activeRun, Runs } from "./run.ts";
 
 export const Chats = defineDoc<{ items: { chatGuid: string; conversationId: ConversationId }[] }>({
 	kind: "imessage.chats",
@@ -77,17 +78,18 @@ export async function submitMessage(
 	if (!input.chatGuid.trim() || !guid.trim() || (!input.text.trim() && !input.attachments?.length))
 		throw new Error("Chat GUID, message GUID and content are required");
 	const conversation = await chatConversation(harness, defaults, input.chatGuid);
-	return conversation.submit(
-		reply
-			? { type: "input", content, requestId: guid, whenBusy: "steer" }
-			: {
-					type: "write",
-					requestId: guid,
-					entry: {
-						kind: UserEntry.kind,
-						model: [{ role: "user", content, timestamp: Date.now() }],
-					},
-				},
-		BACKGROUND_CONTEXT,
-	);
+	const log = {
+		type: "write",
+		requestId: guid,
+		entry: { kind: UserEntry.kind, model: [{ role: "user", content, timestamp: Date.now() }] },
+	} as const;
+	if (!reply) return conversation.submit(log, BACKGROUND_CONTEXT);
+	const message = { type: "input", content, requestId: guid, whenBusy: "steer" } as const;
+	const run = activeRun((await harness.snapshot(Runs, BACKGROUND_CONTEXT))?.items, conversation.id);
+	const target = run && (await harness.conversation(run.conversationId, BACKGROUND_CONTEXT));
+	if (!target) return conversation.submit(message, BACKGROUND_CONTEXT);
+	// During a run, the chat has one place where work happens; its own conversation keeps the record.
+	const submission = await target.submit(message, BACKGROUND_CONTEXT);
+	await conversation.submit(log, BACKGROUND_CONTEXT);
+	return submission;
 }
