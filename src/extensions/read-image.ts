@@ -22,7 +22,10 @@ export const ImageRead = defineExtension({
 				}
 				if (!api.env) throw new Error("No image filesystem");
 				const path = getOrThrow(await api.env.canonicalPath(args.path, context));
-				return { content: [{ type: "text", text: imagePrefix + JSON.stringify(path) }] };
+				return {
+					content: [{ type: "text", text: imagePrefix + JSON.stringify(path) }],
+					details: { imagePath: path },
+				};
 			},
 		}),
 	],
@@ -32,11 +35,10 @@ export const ImageRead = defineExtension({
 				const messages = await Promise.all(
 					request.messages.map(async (message) => {
 						if (message.role !== "toolResult" || message.toolName !== "read") return message;
-						const reference = message.content.find(
-							(part) => part.type === "text" && part.text.startsWith(imagePrefix),
-						);
-						if (reference?.type !== "text") return message;
-						const path: unknown = JSON.parse(reference.text.slice(imagePrefix.length));
+						// Only trusted tool metadata is a reference; plain file text must not impersonate one.
+						const details = message.details;
+						if (!details || typeof details !== "object" || !("imagePath" in details)) return message;
+						const path = details.imagePath;
 						if (typeof path !== "string") return message;
 						try {
 							const bytes = await sharp(path)
@@ -51,11 +53,16 @@ export const ImageRead = defineExtension({
 									{ type: "image" as const, data: bytes.toString("base64"), mimeType: "image/jpeg" },
 								],
 							};
-						} catch {
+						} catch (error) {
 							return {
 								...message,
 								isError: true,
-								content: [{ type: "text" as const, text: `Image is no longer available: ${path}` }],
+								content: [
+									{
+										type: "text" as const,
+										text: `Image read failed: ${path} (${error instanceof Error ? error.message : String(error)})`,
+									},
+								],
 							};
 						}
 					}),

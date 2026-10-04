@@ -7,6 +7,25 @@ The server has no authentication; do not expose it to untrusted networks.
 
 The agent is aware of these endpoints via its system prompt and can use them as tools (e.g., scheduling a cron job that calls `/prompt`).
 
+`/prompt` and `/send` accept an optional stable `requestId`; repeat the same ID
+only for the same operation. Prompt success follows durable admission, not model
+completion. `sessionKey` isolates API context from ordinary chat and cron contexts;
+without it, `/prompt` is an ordinary chat message. `ephemeral:true` returns 501
+before admission until the privacy-preserving cleanup design is accepted and
+implemented; it is not silently converted to a retained-history reset.
+
+`/send` accepts `filePath` or the existing `attachmentPath` alias. A successful
+response includes per-part receipts and the request ID. An uncertain outcome
+returns 503 with `unknown`; repeating that ID never repeats the effect. `sent`
+means the adapter returned, not confirmed recipient delivery.
+
+The pages `/`, `/chat`, `/settings`, `/memory`, `/logs`, `/scheduled` and
+`/automation` are read-only. `/chat/data?conversationId=ID` exposes history/live
+state; `/events` announces committed changes without executing anything. Native
+history cursors use base64url-encoded JSON in `cursor`; long results are paged and
+large text is truncated. Known credential fields/token patterns are redacted,
+not a guarantee that arbitrary user-written secrets can be identified.
+
 | Endpoint | Description | Example |
 |---|---|---|
 | `POST /send` | Send text and/or a local file attachment to a chat (bypasses the agent) | `curl -X POST localhost:7750/send -d '{"chatGuid": "iMessage;-;+11234567890", "text": "hello"}'`<br>→ `{"ok": true}` |

@@ -1,6 +1,6 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
-import type { Extension } from "@earendil-works/pi-durable";
+import type { Extension, Submission } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import {
 	type AgentDefaults,
@@ -14,16 +14,21 @@ import { compactChats } from "./agent/compaction.ts";
 import { deliverReplies, recoverSending, type SendText } from "./agent/deliver.ts";
 import { type DirectSendInput, deliverDirect } from "./agent/direct-send.ts";
 import { openHarness } from "./agent/harness.ts";
+import { type PromptInput, submitIsolated } from "./agent/isolated.ts";
 import { openModels, readDefaults, withCodexFast } from "./agent/models.ts";
 import { loadPrompt } from "./agent/prompt.ts";
+import { createAutomationService } from "./automation/service.ts";
 import { isReplyEnabled, readSettings } from "./config/settings.ts";
+import { finalReplyText } from "./extensions/final-text.ts";
 import { memoryExtension } from "./extensions/memory.ts";
 import { ImageRead } from "./extensions/read-image.ts";
 import { Subagent } from "./extensions/subagent.ts";
 import { webExtension } from "./extensions/web.ts";
+import { createServices } from "./scheduler/services.ts";
 import { archiveAttachments } from "./transport/attachments.ts";
 import type { MessageSender } from "./transport/send.ts";
 import { createWatcher } from "./transport/watch.ts";
+import { startWeb } from "./web/server.ts";
 
 /** Explicit startup; pass an isolated runtime in tests instead of opening installed auth. */
 export async function startService(options: {
@@ -82,8 +87,51 @@ export async function startService(options: {
 		return operation;
 	}
 
-	return {
+	const service = {
 		harness,
+		install(extension: Extension) {
+			owner.registry.install(extension);
+		},
+		prompt(input: PromptInput): Promise<Submission> {
+			if (!input.sessionKey)
+				return service.submit({ chatGuid: input.chatGuid, guid: input.requestId, text: input.prompt });
+			return track(async () => {
+				if (
+					input.deliver !== false &&
+					!isReplyEnabled(await readSettings(options.workingDir), input.chatGuid)
+				)
+					throw new Error("Chat is disabled");
+				return submitIsolated(harness, defaults, input);
+			});
+		},
+		async health() {
+			const started = Date.now();
+			const submission = await service.prompt({
+				chatGuid: "health",
+				prompt: "Reply OK.",
+				requestId: crypto.randomUUID(),
+				sessionKey: "model-health",
+				scope: "health",
+				deliver: false,
+			});
+			const result = await submission.wait(BACKGROUND_CONTEXT);
+			if (result.status !== "done" || result.type !== "input") throw new Error("Model health request failed");
+			const answer = (await harness.commit((tx) => tx.entry(result.answer), BACKGROUND_CONTEXT))?.model?.[0];
+			if (answer?.role !== "assistant") throw new Error("Model health answer missing");
+			return {
+				ok: true,
+				model: `${answer.provider}/${answer.model}`,
+				latencyMs: Date.now() - started,
+				checkedAt: new Date().toISOString(),
+			};
+		},
+		async result(submission: Submission) {
+			const result = await submission.wait(BACKGROUND_CONTEXT);
+			if (result.status !== "done" || result.type !== "input")
+				throw new Error(`Prompt ended: ${result.reason ?? result.status}`);
+			const entry = await harness.commit((tx) => tx.entry(result.answer), BACKGROUND_CONTEXT);
+			return finalReplyText(entry?.model?.[0]) ?? "";
+		},
 		submit(input: MessageInput, { logDisabled = false } = {}) {
 			const snapshot = { ...input, attachments: input.attachments ? [...input.attachments] : undefined };
 			return track(async () => {
@@ -192,6 +240,7 @@ export async function startService(options: {
 			return closing;
 		},
 	};
+	return service;
 }
 
 /** One host poll loop for incoming rows and saved replies; Durable owns model execution. */
@@ -199,6 +248,8 @@ export async function startMessaging(
 	options: Parameters<typeof startService>[0] & {
 		dbPath: string;
 		intervalMs?: number;
+		/** Defer polling/resume until application-owned extensions and services are installed. */
+		autostart?: boolean;
 		onError(error: unknown): void;
 	},
 ) {
@@ -231,8 +282,6 @@ export async function startMessaging(
 			await service.harness.commit(async (tx) => {
 				(await tx.doc(WatchCursor)).rowid = watcher.cursor;
 			}, BACKGROUND_CONTEXT);
-			// Resume saved work once; do not rebuild Durable's recovery or model loop in the host.
-			service.harness.resume();
 		} catch (error) {
 			await watcher.stop();
 			throw error;
@@ -245,7 +294,9 @@ export async function startMessaging(
 	let closed = false;
 	let pending: Promise<void> | undefined;
 	let closing: Promise<void> | undefined;
-	let timer: ReturnType<typeof setTimeout>;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	let compactionTimer: ReturnType<typeof setInterval> | undefined;
+	let started = false;
 	function poll() {
 		if (closed) return Promise.reject(new Error("Messaging is closed"));
 		pending ??= (async () => {
@@ -267,16 +318,35 @@ export async function startMessaging(
 				if (!closed) timer = setTimeout(tick, intervalMs);
 			});
 	}
-	timer = setTimeout(tick, 0);
-	const compactionTimer = setInterval(
-		() => {
-			void service.compact().catch(options.onError);
-		},
-		6 * 60 * 60 * 1000,
-	);
-	compactionTimer.unref();
+	function start() {
+		if (closed) throw new Error("Messaging is closed");
+		if (started) return;
+		// Resume once, after product service extensions are installed; Durable owns recovery.
+		service.harness.resume();
+		started = true;
+		timer = setTimeout(tick, 0);
+		compactionTimer = setInterval(
+			() => {
+				void service.compact().catch(options.onError);
+			},
+			6 * 60 * 60 * 1000,
+		);
+		compactionTimer.unref();
+	}
+	try {
+		if (options.autostart !== false) start();
+	} catch (error) {
+		await watcher.stop();
+		await service.close();
+		throw error;
+	}
 	return {
+		start,
 		harness: service.harness,
+		install: service.install,
+		prompt: service.prompt,
+		result: service.result,
+		health: service.health,
 		sendDirect(input: DirectSendInput) {
 			if (closed) return Promise.reject(new Error("Messaging is closed"));
 			return service.sendDirect(input);
@@ -294,4 +364,61 @@ export async function startMessaging(
 			return closing;
 		},
 	};
+}
+
+/** Production wiring is explicit; tests pass a faux runtime, temporary database and fake senders. */
+export async function startApplication(
+	options: Parameters<typeof startMessaging>[0] & {
+		web?: false | { host?: string; port?: number };
+		services?: boolean;
+		automation?: boolean;
+	},
+) {
+	const messaging = await startMessaging({ ...options, autostart: false });
+	let workers: Awaited<ReturnType<typeof createServices>> | undefined;
+	let automation: ReturnType<typeof createAutomationService> | undefined;
+	let web: Awaited<ReturnType<typeof startWeb>> | undefined;
+	let closing: Promise<void> | undefined;
+	function close() {
+		closing ??= (async () => {
+			// Stop producers and execution together: a worker may be awaiting a model result.
+			const results = await Promise.allSettled([
+				web?.close(),
+				workers?.close(),
+				automation?.stop(),
+				messaging.close(),
+			]);
+			const failure = results.find((result) => result.status === "rejected");
+			if (failure?.status === "rejected") throw failure.reason;
+		})();
+		return closing;
+	}
+	try {
+		if (options.services !== false)
+			workers = await createServices({ workingDir: options.workingDir, agent: messaging });
+		if (workers) messaging.install(workers.extension);
+		if (options.automation !== false)
+			automation = createAutomationService({
+				workingDir: options.workingDir,
+				notify: async (chatGuid, text, requestId) => {
+					const receipt = await messaging.sendDirect({ chatGuid, text, requestId });
+					if (receipt.textStatus !== "sent") throw new Error("Automation notification outcome unknown");
+				},
+			});
+		if (options.web !== false)
+			web = await startWeb({
+				workingDir: options.workingDir,
+				agent: messaging,
+				scheduled: workers?.api,
+				automation: () => ({ tasks: automation?.list() ?? [], runs: automation?.listRuns() ?? [] }),
+				...options.web,
+			});
+		messaging.start();
+		workers?.start();
+		automation?.start();
+		return { messaging, workers, automation, web, close };
+	} catch (error) {
+		await close().catch(() => {});
+		throw error;
+	}
 }

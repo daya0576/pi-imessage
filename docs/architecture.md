@@ -22,6 +22,8 @@
 ### Notes
 
 These are folders under `src/`, not separate npm packages.
+The root `main.ts` and `cli.ts` files form one host package. `migrate/` is a
+separate top-layer executable: the CLI invokes it by process argv, not an import.
 Lower layer numbers may import higher ones. Different packages in the same layer
 cannot import each other; imports within a package are allowed.
 

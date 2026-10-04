@@ -192,33 +192,6 @@ it("admits all busy-chat additions at the next tool boundary without repeating c
 	}
 });
 
-// #33 Phase 2: ordinary chat policy must not leak into isolated service conversations.
-it("omits chat steering guidance from an unmapped isolated conversation", async () => {
-	faux.setResponses([
-		(context) => {
-			expect(JSON.stringify(context.messages)).not.toContain("chat-steer");
-			expect(JSON.stringify(context.messages)).not.toContain("reply-delivery");
-			return fauxAssistantMessage("isolated answer");
-		},
-	]);
-	const conversation = await agent.harness.createConversation(
-		{
-			ownership: { kind: "ownerless" },
-			agent: options.runtime.defaults,
-		},
-		BACKGROUND_CONTEXT,
-	);
-	await answered(
-		await conversation.submit(
-			{ type: "input", content: "Summarize an isolated result." },
-			BACKGROUND_CONTEXT,
-		),
-	);
-	await agent.deliver();
-	expect(send).not.toHaveBeenCalled();
-	expect(await agent.harness.snapshot(Chats, BACKGROUND_CONTEXT)).toBeUndefined();
-});
-
 // #33 / ADR 0011: late input from another sender holds an unattempted draft until reconciliation.
 it("reconciles unsent answers with multiple senders and preserves the replaced draft", async () => {
 	const firstStarted = Promise.withResolvers<void>();

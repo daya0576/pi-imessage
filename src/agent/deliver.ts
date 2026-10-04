@@ -11,6 +11,7 @@ import { finalReplyText } from "../extensions/final-text.ts";
 import type { MessageSender } from "../transport/send.ts";
 import { Chats } from "./chats.ts";
 import { DirectSends } from "./direct-send.ts";
+import { Sessions } from "./isolated.ts";
 import { Deliveries, type DeliveryStatus } from "./replies.ts";
 import { RUN_RECORD, Runs, runRecord } from "./run.ts";
 
@@ -24,6 +25,9 @@ async function targets(harness: Harness): Promise<Target[]> {
 	const runs = (await harness.snapshot(Runs, BACKGROUND_CONTEXT))?.items ?? [];
 	return [
 		...chats,
+		...((await harness.snapshot(Sessions, BACKGROUND_CONTEXT))?.items ?? []).filter(
+			(session) => session.deliver,
+		),
 		...runs.map((run) => ({ conversationId: run.conversationId, chatGuid: run.chatGuid, chat: run.chat })),
 	];
 }
