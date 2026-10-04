@@ -17,7 +17,8 @@ import {
 	type TaskId,
 	type Tx,
 } from "@earendil-works/pi-durable";
-import { Deliveries, finalReplyText } from "./replies.ts";
+import { finalReplyText } from "../extensions/final-text.ts";
+import { Deliveries } from "./replies.ts";
 
 export type RunRecord = {
 	chatGuid: string;

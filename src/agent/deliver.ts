@@ -7,10 +7,11 @@ import {
 	type Harness,
 	type Storage,
 } from "@earendil-works/pi-durable";
+import { finalReplyText } from "../extensions/final-text.ts";
 import type { MessageSender } from "../transport/send.ts";
 import { Chats } from "./chats.ts";
 import { DirectSends } from "./direct-send.ts";
-import { Deliveries, type DeliveryStatus, finalReplyText } from "./replies.ts";
+import { Deliveries, type DeliveryStatus } from "./replies.ts";
 import { RUN_RECORD, Runs, runRecord } from "./run.ts";
 
 export type SendText = MessageSender["sendMessage"];

@@ -588,10 +588,14 @@ it("starts quietly and wires default coding/image tools, model defaults and work
 	expect(resolved?.tools.map((tool) => tool.name).sort()).toEqual([
 		"bash",
 		"edit",
+		"fetch_content",
+		"get_search_results",
 		"load_memory",
 		"read",
 		"save_memory",
 		"search_memory",
+		"subagent",
+		"web_search",
 		"write",
 	]);
 	expect(resolved?.tools.find((tool) => tool.name === "read")?.description).toContain(

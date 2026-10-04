@@ -8,8 +8,9 @@ import {
 	type Storage,
 	section,
 } from "@earendil-works/pi-durable";
+import { finalReplyText } from "../extensions/final-text.ts";
 import { Chats } from "./chats.ts";
-import { Deliveries, finalReplyText } from "./replies.ts";
+import { Deliveries } from "./replies.ts";
 import { Runs } from "./run.ts";
 
 const steeringInstructions = [

@@ -18,6 +18,8 @@ import { loadPrompt } from "./agent/prompt.ts";
 import { isReplyEnabled, readSettings } from "./config/settings.ts";
 import { memoryExtension } from "./extensions/memory.ts";
 import { ImageRead } from "./extensions/read-image.ts";
+import { Subagent } from "./extensions/subagent.ts";
+import { webExtension } from "./extensions/web.ts";
 import { archiveAttachments } from "./transport/attachments.ts";
 import type { MessageSender } from "./transport/send.ts";
 import { createWatcher } from "./transport/watch.ts";
@@ -49,7 +51,7 @@ export async function startService(options: {
 			// ImageRead replaces CodingTools.read, while text reads still use the native tool.
 			...(options.extensions
 				? await options.extensions()
-				: [CodingTools, ImageRead, await memoryExtension(options.workingDir)]),
+				: [CodingTools, ImageRead, await memoryExtension(options.workingDir), webExtension(), Subagent]),
 		];
 	}
 	const owner = await openHarness(options.workingDir, withCodexFast(runtime.models), await loadExtensions());
