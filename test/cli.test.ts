@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -188,6 +188,36 @@ NO_PROXY="127.0.0.1,localhost"
 				timeout: 10_000,
 			}),
 		).rejects.toThrow("Unable to load environment configuration");
+		if (process.platform === "darwin") {
+			// #33: a present wrapper is insufficient when its browser runtime is missing.
+			const browserCli = join(directory, "browser-cli");
+			await writeFile(
+				browserCli,
+				'#!/bin/sh\n[ "$1" = "--version" ] || exit 2\n[ -n "$PI_BROWSER_HOME" ] || exit 3\nprintf "%s" "$PI_BROWSER_HOME" > "$HOME/browser-state-path"\nprintf "0.1.19\\n"\n',
+				{ mode: 0o700 },
+			);
+			const preflightEnvironment = {
+				...explicit,
+				PI_BROWSER_CLI_PATH: browserCli,
+				PI_SCHEDULER_SERVICE_PATH: resolve("test/fixtures/scheduler-service.cjs"),
+			};
+			const preflight = await execute(
+				process.execPath,
+				["--experimental-strip-types", resolve("ops/preflight.mjs")],
+				{ env: preflightEnvironment, timeout: 10_000 },
+			);
+			expect(preflight.stdout).toContain("browser CLI runtime");
+			const temporaryBrowserState = await readFile(join(directory, "browser-state-path"), "utf8");
+			expect(temporaryBrowserState).toContain("imessage-browser-preflight-");
+			await expect(access(temporaryBrowserState)).rejects.toMatchObject({ code: "ENOENT" });
+			await writeFile(browserCli, '#!/bin/sh\nprintf "runtime missing\\n" >&2\nexit 1\n');
+			await expect(
+				execute(process.execPath, ["--experimental-strip-types", resolve("ops/preflight.mjs")], {
+					env: preflightEnvironment,
+					timeout: 10_000,
+				}),
+			).rejects.toThrow("Browser CLI readiness failed");
+		}
 	} finally {
 		for (const socket of sockets) socket.destroy();
 		proxy.closeAllConnections();

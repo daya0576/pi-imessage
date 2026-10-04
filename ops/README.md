@@ -10,6 +10,12 @@ in tests. Implementation readiness and open decisions are tracked in GitHub #33.
 - Terminal/Node Full Disk Access for Messages' SQLite database; Automation and
   Accessibility permissions for Messages.app/rich-text sends; `/usr/bin/sips`.
 - The existing memory CLI at `WORKING_DIR/skills/file-memory/memory_cli.py`.
+- The installed `pi-browser` CLI and its pinned Playwright runtime. Run
+  `pi-browser setup` yourself when needed; preflight never installs it. Preflight
+  resolves the wrapper in Pi's agent `bin/`, or a preflight-only
+  `PI_BROWSER_CLI_PATH` override, and runs `--version` with temporary browser state
+  that is removed afterward. A wrapper whose `doctor` reports MISSING is not ready.
+  Version readiness does not prove browser privacy, login or per-chat isolation.
 - The installed shared scheduler `service.cjs` and `time.cjs` (API version 1),
   normally in Pi's agent directory under `extensions/scheduler/`. Override the
   entry path with `PI_SCHEDULER_SERVICE_PATH`; no scheduler source is vendored.
