@@ -11,7 +11,6 @@ import {
 	fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
 import { defineExtension, defineTool, Harness, type Submission, UserEntry } from "@earendil-works/pi-durable";
-import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Chats } from "../src/agent/chats.ts";
 import type { SendText } from "../src/agent/deliver.ts";
@@ -560,11 +559,11 @@ it("joins a partial direct send and preserves per-part receipts across restart",
 });
 
 // #33 Phase 1: exercise the service entry point, not a second agent loop.
-it("starts quietly and wires explicit tools, model defaults and working directory", async () => {
+it("starts quietly and wires default coding/image tools, model defaults and working directory", async () => {
 	await agent.close();
 	await writeFile(join(directory, "fixture.txt"), "isolated tool result");
 	const stream = vi.spyOn(options.runtime.models, "streamSimple");
-	agent = await startService({ ...options, extensions: () => [CodingTools] });
+	agent = await startService({ ...options, extensions: undefined });
 	expect(stream).not.toHaveBeenCalled();
 	expect(send).not.toHaveBeenCalled();
 	faux.setResponses([
@@ -584,7 +583,20 @@ it("starts quietly and wires explicit tools, model defaults and working director
 	input.attachments[0] = "mutated.txt";
 	const record = await answered(await submission);
 	const conversation = await agent.harness.conversation(record.conversationId, BACKGROUND_CONTEXT);
-	expect((await conversation?.agent(BACKGROUND_CONTEXT))?.model).toEqual(options.runtime.defaults.model);
+	const resolved = await conversation?.agent(BACKGROUND_CONTEXT);
+	expect(resolved?.model).toEqual(options.runtime.defaults.model);
+	expect(resolved?.tools.map((tool) => tool.name).sort()).toEqual([
+		"bash",
+		"edit",
+		"load_memory",
+		"read",
+		"save_memory",
+		"search_memory",
+		"write",
+	]);
+	expect(resolved?.tools.find((tool) => tool.name === "read")?.description).toContain(
+		"Images are kept as file references",
+	);
 	expect(stream.mock.calls[0][2]?.transport).toBe("sse");
 	expect(JSON.stringify(stream.mock.calls[0][1])).toContain("original.txt");
 	expect(JSON.stringify(stream.mock.calls[0][1])).not.toContain("mutated.txt");

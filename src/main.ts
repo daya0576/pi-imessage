@@ -1,6 +1,7 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
 import type { Extension } from "@earendil-works/pi-durable";
+import { CodingTools } from "@earendil-works/pi-durable/tools";
 import {
 	type AgentDefaults,
 	chatConversation,
@@ -16,6 +17,7 @@ import { openModels, readDefaults, withCodexFast } from "./agent/models.ts";
 import { loadPrompt } from "./agent/prompt.ts";
 import { isReplyEnabled, readSettings } from "./config/settings.ts";
 import { memoryExtension } from "./extensions/memory.ts";
+import { ImageRead } from "./extensions/read-image.ts";
 import { archiveAttachments } from "./transport/attachments.ts";
 import type { MessageSender } from "./transport/send.ts";
 import { createWatcher } from "./transport/watch.ts";
@@ -44,7 +46,10 @@ export async function startService(options: {
 	async function loadExtensions() {
 		return [
 			await loadPrompt(options.workingDir, options.agentDir),
-			...(options.extensions ? await options.extensions() : [await memoryExtension(options.workingDir)]),
+			// ImageRead replaces CodingTools.read, while text reads still use the native tool.
+			...(options.extensions
+				? await options.extensions()
+				: [CodingTools, ImageRead, await memoryExtension(options.workingDir)]),
 		];
 	}
 	const owner = await openHarness(options.workingDir, withCodexFast(runtime.models), await loadExtensions());

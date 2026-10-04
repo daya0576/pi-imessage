@@ -17,7 +17,6 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Chats, WatchCursor } from "../src/agent/chats.ts";
 import type { SendText } from "../src/agent/deliver.ts";
 import { Deliveries } from "../src/agent/replies.ts";
-import { ImageRead } from "../src/extensions/read-image.ts";
 import { startMessaging, startService } from "../src/main.ts";
 import { createWatcher } from "../src/transport/watch.ts";
 
@@ -149,7 +148,8 @@ it("automatically routes DM, group and SMS, archives attachments and logs disabl
 
 // #33 Phase 2: exercise real local HEIC conversion and image reading without storing image bytes.
 it("retries a broken HEIC, archives JPEG and reads the image only in the model request", async () => {
-	options.extensions = () => [ImageRead];
+	// #33 Phase 3: use the default product tool set, not an explicitly injected image extension.
+	options.extensions = undefined;
 	options.intervalMs = 60_000;
 	const source = join(directory, "photo.HEIC");
 	await writeFile(source, "incomplete HEIC");
