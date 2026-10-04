@@ -45,6 +45,11 @@ operator configuration, not a message attachment. Keep it private and out of Git
 Installation pins its current directory as the job's working directory, so the
 same configuration path is used at launch. Selected environment values in the
 plist are a snapshot; regenerate a reviewed job to change those overrides.
+The job also pins the selected Pi agent directory as an absolute
+`PI_CODING_AGENT_DIR` (including the default). Relative paths and `~` are resolved
+at installation, after `.env` loading, so daemon HOME/cwd changes do not select a
+different auth.json, models.json, settings.json or skill root. This selects a
+configuration location; it does not copy credentials or grant access to it.
 
 No proxy credentials are printed by installation. If invoking Node directly for
 `serve`, include `--use-env-proxy`. This does not implement Pi's separate

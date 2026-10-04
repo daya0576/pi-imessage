@@ -27,6 +27,7 @@ export async function main(args = process.argv.slice(2)) {
 			throw new Error("Unable to load environment configuration", { cause: error });
 	}
 	const workingDir = resolve(process.env.WORKING_DIR ?? join(homedir(), ".pi", "imessage"));
+	const agentDir = resolve(getAgentDir());
 	if (args[0] === "install") {
 		const directory = join(homedir(), "Library", "LaunchAgents");
 		await mkdir(directory, { recursive: true });
@@ -56,7 +57,7 @@ export async function main(args = process.argv.slice(2)) {
 			.join("");
 		await writeFile(
 			path,
-			`<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>Label</key><string>me.changchen.pi-imessage-durable</string><key>ProgramArguments</key><array><string>${xml(process.execPath)}</string><string>--use-env-proxy</string><string>--experimental-strip-types</string><string>${xml(fileURLToPath(import.meta.url))}</string><string>serve</string></array><key>WorkingDirectory</key><string>${xml(process.cwd())}</string><key>EnvironmentVariables</key><dict><key>WORKING_DIR</key><string>${xml(workingDir)}</string><key>PATH</key><string>${xml(process.env.PATH ?? "/usr/bin:/bin")}</string>${environment}</dict><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>StandardOutPath</key><string>${xml(join(workingDir, "service.log"))}</string><key>StandardErrorPath</key><string>${xml(join(workingDir, "service.log"))}</string></dict></plist>`,
+			`<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>Label</key><string>me.changchen.pi-imessage-durable</string><key>ProgramArguments</key><array><string>${xml(process.execPath)}</string><string>--use-env-proxy</string><string>--experimental-strip-types</string><string>${xml(fileURLToPath(import.meta.url))}</string><string>serve</string></array><key>WorkingDirectory</key><string>${xml(process.cwd())}</string><key>EnvironmentVariables</key><dict><key>PI_CODING_AGENT_DIR</key><string>${xml(agentDir)}</string><key>WORKING_DIR</key><string>${xml(workingDir)}</string><key>PATH</key><string>${xml(process.env.PATH ?? "/usr/bin:/bin")}</string>${environment}</dict><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>StandardOutPath</key><string>${xml(join(workingDir, "service.log"))}</string><key>StandardErrorPath</key><string>${xml(join(workingDir, "service.log"))}</string></dict></plist>`,
 			{ flag: "wx", mode: 0o600 },
 		);
 		console.log(
@@ -82,7 +83,7 @@ export async function main(args = process.argv.slice(2)) {
 	const sender = createMessageSender({ attachmentsRoot: join(workingDir, "attachments"), dbPath });
 	const app = await startApplication({
 		workingDir,
-		agentDir: getAgentDir(),
+		agentDir,
 		dbPath,
 		send: sender.sendMessage,
 		sendAttachment: sender.sendAttachment,

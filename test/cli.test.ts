@@ -50,6 +50,7 @@ it("loads CLI environment without overriding explicit values and retains proxy c
 			HOME: directory,
 			PATH: process.env.PATH,
 			WORKING_DIR: join(directory, "workspace<&>"),
+			PI_CODING_AGENT_DIR: "selected<&>/agent",
 			HTTP_PROXY: proxyUrl,
 			HTTPS_PROXY: `http://fixture-user:fake&password@127.0.0.1:${proxyAddress.port}`,
 			NO_PROXY: "127.0.0.1,localhost",
@@ -80,6 +81,22 @@ it("loads CLI environment without overriding explicit values and retains proxy c
 			WorkingDirectory: string;
 		};
 		expect(job.WorkingDirectory).toBe(directory);
+		expect(job.EnvironmentVariables.PI_CODING_AGENT_DIR).toBe(join(directory, "selected<&>", "agent"));
+		const directoryProbe = join(directory, "agent-directory-probe.mjs");
+		await writeFile(
+			directoryProbe,
+			`import { getAgentDir } from ${JSON.stringify(pathToFileURL(resolve("node_modules/@earendil-works/pi-coding-agent/dist/index.js")).href)};\nconsole.log(getAgentDir());\n`,
+		);
+		const pinned = await execute(
+			job.ProgramArguments[0],
+			[...job.ProgramArguments.slice(1, -2), directoryProbe],
+			{
+				cwd: tmpdir(),
+				env: { HOME: join(directory, "different-home"), ...job.EnvironmentVariables },
+				timeout: 10_000,
+			},
+		);
+		expect(pinned.stdout.trim()).toBe(join(directory, "selected<&>", "agent"));
 		expect(job.ProgramArguments).toEqual([
 			process.execPath,
 			"--use-env-proxy",
@@ -124,6 +141,7 @@ it("loads CLI environment without overriding explicit values and retains proxy c
 			join(directory, ".env"),
 			`WORKING_DIR="${join(directory, "wrong-workspace")}"
 WEB_PORT='7766'
+PI_CODING_AGENT_DIR="~/file-agent<&>"
 BRAVE_API_KEY="${fixtureSecret}"
 HTTP_PROXY="${proxyUrl}"
 NO_PROXY="127.0.0.1,localhost"
@@ -148,6 +166,7 @@ NO_PROXY="127.0.0.1,localhost"
 		expect(fileJob.EnvironmentVariables).toMatchObject({
 			WORKING_DIR: environment.WORKING_DIR,
 			WEB_PORT: "7788",
+			PI_CODING_AGENT_DIR: join(directory, "file-agent<&>"),
 			BRAVE_API_KEY: fixtureSecret,
 			HTTP_PROXY: proxyUrl,
 			NO_PROXY: "127.0.0.1,localhost",
@@ -180,6 +199,7 @@ NO_PROXY="127.0.0.1,localhost"
 			WEB_PORT: "7799",
 			BRAVE_API_KEY: "alternate fixture value",
 			DOTENV_CONFIG_PATH: overridePath,
+			PI_CODING_AGENT_DIR: join(directory, ".pi", "agent"),
 		});
 		await expect(
 			execute(process.execPath, ["--experimental-strip-types", cli, "install"], {
