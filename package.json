@@ -1,0 +1,31 @@
+{
+	"name": "@kingcrab/pi-imessage",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"engines": {
+		"node": ">=22.22.2"
+	},
+	"scripts": {
+		"check": "tsc --noEmit && biome check .",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@earendil-works/chord": "1.0.2",
+		"@earendil-works/pi-ai": "1.0.2",
+		"@earendil-works/pi-coding-agent": "1.0.2",
+		"@earendil-works/pi-durable": "1.0.2",
+		"better-sqlite3": "13.0.3",
+		"croner": "10.0.1",
+		"defuddle": "0.19.4",
+		"sharp": "0.35.5",
+		"unpdf": "1.8.1"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.5.15",
+		"@types/better-sqlite3": "7.6.13",
+		"@types/node": "22.20.5",
+		"typescript": "7.0.2",
+		"vitest": "5.0.3"
+	}
+}
