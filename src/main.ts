@@ -10,6 +10,7 @@ import {
 	WatchCursor,
 } from "./agent/chats.ts";
 import { isCommand, runCommand } from "./agent/commands.ts";
+import { compactChats } from "./agent/compaction.ts";
 import { deliverReplies, recoverSending, type SendText } from "./agent/deliver.ts";
 import { type DirectSendInput, deliverDirect } from "./agent/direct-send.ts";
 import { openHarness } from "./agent/harness.ts";
@@ -153,6 +154,23 @@ export async function startService(options: {
 				}),
 			);
 		},
+		/** Admit quiet native compactions; observing their results must not hold shutdown open. */
+		compact() {
+			return track(async () => {
+				const tasks = await compactChats(harness);
+				for (const task of tasks)
+					void harness
+						.waitForTask(task, BACKGROUND_CONTEXT)
+						.then((settled) => {
+							if (settled.state.outcome.status !== "completed")
+								console.warn("Scheduled compaction ended", task, settled.state.outcome);
+						})
+						.catch((error) => {
+							if (!closed) console.warn("Scheduled compaction observation failed", task, error);
+						});
+				return tasks;
+			});
+		},
 		// Explicit host boundary; no model loop, timer or transport runs on import.
 		deliver() {
 			return track(async () => {
@@ -250,6 +268,13 @@ export async function startMessaging(
 			});
 	}
 	timer = setTimeout(tick, 0);
+	const compactionTimer = setInterval(
+		() => {
+			void service.compact().catch(options.onError);
+		},
+		6 * 60 * 60 * 1000,
+	);
+	compactionTimer.unref();
 	return {
 		harness: service.harness,
 		sendDirect(input: DirectSendInput) {
@@ -260,6 +285,7 @@ export async function startMessaging(
 		close() {
 			closed = true;
 			clearTimeout(timer);
+			clearInterval(compactionTimer);
 			closing ??= (async () => {
 				await watcher.stop();
 				await pending?.catch(() => {});

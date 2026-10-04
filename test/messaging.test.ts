@@ -89,6 +89,8 @@ function insert(guid: string, text: string | null, chat = 1) {
 
 // #33 Phase 2: test our polling, routing and attachment boundaries, not the Messages service.
 it("automatically routes DM, group and SMS, archives attachments and logs disabled chats", async () => {
+	const intervals = vi.spyOn(globalThis, "setInterval");
+	const clearInterval = vi.spyOn(globalThis, "clearInterval");
 	const contexts: TranscriptContext[] = [];
 	const reply = (context: TranscriptContext) => {
 		contexts.push(context);
@@ -144,6 +146,10 @@ it("automatically routes DM, group and SMS, archives attachments and logs disabl
 	expect(faux.state.callCount).toBe(3);
 	expect((await service.harness.snapshot(WatchCursor, BACKGROUND_CONTEXT))?.rowid).toBe(last);
 	expect(onError).not.toHaveBeenCalled();
+	const compaction = intervals.mock.calls.findIndex(([, duration]) => duration === 6 * 60 * 60 * 1000);
+	expect(compaction).toBeGreaterThanOrEqual(0);
+	await service.close();
+	expect(clearInterval).toHaveBeenCalledWith(intervals.mock.results[compaction].value);
 });
 
 // #33 Phase 2: exercise real local HEIC conversion and image reading without storing image bytes.
