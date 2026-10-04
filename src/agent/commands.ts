@@ -1,6 +1,14 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import { type AgentChange, type Harness, type TaskId, UsageDoc } from "@earendil-works/pi-durable";
+import {
+	type AgentChange,
+	type CompactionResult,
+	type Harness,
+	type SubmissionRecord,
+	type TaskId,
+	type TaskOutcome,
+	UsageDoc,
+} from "@earendil-works/pi-durable";
 import { type AgentDefaults, chatConversation } from "./chats.ts";
 import { activeRun, Runs, startRun } from "./run.ts";
 
@@ -30,8 +38,21 @@ function tokens(count: number) {
 	return count >= 1000 ? `${(count / 1000).toFixed(1)}k` : String(count);
 }
 
-/** `wait` names a task whose end the reply should follow, so the watcher is not blocked on it. */
-export type CommandResult = { reply?: string; wait?: TaskId };
+/** A compaction runs independently; its reply follows the native task/placement outcome. */
+export type CommandResult = { reply?: string; wait?: TaskId<CompactionResult> };
+
+export function compactionReply(outcome: TaskOutcome<CompactionResult>, placement?: SubmissionRecord) {
+	if (outcome.status === "aborted") return "Compaction cancelled.";
+	if (outcome.status !== "completed") return "Compaction failed.";
+	if (outcome.result.entryId !== undefined) return "Compacted.";
+	if (outcome.result.submissionId === undefined) return "Nothing to compact.";
+	if (placement?.type !== "write") return "Compaction result unavailable.";
+	if (placement.status === "done") return "Compacted.";
+	if (placement.status === "queued") return "Compaction summary queued for the next turn boundary.";
+	return placement.reason === "stale"
+		? "Compaction summary discarded because the context changed."
+		: "Compaction summary was not applied.";
+}
 
 /** Runs a slash command through Durable APIs; command replies bypass the model. */
 export async function runCommand(options: {
@@ -99,7 +120,6 @@ export async function runCommand(options: {
 		}
 		case "/compact":
 			return {
-				reply: "Compacted.",
 				wait: await conversation.compact(argument || undefined, BACKGROUND_CONTEXT),
 			};
 		case "/thinking":

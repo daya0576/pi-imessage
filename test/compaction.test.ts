@@ -5,6 +5,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { expect, it, vi } from "vitest";
+import { compactionReply } from "../src/agent/commands.ts";
 import { startService } from "../src/main.ts";
 
 // #33: host scheduling stays quiet, native no-ops do not infer, and admission failures preserve context.
@@ -49,6 +50,34 @@ it("schedules quiet native compaction, skips empty/reset chats and preserves con
 		expect(await agent.compact()).toEqual([]);
 		expect(warn).toHaveBeenCalledWith("Scheduled compaction admission failed", "chat", expect.any(Error));
 		expect(await conversation.context(BACKGROUND_CONTEXT)).toEqual(before);
+		// #33: manual no-op reports no work, rather than claiming a summary was applied.
+		await agent.command({ chatGuid: "chat", guid: "compact-command", text: "/compact" });
+		await vi.waitFor(() => expect(send.mock.calls.map(([, text]) => text)).toEqual(["Nothing to compact."]), {
+			timeout: 5000,
+		});
+		expect(faux.state.callCount).toBe(1);
+		// Public receipt fixtures test our reporting, not Durable's summarization/placement guarantees.
+		expect(compactionReply({ status: "failed", error: { message: "fixture failure" } })).toBe(
+			"Compaction failed.",
+		);
+		expect(compactionReply({ status: "aborted" })).toBe("Compaction cancelled.");
+		if (record.status !== "done" || record.type !== "input") throw new Error("Missing answer");
+		expect(compactionReply({ status: "completed", result: { entryId: record.answer } })).toBe("Compacted.");
+		const completed = { status: "completed", result: { submissionId: record.id } } as const;
+		const placement = { id: record.id, conversationId: record.conversationId, type: "write" } as const;
+		expect(compactionReply(completed, { ...placement, status: "done", entry: record.answer })).toBe(
+			"Compacted.",
+		);
+		expect(compactionReply(completed, { ...placement, status: "queued" })).toBe(
+			"Compaction summary queued for the next turn boundary.",
+		);
+		expect(compactionReply(completed, { ...placement, status: "unanswered", reason: "stale" })).toBe(
+			"Compaction summary discarded because the context changed.",
+		);
+		expect(compactionReply(completed, { ...placement, status: "unanswered", reason: "aborted" })).toBe(
+			"Compaction summary was not applied.",
+		);
+		expect(compactionReply(completed)).toBe("Compaction result unavailable.");
 		await conversation.reset(undefined, BACKGROUND_CONTEXT);
 		expect(await agent.compact()).toEqual([]);
 	} finally {

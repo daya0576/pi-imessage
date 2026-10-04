@@ -9,7 +9,7 @@ import {
 	submitMessage,
 	WatchCursor,
 } from "./agent/chats.ts";
-import { isCommand, runCommand } from "./agent/commands.ts";
+import { compactionReply, isCommand, runCommand } from "./agent/commands.ts";
 import { compactChats } from "./agent/compaction.ts";
 import { deliverReplies, recoverSending, type SendText } from "./agent/deliver.ts";
 import { type DirectSendInput, deliverDirect } from "./agent/direct-send.ts";
@@ -178,11 +178,20 @@ export async function startService(options: {
 					text: snapshot.text,
 				});
 				const reply = async () => {
-					if (result.wait !== undefined) await harness.waitForTask(result.wait, BACKGROUND_CONTEXT);
-					if (result.reply)
+					let text = result.reply;
+					if (result.wait !== undefined) {
+						const { outcome } = (await harness.waitForTask(result.wait, BACKGROUND_CONTEXT)).state;
+						const id = outcome.status === "completed" ? outcome.result.submissionId : undefined;
+						const placement =
+							id === undefined
+								? undefined
+								: await (await harness.submission(id, BACKGROUND_CONTEXT))?.status(BACKGROUND_CONTEXT);
+						text = compactionReply(outcome, placement);
+					}
+					if (text)
 						await deliverDirect(
 							harness,
-							{ chatGuid: snapshot.chatGuid, requestId: `command:${snapshot.guid}`, text: result.reply },
+							{ chatGuid: snapshot.chatGuid, requestId: `command:${snapshot.guid}`, text },
 							{ sendMessage: options.send, sendAttachment: options.sendAttachment },
 						);
 				};
