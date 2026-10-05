@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { constants, createReadStream } from "node:fs";
 import {
 	access,
 	copyFile,
@@ -8,6 +8,7 @@ import {
 	readdir,
 	readFile,
 	realpath,
+	readlink,
 	rename,
 	rm,
 	writeFile,
@@ -29,8 +30,9 @@ async function manifest(root: string) {
 	async function walk(directory: string) {
 		for (const entry of await readdir(directory, { withFileTypes: true })) {
 			const path = join(directory, entry.name);
-			if (entry.isSymbolicLink()) throw new Error(`Resolve symlinks before backup: ${path}`);
-			if (entry.isDirectory()) await walk(path);
+			// Old releases contain symlinks; they are copied as links, never followed.
+			if (entry.isSymbolicLink()) result[relative(root, path)] = `link:${await readlink(path)}`;
+			else if (entry.isDirectory()) await walk(path);
 			else if (entry.isFile()) {
 				const hash = createHash("sha256");
 				for await (const bytes of createReadStream(path)) hash.update(bytes);
@@ -41,6 +43,14 @@ async function manifest(root: string) {
 	await walk(root);
 	return Object.fromEntries(Object.entries(result).sort(([left], [right]) => left.localeCompare(right)));
 }
+// APFS clones: backup and staging copies of a large workspace take almost no extra disk space.
+const copyOptions = {
+	recursive: true,
+	force: false,
+	errorOnExist: true,
+	verbatimSymlinks: true,
+	mode: constants.COPYFILE_FICLONE,
+};
 function within(root: string, path: string) {
 	const part = relative(root, path);
 	return part === "" || (!part.startsWith(`..${sep}`) && part !== ".." && !isAbsolute(part));
@@ -81,8 +91,7 @@ export async function migrate(options: {
 	if (before["backup-manifest.json"] || Object.keys(before).some((file) => file.startsWith(`durable${sep}`)))
 		throw new Error("Source already contains migration/Durable data");
 	await mkdir(backup, { mode: 0o700 });
-	for (const entry of await readdir(source))
-		await cp(join(source, entry), join(backup, entry), { recursive: true, force: false, errorOnExist: true });
+	for (const entry of await readdir(source)) await cp(join(source, entry), join(backup, entry), copyOptions);
 	if (
 		JSON.stringify(await manifest(backup)) !== JSON.stringify(before) ||
 		JSON.stringify(await manifest(source)) !== JSON.stringify(before)
@@ -97,7 +106,7 @@ export async function migrate(options: {
 	let messages = 0;
 	let chats = 0;
 	try {
-		await cp(backup, stage, { recursive: true, force: false, errorOnExist: true });
+		await cp(backup, stage, copyOptions);
 		owner = await openHarness(stage, createModels(), [], {});
 		for (const entry of await readdir(backup, { withFileTypes: true })) {
 			if (!entry.isDirectory()) continue;
@@ -140,7 +149,11 @@ export async function migrate(options: {
 					const name = `${createHash("sha256").update(relative(source, path)).digest("hex").slice(0, 16)}-${basename(path)}`;
 					const directory = join(stage, "attachments", encodeURIComponent(entry.name));
 					await mkdir(directory, { recursive: true });
-					await copyFile(join(backup, relative(source, path)), join(directory, name));
+					await copyFile(
+						join(backup, relative(source, path)),
+						join(directory, name),
+						constants.COPYFILE_FICLONE,
+					);
 					paths.push(join(target, "attachments", encodeURIComponent(entry.name), name));
 				}
 				const content = [row.text ?? "", ...paths.map((path) => `[Attachment: ${path}]`)]

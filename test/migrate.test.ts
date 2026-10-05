@@ -1,4 +1,4 @@
-import { access, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -21,6 +21,8 @@ it("verifies a backup, imports history and attachments once, then starts from em
 		const settings = JSON.stringify({ chatAllowlist: { whitelist: ["*"], blacklist: [] } });
 		await writeFile(join(source, "settings.json"), settings);
 		await writeFile(join(source, "chat", "images", "image.png"), "synthetic bytes");
+		// Old releases keep symlinks such as releases/current; they are copied as links.
+		await symlink("chat/images", join(source, "current"));
 		const rows = [
 			{
 				date: "2026-10-01T00:00:00Z",
@@ -55,6 +57,7 @@ it("verifies a backup, imports history and attachments once, then starts from em
 			JSON.parse(await readFile(join(backup, "backup-manifest.json"), "utf8")).files["chat/log.jsonl"],
 		).toMatch(/^[a-f0-9]{64}$/);
 		expect(await readFile(join(source, "chat", "log.jsonl"), "utf8")).toBe(original);
+		expect(await readlink(join(backup, "current"))).toBe("chat/images");
 		const restored = join(directory, "restored");
 		await cp(backup, restored, { recursive: true });
 		expect(await readFile(join(restored, "chat", "log.jsonl"), "utf8")).toBe(original);
