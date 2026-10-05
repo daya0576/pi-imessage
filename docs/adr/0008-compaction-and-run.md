@@ -1,6 +1,6 @@
 # 0008. Compact every 6 hours; `/run` replaces `/goal`
 
-Status: proposed (2026-10-04)
+Status: accepted (2026-10-04; owner accepted 2026-10-05)
 
 **Context.** The old bot reset every chat nightly, and used `pi-goal-x` for long tasks, which brought task trees, contracts and reviewers we don't need.
 

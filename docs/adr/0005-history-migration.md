@@ -1,6 +1,6 @@
 # 0005. Import old history once; start with an empty context
 
-Status: proposed (2026-10-04)
+Status: accepted (2026-10-04; owner accepted 2026-10-05)
 
 **Context.** Old data per chat: `WORKING_DIR/<chat>/log.jsonl` (about 28,000 lines across 12 chats on claw), plus SDK sessions, goals, subagents and several GB of images.
 

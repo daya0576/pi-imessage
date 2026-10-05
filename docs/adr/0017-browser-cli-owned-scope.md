@@ -1,6 +1,6 @@
 # 0017. Invoke browser CLI in a native conversation-owned scope
 
-Status: proposed (2026-10-05). Replaces only the browser-through-unrestricted-bash part of proposed [0004](0004-native-extensions.md) if accepted.
+Status: accepted (2026-10-05; owner accepted 2026-10-05). Replaces only the browser-through-unrestricted-bash part of proposed [0004](0004-native-extensions.md) if accepted.
 
 **Problem.** `PI_BROWSER_HOME` scopes the pi-browser wrapper's profiles/output, not Playwright CLI's daemon registry. CLI 0.1.19 keeps that registry in the user's cache directory, derives daemon workspace identity from `.playwright` or the installed package, and enumerates other workspaces. All chats currently share the same shell environment and working directory. A named session or separate profile directory alone therefore does not preserve the old browser adapter's private-session rules.
 

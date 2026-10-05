@@ -1,6 +1,6 @@
 # 0004. Native Durable extensions, not an SDK adapter
 
-Status: proposed (2026-10-04)
+Status: accepted (2026-10-04; owner accepted 2026-10-05)
 
 **Context.** Chats need web search, page fetch and a browser. Durable has no loader for Pi SDK extensions, and the official durable coding agent loads none; its own way to add tools is `defineTool` / `section` / `defineDoc`.
 

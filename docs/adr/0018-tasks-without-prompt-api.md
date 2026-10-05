@@ -1,6 +1,6 @@
 # 0018. Ordinary `/stop`; scheduled tasks without HTTP `/prompt` and `/send`
 
-Status: proposed (2026-10-05). Supersedes proposed [0014](0014-ephemeral-private-storage.md) and [0015](0015-ordinary-stop-keeps-native-inbox.md). Replaces the HTTP `/prompt` clause of proposed [0012](0012-run-in-owned-conversation.md) and the `/send` resend hint of [0003](0003-replies-at-most-once.md).
+Status: accepted (2026-10-05; owner accepted 2026-10-05). Supersedes proposed [0014](0014-ephemeral-private-storage.md) and [0015](0015-ordinary-stop-keeps-native-inbox.md). Replaces the HTTP `/prompt` clause of proposed [0012](0012-run-in-owned-conversation.md) and the `/send` resend hint of [0003](0003-replies-at-most-once.md).
 
 **Context.** Every production caller of HTTP `/prompt` and `/send` is a script or cron job on the same machine, plus the agent sending files through curl. The work they start runs in a separate context, but its result never reaches the chat's own conversation: when the user replies to a morning summary, the chat does not know what was sent. 0014 and 0015 wait for storage lifecycle work and an upstream Durable API.
 

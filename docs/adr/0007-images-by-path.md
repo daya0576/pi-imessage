@@ -1,6 +1,6 @@
 # 0007. Store images as file paths
 
-Status: proposed (2026-10-04)
+Status: accepted (2026-10-04; owner accepted 2026-10-05)
 
 **Context.** Durable stores images inside entries as base64. Old chats hold several GB of images; inlining them would bloat `durable/` and the dotfiles backup. Durable's `read` tool cannot read images yet.
 

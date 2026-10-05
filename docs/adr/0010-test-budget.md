@@ -1,6 +1,6 @@
 # 0010. About 40 tests, only for our code
 
-Status: proposed (2026-10-04)
+Status: accepted (2026-10-04; owner accepted 2026-10-05)
 
 **Context.** #31 reached 404 tests. Many retested Durable's own guarantees, or killed subprocesses to probe crash windows.
 

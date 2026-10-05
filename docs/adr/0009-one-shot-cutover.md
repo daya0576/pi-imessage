@@ -1,6 +1,6 @@
 # 0009. Switch over in one step
 
-Status: proposed (2026-10-04)
+Status: accepted (2026-10-04; owner accepted 2026-10-05)
 
 **Context.** Running old and new pipelines side by side (a per-chat canary) needs guards against processing a message twice. That was much of #31's complexity.
 

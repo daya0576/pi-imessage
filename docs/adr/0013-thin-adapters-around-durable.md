@@ -1,6 +1,6 @@
 # 0013. Use Durable directly; keep adapters thin
 
-Status: proposed (2026-10-04)
+Status: accepted (2026-10-04; owner accepted 2026-10-05)
 
 **Context.** The drafts grew host state that Durable already keeps (per-command receipts with running/unknown recovery, a reply scan over every settled submission) and copies of other systems (a gzip/base64 Python memory backend inside TypeScript, a vendored 1,000-line scheduler). [0001](0001-durable-owns-state.md) says Durable owns chat state; this records where our code stops.
 

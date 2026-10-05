@@ -1,6 +1,6 @@
 # 0016. Initialize one process-owned HTTP transport
 
-Status: proposed (2026-10-05)
+Status: accepted (2026-10-05; owner accepted 2026-10-05)
 
 **Problem.** Pi's global `httpProxy` and `httpIdleTimeoutMs` settings need HTTP transport setup, not just request-option forwarding. Coding-agent's experimental Durable startup calls `applyHttpProxySettings()` and `configureHttpDispatcher()`, but neither is a public export of coding-agent 1.0.2. Merely assigning `HTTP_PROXY` and `HTTPS_PROXY` after Node starts does not reconfigure the dispatcher created by `--use-env-proxy`.
 

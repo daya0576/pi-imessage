@@ -1,6 +1,6 @@
 # 0006. One JSONL storage, backed up by hand
 
-Status: proposed (2026-10-04)
+Status: accepted (2026-10-04; owner accepted 2026-10-05)
 
 **Context.** Durable can store to memory, SQLite or JSONL. The owner backs up `WORKING_DIR` with git in their dotfiles.
 

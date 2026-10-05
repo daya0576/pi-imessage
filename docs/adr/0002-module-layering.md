@@ -1,6 +1,6 @@
 # 0002. Modules in strict layers
 
-Status: proposed (2026-10-04)
+Status: accepted (2026-10-04; owner accepted 2026-10-05)
 
 **Context.** The old `src/` was flat; `agent.ts` alone was 1,536 lines, and any file could import any other.
 

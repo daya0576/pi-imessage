@@ -1,6 +1,6 @@
 # 0012. `/run` works in a conversation owned by one task
 
-Status: proposed (2026-10-04). Replaces the `/run` part of [0008](0008-compaction-and-run.md); its compaction part stays.
+Status: accepted (2026-10-04; owner accepted 2026-10-05). Replaces the `/run` part of [0008](0008-compaction-and-run.md); its compaction part stays.
 
 **Context.** In 0008, `/run` works inside the chat's own conversation. Stopping it then means telling run work apart from ordinary work: `Conversation.abort()` also withdraws ordinary queued messages, so the draft tracked submission IDs and command receipts by hand. Durable already scopes abort by ownership: aborting a task aborts the conversations and work it owns.
 

@@ -1,6 +1,6 @@
 # 0001. Pi Durable owns all chat state
 
-Status: proposed (2026-10-04)
+Status: accepted (2026-10-04; owner accepted 2026-10-05)
 
 **Context.** The old bot wrapped the Pi SDK in its own queue, retries, timeouts and recovery fences. The first Durable attempt (#31) then added controllers, epochs, outboxes and a supervisor around Durable, and reached 54 files and 404 tests without shipping.
 

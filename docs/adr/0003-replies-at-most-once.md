@@ -1,6 +1,6 @@
 # 0003. Replies are sent at most once
 
-Status: proposed (2026-10-04)
+Status: accepted (2026-10-04; owner accepted 2026-10-05)
 
 **Context.** Sending through Messages.app and recording it in Durable cannot be one atomic step. A crash in between either loses or repeats a reply.
 
