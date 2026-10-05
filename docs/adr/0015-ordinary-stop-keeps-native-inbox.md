@@ -1,6 +1,6 @@
 # 0015. Ordinary `/stop` keeps the native inbox
 
-Status: proposed (2026-10-04). Replaces only the no-active-run `/stop` clause of proposed [0012](0012-run-in-owned-conversation.md) if accepted. Does not approve its other behavior changes.
+Status: superseded by [0018](0018-tasks-without-prompt-api.md) (2026-10-05). Was: proposed (2026-10-04). Replaces only the no-active-run `/stop` clause of proposed [0012](0012-run-in-owned-conversation.md) if accepted. Does not approve its other behavior changes.
 
 **Problem.** Ordinary `/stop` must cancel current work and foreground children, suppress unclaimed old replies, and preserve later unprocessed ordinary messages. `Conversation.abort()` in Durable 1.0.2 cancels the conversation's foreground scope but withdraws queued inputs. Looking up `LiveDoc.run.taskId` and calling `abortTask()` preserves the parent inbox, but is not equivalent: generation hands over to a new conversation-owned task between turns. The old task can become terminal between lookup and abort; aborting it then does nothing to the new generation.
 

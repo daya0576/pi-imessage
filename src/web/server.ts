@@ -1,27 +1,16 @@
-import { randomUUID } from "node:crypto";
 import { open, readdir, readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import {
-	type ConversationId,
-	type Cursor,
-	type Harness,
-	LiveDoc,
-	type Submission,
-} from "@earendil-works/pi-durable";
+import { type ConversationId, type Cursor, type Harness, LiveDoc } from "@earendil-works/pi-durable";
 import { Chats } from "../agent/chats.ts";
-import type { DirectSendInput, DirectSendReceipt } from "../agent/direct-send.ts";
 import { DirectSends } from "../agent/direct-send.ts";
-import type { PromptInput } from "../agent/isolated.ts";
 import { Sessions } from "../agent/isolated.ts";
 import { Deliveries } from "../agent/replies.ts";
 import { readSettings } from "../config/settings.ts";
 
 export interface WebAgent {
 	harness: Harness;
-	prompt(input: PromptInput): Promise<Submission>;
-	sendDirect(input: DirectSendInput): Promise<DirectSendReceipt>;
 	health(): Promise<{ ok: boolean; model: string; latencyMs: number; checkedAt: string }>;
 }
 export interface ScheduledAPI {
@@ -122,41 +111,6 @@ export async function startWeb(options: {
 			(request.headers.origin && new URL(request.headers.origin).host !== request.headers.host)
 		) {
 			json(response, 403, { error: "Cross-origin requests are not allowed" });
-			return;
-		}
-		if (request.method === "POST" && url.pathname === "/send") {
-			const input = await body(request);
-			const requestId = typeof input.requestId === "string" ? input.requestId : randomUUID();
-			const receipt = await options.agent.sendDirect({
-				chatGuid: required(input.chatGuid, "chatGuid"),
-				requestId,
-				text: typeof input.text === "string" ? input.text : undefined,
-				filePath:
-					typeof input.filePath === "string"
-						? input.filePath
-						: typeof input.attachmentPath === "string"
-							? input.attachmentPath
-							: undefined,
-			});
-			const unknown = receipt.textStatus === "unknown" || receipt.fileStatus === "unknown";
-			json(response, unknown ? 503 : 200, { ok: !unknown, requestId, receipt });
-			return;
-		}
-		if (request.method === "POST" && url.pathname === "/prompt") {
-			const input = await body(request);
-			// Durable has no single-conversation purge API; never silently downgrade ephemeral privacy.
-			if (input.ephemeral === true) {
-				json(response, 501, { ok: false, error: "Ephemeral storage cleanup is not implemented yet" });
-				return;
-			}
-			const requestId = typeof input.requestId === "string" ? input.requestId : randomUUID();
-			const submission = await options.agent.prompt({
-				chatGuid: required(input.chatGuid, "chatGuid"),
-				prompt: required(input.prompt, "prompt"),
-				requestId,
-				sessionKey: typeof input.sessionKey === "string" ? input.sessionKey : undefined,
-			});
-			json(response, 200, { ok: true, requestId, submissionId: submission.id });
 			return;
 		}
 		if (request.method === "GET" && url.pathname === "/health/model") {

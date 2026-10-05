@@ -11,8 +11,8 @@ import { startService } from "../src/main.ts";
 import { createServices } from "../src/scheduler/services.ts";
 import { startWeb } from "../src/web/server.ts";
 
-// #33: retained HTTP boundaries persist acceptance, isolate producers and keep viewing side-effect free.
-it("serves compatible send/prompt/schedule APIs and read-only state without inferring on page views", async () => {
+// #33 / ADR 0018: tasks run fresh and isolated, the chat records what was sent, and viewing has no side effects.
+it("runs cron tasks fresh, records what was sent in the chat and serves read-only state", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "imessage-http-"));
 	let agent: Awaited<ReturnType<typeof startService>> | undefined;
 	let services: Awaited<ReturnType<typeof createServices>> | undefined;
@@ -57,64 +57,49 @@ it("serves compatible send/prompt/schedule APIs and read-only state without infe
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(body),
 			});
-		const payload = {
-			chatGuid: "disabled",
-			text: "direct text",
-			attachmentPath: "/tmp/fixture-file",
-			requestId: "direct",
-		};
-		expect((await post("/send", payload)).status).toBe(200);
-		expect((await post("/send", payload)).status).toBe(200);
-		expect(send).toHaveBeenCalledTimes(1);
-		expect(sendAttachment).toHaveBeenCalledTimes(1);
+		for (const path of ["/send", "/prompt"])
+			expect((await post(path, { chatGuid: "chat" })).status).toBe(404);
 		faux.setResponses([
 			fauxAssistantMessage("Chat answer <script>unsafe</script> sk-fixturesecretkey"),
 			(context) => {
 				expect(JSON.stringify(context.messages)).not.toContain("Chat-only private request");
-				return fauxAssistantMessage("Isolated answer");
-			},
-			(context) => {
-				expect(JSON.stringify(context.messages)).not.toContain("Chat-only private request");
-				expect(JSON.stringify(context.messages)).not.toContain("API-only request");
 				return fauxAssistantMessage("Cron answer");
 			},
+			(context) => {
+				// A fresh conversation per run: the first run's prompt and answer are not here.
+				expect(JSON.stringify(context.messages).match(/Cron-only request/g)).toHaveLength(1);
+				return fauxAssistantMessage(fauxToolCall("send_message", { filePath: "/tmp/fixture-file" }), {
+					stopReason: "toolUse",
+				});
+			},
+			() => fauxAssistantMessage("Second cron answer"),
+			(context) => {
+				// The chat conversation records what the user saw from tasks and tools.
+				const messages = JSON.stringify(context.messages);
+				expect(messages).toContain("Cron answer");
+				expect(messages).toContain("/tmp/fixture-file");
+				expect(messages).not.toContain("Cron-only request");
+				return fauxAssistantMessage("Follow-up answer");
+			},
 		]);
-		const ordinary = await (
-			await post("/prompt", { chatGuid: "chat", prompt: "Chat-only private request", requestId: "ordinary" })
-		).json();
-		expect(ordinary.ok).toBe(true);
-		const accepted = await agent.harness.submission(ordinary.submissionId, BACKGROUND_CONTEXT);
-		expect(accepted).toBeDefined();
-		await accepted?.wait(BACKGROUND_CONTEXT);
-		expect(
-			(
-				await post("/prompt", {
-					chatGuid: "chat",
-					prompt: "Chat-only private request",
-					requestId: "ordinary",
-				})
-			).status,
-		).toBe(200);
-		const isolated = await (
-			await post("/prompt", {
-				chatGuid: "chat",
-				prompt: "API-only request",
-				requestId: "isolated",
-				sessionKey: "task",
-			})
-		).json();
-		await (await agent.harness.submission(isolated.submissionId, BACKGROUND_CONTEXT))?.wait(
-			BACKGROUND_CONTEXT,
-		);
+		await (
+			await agent.submit({ chatGuid: "chat", guid: "ordinary", text: "Chat-only private request" })
+		).wait(BACKGROUND_CONTEXT);
 		expect((await post("/cron/jobs/fixture-cron/run", {})).status).toBe(200);
+		expect((await post("/cron/jobs/fixture-cron/run", {})).status).toBe(200);
+		expect(sendAttachment).toHaveBeenCalledWith("chat", "/tmp/fixture-file");
 		const sessions = await agent.harness.snapshot(Sessions, BACKGROUND_CONTEXT);
 		expect(sessions?.items).toHaveLength(2);
 		await agent.deliver();
+		await (await agent.submit({ chatGuid: "chat", guid: "follow-up", text: "Tell me more" })).wait(
+			BACKGROUND_CONTEXT,
+		);
+		await agent.deliver();
 		expect(send.mock.calls.map(([, text]) => text)).toEqual([
-			"direct text",
 			expect.stringContaining("Chat answer"),
-			"Isolated answer",
 			"Cron answer",
+			"Second cron answer",
+			"Follow-up answer",
 		]);
 		for (const path of [
 			"/",
@@ -132,7 +117,7 @@ it("serves compatible send/prompt/schedule APIs and read-only state without infe
 		const history = await (await fetch(`${base}/?conversationId=${conversationId}`)).text();
 		expect(history).toContain("&lt;script&gt;");
 		expect(history).not.toContain("sk-fixturesecretkey");
-		expect(faux.state.callCount).toBe(3);
+		expect(faux.state.callCount).toBe(5);
 		const reminder = await (
 			await post("/reminders", {
 				chatGuid: "chat",
@@ -145,20 +130,7 @@ it("serves compatible send/prompt/schedule APIs and read-only state without infe
 		expect((await (await post("/cron/jobs/fixture-cron/enabled", { enabled: false })).json()).enabled).toBe(
 			false,
 		);
-		expect(
-			(
-				await post("/prompt", {
-					chatGuid: "chat",
-					prompt: "private",
-					sessionKey: "temporary",
-					ephemeral: true,
-				})
-			).status,
-		).toBe(501);
-		expect(
-			(await post("/prompt", { chatGuid: "chat", prompt: "invalid", sessionKey: "../escape" })).status,
-		).toBe(400);
-		expect(faux.state.callCount).toBe(3);
+		expect(faux.state.callCount).toBe(5);
 		faux.setResponses([
 			(context) => {
 				const messages = JSON.stringify(context.messages);
@@ -180,10 +152,10 @@ it("serves compatible send/prompt/schedule APIs and read-only state without infe
 				return fauxAssistantMessage("Scheduled");
 			},
 		]);
-		const background = await agent.prompt({
+		const background = await agent.task({
 			chatGuid: "chat",
 			prompt: "Summarize registered files",
-			sessionKey: "background",
+			label: "background",
 			scope: "background",
 			readOnly: true,
 			deliver: false,
@@ -195,10 +167,10 @@ it("serves compatible send/prompt/schedule APIs and read-only state without infe
 		await (await agent.submit({ chatGuid: "chat", guid: "schedule", text: "Schedule fixture work" })).wait(
 			BACKGROUND_CONTEXT,
 		);
-		expect(faux.state.callCount).toBe(6);
+		expect(faux.state.callCount).toBe(8);
 		faux.setResponses([fauxAssistantMessage("OK")]);
 		expect((await fetch(`${base}/health/model`)).status).toBe(200);
-		expect(faux.state.callCount).toBe(7);
+		expect(faux.state.callCount).toBe(9);
 	} finally {
 		await web?.close();
 		await services?.close();

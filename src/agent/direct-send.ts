@@ -74,7 +74,7 @@ export async function deliverDirect(harness: Harness, input: DirectSendInput, se
 		if (status === "unknown") console.warn("Direct delivery unknown", chatGuid, requestId, part);
 		return status;
 	}
-	// Explicit sends preserve the old /send plain-text behavior, independent of automatic reply settings.
+	// Explicit sends are plain text, independent of automatic reply settings.
 	if (text && (await attempt("textStatus", () => sender.sendMessage(chatGuid, text))) !== "sent")
 		return receipt;
 	if (filePath) await attempt("fileStatus", () => sender.sendAttachment(chatGuid, filePath));

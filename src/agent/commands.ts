@@ -4,10 +4,12 @@ import {
 	type AgentChange,
 	type CompactionResult,
 	type Harness,
+	LiveDoc,
 	type SubmissionRecord,
 	type TaskId,
 	type TaskOutcome,
 	UsageDoc,
+	UserEntry,
 } from "@earendil-works/pi-durable";
 import { type AgentDefaults, chatConversation } from "./chats.ts";
 import { activeRun, Runs, startRun } from "./run.ts";
@@ -20,7 +22,7 @@ const help = [
 	"/thinking <level|default> - set thinking for this chat",
 	"/reload - reload models, instructions and skills; apply the default model to this chat",
 	"/run <duration> [task] - keep working until done, blocked or the deadline, e.g. /run 1h",
-	"/stop - stop the current /run",
+	"/stop - stop the current work or /run",
 ].join("\n");
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
@@ -81,11 +83,38 @@ export async function runCommand(options: {
 	switch (name) {
 		case "/help":
 			return { reply: help };
-		case "/stop":
-			if (!run) return { reply: "Nothing is running." };
-			await harness.abortTask(run.taskId, BACKGROUND_CONTEXT);
-			await harness.waitForTask(run.taskId, BACKGROUND_CONTEXT);
+		case "/stop": {
+			if (run) {
+				await harness.abortTask(run.taskId, BACKGROUND_CONTEXT);
+				await harness.waitForTask(run.taskId, BACKGROUND_CONTEXT);
+				return { reply: "Stopped." };
+			}
+			// Abort the generation that owns the current inputs, not the conversation, so later queued
+			// messages stay in the inbox (ADR 0015). Retry while generation hands the same inputs over.
+			const live = async () => (await harness.snapshot(LiveDoc, conversation.id, BACKGROUND_CONTEXT))?.run;
+			const stopping = await live();
+			if (!stopping) return { reply: "Nothing is running." };
+			for (
+				let current: typeof stopping | undefined = stopping;
+				current?.inputs[0] === stopping.inputs[0];
+				current = await live()
+			) {
+				await harness.abortTask(current.taskId, BACKGROUND_CONTEXT);
+				await harness.waitForTask(current.taskId, BACKGROUND_CONTEXT);
+			}
+			// A passive note gives Durable a boundary to place the queued messages.
+			await conversation.submit(
+				{
+					type: "write",
+					entry: {
+						kind: UserEntry.kind,
+						model: [{ role: "user", content: "[/stop]", timestamp: Date.now() }],
+					},
+				},
+				BACKGROUND_CONTEXT,
+			);
 			return { reply: "Stopped." };
+		}
 		case "/new":
 			// The run task belongs to the chat conversation, so this abort stops it too.
 			await conversation.abort(BACKGROUND_CONTEXT);

@@ -1,21 +1,31 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { type ConversationId, configure, defineDoc, type Harness } from "@earendil-works/pi-durable";
 import { createReadTool } from "@earendil-works/pi-durable/tools";
-import type { AgentDefaults } from "./chats.ts";
+import { type AgentDefaults, chatConversation } from "./chats.ts";
 
-export interface PromptInput {
+/** A scheduled or background task; each request gets a fresh conversation (ADR 0018). */
+export interface TaskInput {
 	chatGuid: string;
 	prompt: string;
 	requestId: string;
-	sessionKey?: string;
-	/** Producer namespaces prevent an API caller from entering a scheduler's context. */
-	scope?: "api" | "cron" | "background" | "health";
+	/** Shown in the chat record and web pages, e.g. the cron job ID. */
+	label: string;
+	scope: "cron" | "background" | "health";
 	readOnly?: boolean;
+	/** Send the final answer to the chat and record it in the chat conversation. */
 	deliver?: boolean;
 }
 
 export const Sessions = defineDoc<{
-	items: { key: string; conversationId: ConversationId; chatGuid: string; deliver: boolean }[];
+	items: {
+		key: string;
+		label: string;
+		conversationId: ConversationId;
+		chatGuid: string;
+		deliver: boolean;
+		/** The chat conversation that records the delivered answer. */
+		chat?: ConversationId;
+	}[];
 }>({
 	kind: "imessage.sessions",
 	version: 1,
@@ -24,12 +34,17 @@ export const Sessions = defineDoc<{
 });
 const read = createReadTool();
 
-export async function submitIsolated(harness: Harness, defaults: AgentDefaults, input: PromptInput) {
-	if (!input.sessionKey || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(input.sessionKey))
-		throw new Error("sessionKey must be 1-128 characters using only letters, numbers, '.', '_' or '-'");
+export async function submitTask(harness: Harness, defaults: AgentDefaults, input: TaskInput) {
 	if (!input.chatGuid.trim() || !input.prompt.trim() || !input.requestId.trim())
 		throw new Error("Chat GUID, prompt and request ID are required");
-	const key = JSON.stringify([input.scope ?? "api", input.chatGuid, input.sessionKey]);
+	const deliver = input.deliver !== false;
+	const chat = deliver ? (await chatConversation(harness, defaults, input.chatGuid)).id : undefined;
+	// Health checks reuse one conversation; every other request starts fresh.
+	const key = JSON.stringify(
+		input.scope === "health"
+			? [input.scope, input.label]
+			: [input.scope, input.chatGuid, input.label, input.requestId],
+	);
 	const id = await harness.commit(async (tx) => {
 		const sessions = await tx.doc(Sessions);
 		const found = sessions.items.find((item) => item.key === key);
@@ -49,14 +64,16 @@ export async function submitIsolated(harness: Harness, defaults: AgentDefaults, 
 			});
 		sessions.items.push({
 			key,
+			label: input.label,
 			conversationId: created.id,
 			chatGuid: input.chatGuid,
-			deliver: input.deliver !== false,
+			deliver,
+			...(chat === undefined ? {} : { chat }),
 		});
 		return created.id;
 	}, BACKGROUND_CONTEXT);
 	const conversation = await harness.conversation(id, BACKGROUND_CONTEXT);
-	if (!conversation) throw new Error("Isolated conversation missing");
+	if (!conversation) throw new Error("Task conversation missing");
 	return conversation.submit(
 		{ type: "input", content: input.prompt, requestId: input.requestId, whenBusy: "followUp" },
 		BACKGROUND_CONTEXT,

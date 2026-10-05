@@ -15,9 +15,10 @@ import { compactChats } from "./agent/compaction.ts";
 import { deliverReplies, recoverSending, type SendText } from "./agent/deliver.ts";
 import { type DirectSendInput, deliverDirect } from "./agent/direct-send.ts";
 import { openHarness } from "./agent/harness.ts";
-import { type PromptInput, submitIsolated } from "./agent/isolated.ts";
+import { submitTask, type TaskInput } from "./agent/isolated.ts";
 import { openModels, readDefaults, requestSettings, withCodexFast } from "./agent/models.ts";
 import { loadPrompt } from "./agent/prompt.ts";
+import { runRecord } from "./agent/run.ts";
 import { createAutomationService } from "./automation/service.ts";
 import { isReplyEnabled, readSettings } from "./config/settings.ts";
 import { finalReplyText } from "./extensions/final-text.ts";
@@ -104,25 +105,23 @@ export async function startService(options: {
 		install(extension: Extension) {
 			owner.registry.install(extension);
 		},
-		prompt(input: PromptInput): Promise<Submission> {
-			if (!input.sessionKey)
-				return service.submit({ chatGuid: input.chatGuid, guid: input.requestId, text: input.prompt });
+		task(input: TaskInput): Promise<Submission> {
 			return track(async () => {
 				if (
 					input.deliver !== false &&
 					!isReplyEnabled(await readSettings(options.workingDir), input.chatGuid)
 				)
 					throw new Error("Chat is disabled");
-				return submitIsolated(harness, defaults, input);
+				return submitTask(harness, defaults, input);
 			});
 		},
 		async health() {
 			const started = Date.now();
-			const submission = await service.prompt({
+			const submission = await service.task({
 				chatGuid: "health",
 				prompt: "Reply OK.",
 				requestId: crypto.randomUUID(),
-				sessionKey: "model-health",
+				label: "model-health",
 				scope: "health",
 				deliver: false,
 			});
@@ -213,15 +212,36 @@ export async function startService(options: {
 				return result;
 			});
 		},
-		// Explicit operator/API sends bypass reply allowlists, as the old /send endpoint does.
+		/**
+		 * Service and tool sends bypass reply allowlists. What was attempted is recorded once in the chat
+		 * conversation, so a later reply there has its context.
+		 */
 		sendDirect(input: DirectSendInput) {
 			const snapshot = { ...input };
-			return track(() =>
-				deliverDirect(harness, snapshot, {
+			return track(async () => {
+				const receipt = await deliverDirect(harness, snapshot, {
 					sendMessage: options.send,
 					sendAttachment: options.sendAttachment,
-				}),
-			);
+				});
+				const parts = [
+					receipt.textStatus === "sent" || receipt.textStatus === "unknown"
+						? `[sent message, ${receipt.textStatus}]\n${receipt.text}`
+						: undefined,
+					receipt.fileStatus === "sent" || receipt.fileStatus === "unknown"
+						? `[sent file, ${receipt.fileStatus}] ${receipt.filePath}`
+						: undefined,
+				].filter((part) => part !== undefined);
+				if (parts.length > 0)
+					await (await chatConversation(harness, defaults, receipt.chatGuid)).submit(
+						{
+							type: "write",
+							requestId: `direct:${receipt.requestId}`,
+							entry: runRecord(parts.join("\n"), Date.now()),
+						},
+						BACKGROUND_CONTEXT,
+					);
+				return receipt;
+			});
 		},
 		/** Admit quiet native compactions; observing their results must not hold shutdown open. */
 		compact() {
@@ -365,7 +385,7 @@ export async function startMessaging(
 		start,
 		harness: service.harness,
 		install: service.install,
-		prompt: service.prompt,
+		task: service.task,
 		result: service.result,
 		health: service.health,
 		sendDirect(input: DirectSendInput) {

@@ -14,6 +14,7 @@ export function scheduleExtension(clock: {
 	list(owner: string): unknown;
 	cancel(owner: string, id: string): unknown;
 	watch(owner: string, input: { completionFile: string; instruction: string; waitMinutes?: number }): unknown;
+	send(input: { chatGuid: string; requestId: string; text?: string; filePath?: string }): Promise<unknown>;
 }) {
 	const owner = async (id: ConversationId, context: Context) => {
 		const destination = await clock.owner(id);
@@ -26,10 +27,32 @@ export function scheduleExtension(clock: {
 			section(
 				"scheduler",
 				() =>
-					"Use schedule_task for delayed or repeating work and cancel_scheduled_task when its explicit stop condition is met. Register watch_background BEFORE launching a detached command, with a fresh run-specific completion JSON. The command must atomically publish a terminal success/failure status; the watcher only reads results and never reruns the command.",
+					"Use send_message to send a file, or a message outside your final answer; your final answer is sent automatically. Use schedule_task for delayed or repeating work and cancel_scheduled_task when its explicit stop condition is met. Register watch_background BEFORE launching a detached command, with a fresh run-specific completion JSON. The command must atomically publish a terminal success/failure status; the watcher only reads results and never reruns the command.",
 			),
 		],
 		tools: [
+			defineTool({
+				name: "send_message",
+				description:
+					"Send text and/or a local file to this chat now, or to another chat by chatGuid. Returns the send receipt; an unknown status may have been sent and must not be repeated blindly.",
+				parameters: Type.Object({
+					text: Type.Optional(Type.String()),
+					filePath: Type.Optional(Type.String()),
+					chatGuid: Type.Optional(Type.String()),
+				}),
+				// The task ID is the request ID: a replayed call returns the first receipt instead of sending again.
+				replay: "safe",
+				async execute(args, api, context) {
+					const chatGuid = args.chatGuid ?? (await owner(api.conversationId, context));
+					const receipt = await clock.send({
+						chatGuid,
+						requestId: `message:${api.taskId}`,
+						text: args.text,
+						filePath: args.filePath,
+					});
+					return { content: [{ type: "text", text: JSON.stringify(receipt) }] };
+				},
+			}),
 			defineTool({
 				name: "schedule_task",
 				description:

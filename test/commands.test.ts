@@ -69,7 +69,7 @@ it("runs each command once by source GUID and replies without the model", async 
 	expect(replies()).toEqual([
 		"Thinking: high (this chat only)",
 		expect.stringMatching(/thinking: high\nRun: none$/),
-		expect.stringContaining("/stop - stop the current /run"),
+		expect.stringContaining("/stop - stop the current work or /run"),
 		"Nothing is running.",
 		expect.stringContaining("Usage: /run"),
 	]);
@@ -135,8 +135,8 @@ it("runs in a fork of the chat, routes ordinary messages to it and records it in
 	expect(faux.state.callCount).toBe(5);
 });
 
-// #33 / ADR 0012: /stop ends the run and its queued messages; a busy chat refuses a new run.
-it("refuses a run while the chat is busy and stops a run without touching the chat", async () => {
+// #33 / ADR 0012, 0015: /stop ends a run with its queued messages, or ordinary work keeping later messages.
+it("refuses a run while the chat is busy and stops runs and ordinary work", async () => {
 	const chatStarted = Promise.withResolvers<void>();
 	const finishChat = Promise.withResolvers<void>();
 	const runStarted = Promise.withResolvers<void>();
@@ -169,4 +169,22 @@ it("refuses a run while the chat is busy and stops a run without touching the ch
 	await agent.command({ chatGuid: "chat", guid: "stop-again", text: "/stop" });
 	expect(replies().at(-1)).toBe("Nothing is running.");
 	expect(faux.state.callCount).toBe(2);
+
+	const workStarted = Promise.withResolvers<void>();
+	faux.setResponses([
+		async (_context, options) => {
+			workStarted.resolve();
+			await new Promise((resolve) => options?.signal?.addEventListener("abort", resolve, { once: true }));
+			return fauxAssistantMessage("obsolete answer");
+		},
+		() => fauxAssistantMessage("later answer"),
+	]);
+	const slow = await agent.submit({ chatGuid: "chat", guid: "slow", text: "Slow work." });
+	await workStarted.promise;
+	const later = await agent.submit({ chatGuid: "chat", guid: "later", text: "Later message." });
+	await agent.command({ chatGuid: "chat", guid: "stop-work", text: "/stop" });
+	expect(await slow.wait(BACKGROUND_CONTEXT)).toMatchObject({ status: "unanswered", reason: "aborted" });
+	expect(await later.wait(BACKGROUND_CONTEXT)).toMatchObject({ status: "done" });
+	await agent.deliver();
+	expect(replies().slice(-2)).toEqual(["Stopped.", "later answer"]);
 });

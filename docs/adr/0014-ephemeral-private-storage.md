@@ -1,6 +1,6 @@
 # 0014. Keep ephemeral transcripts in disposable private storage
 
-Status: proposed (2026-10-04)
+Status: superseded by [0018](0018-tasks-without-prompt-api.md) (2026-10-05). Was: proposed (2026-10-04)
 
 **Context.** The retained HTTP `ephemeral:true` contract removes an isolated session after its queued work finishes. Durable 1.0.2 has reset/compaction but no public single-conversation deletion API. Reset hides old context from the model; it does not erase stored prompts, tool results or child conversations.
 

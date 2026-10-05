@@ -90,12 +90,18 @@ required capabilities/remaining gaps in #33 have been verified.
      --backup VERIFIED_BACKUP --cursor RECORDED_ROWID
    ```
 
-5. Inspect `backup-manifest.json` and `import-receipt.json`; rehearse restoration
+5. Move every caller of the old HTTP `/prompt` and `/send` to `cron/jobs.json`
+   ([ADR 0018](../docs/adr/0018-tasks-without-prompt-api.md)): scripts print the
+   prompt or text instead of POSTing and become `command` of a `prompt`/`send`
+   job; their crontab entries move into `jobs.json`. Find them with
+   `grep -rl "7750/\(prompt\|send\)" WORKSPACE/skills` plus `crontab -l` and
+   `jobs.json` `exec` curl jobs. Review each diff before applying it.
+6. Inspect `backup-manifest.json` and `import-receipt.json`; rehearse restoration
    from the backup. Retain old SDK artifacts until a separate cleanup approval.
-6. Set `WORKING_DIR` to the imported target. Start the new service yourself,
+7. Set `WORKING_DIR` to the imported target. Start the new service yourself,
    initially in foreground (`npm start`).
    A brand-new, unimported workspace intentionally skips existing Messages rows.
-7. Run the explicitly live smoke only after approval:
+8. Run the explicitly live smoke only after approval:
 
    ```sh
    node --experimental-strip-types ops/smoke.ts --live --chat CHAT_GUID
@@ -103,10 +109,11 @@ required capabilities/remaining gaps in #33 have been verified.
 
    This makes a paid model request and sends a real message. Confirm DM/group/SMS,
    HEIC images, text/rich-text/files, native tools, model/thinking/reload, run/stop,
-   reminders/cron, background summaries, isolated prompts and read-only web views.
+   reminders/cron (including `command` jobs), background summaries, `send_message`
+   and read-only web views.
    Check sender permissions/focus and receipt states. Faux tests are not evidence
    of real-model judgment or actual recipient delivery.
-8. `WORKING_DIR=NEW_WORKSPACE node --experimental-strip-types src/cli.ts install`
+9. `WORKING_DIR=NEW_WORKSPACE node --experimental-strip-types src/cli.ts install`
    writes a new launchd plist exclusively; it does not load or restart anything.
    After stopping the foreground process yourself, inspect that plist and use
    `launchctl bootstrap gui/$(id -u) PLIST_PATH` yourself. Never load alongside

@@ -43,7 +43,7 @@ exports.createServiceBackend = () => {
 			const job = {
 				id: "fixture-cron",
 				enabled: true,
-				action: { type: "prompt", chatGuid: "chat", prompt: "Cron-only request" },
+				action: { type: "prompt", chatGuid: "chat", command: ["/bin/echo", "Cron-only request"] },
 			};
 			return {
 				...worker,
@@ -51,7 +51,7 @@ exports.createServiceBackend = () => {
 				listRuns: () => runs,
 				async runNow(id) {
 					if (id !== job.id) throw new Error("Missing job");
-					const run = { id: "fixture-run", jobId: id, status: "running" };
+					const run = { id: `fixture-run-${runs.length}`, jobId: id, status: "running" };
 					runs.unshift(run);
 					await config.execute(job, new AbortController().signal);
 					run.status = "success";

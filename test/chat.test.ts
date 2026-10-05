@@ -453,7 +453,7 @@ it("holds the storage lock and joins an in-flight send before closing", async ()
 	}
 });
 
-// #33 Phase 2: direct sends report each effect and reuse receipts, without an agent turn or retry queue.
+// #33 Phase 2: direct sends report each effect, reuse receipts and are recorded in the chat, without an agent turn.
 it("records direct text/file outcomes, rejects conflicting IDs and stops after uncertain text", async () => {
 	await writeFile(join(directory, "settings.json"), "{}"); // Explicit sends are not automatic replies.
 	const input = { chatGuid: "chat", requestId: "send-1", text: "report", filePath: "/fake/report.pdf" };
@@ -479,7 +479,15 @@ it("records direct text/file outcomes, rejects conflicting IDs and stops after u
 	expect(send).toHaveBeenCalledTimes(2);
 	expect(sendAttachment).toHaveBeenCalledTimes(2);
 	expect(faux.state.callCount).toBe(0);
-	expect(await agent.harness.snapshot(Chats, BACKGROUND_CONTEXT)).toBeUndefined();
+	// ADR 0018: the chat conversation records each attempted send once, without a model turn.
+	const chat = (await agent.harness.snapshot(Chats, BACKGROUND_CONTEXT))?.items.find(
+		(item) => item.chatGuid === "chat",
+	);
+	const conversation = chat && (await agent.harness.conversation(chat.conversationId, BACKGROUND_CONTEXT));
+	const records = JSON.stringify(await conversation?.entries({}, 100, undefined, BACKGROUND_CONTEXT));
+	expect(records.match(/sent message, sent/g)).toHaveLength(1);
+	expect(records).toContain("sent file, sent] /fake/report.pdf");
+	expect(records).toContain("sent message, unknown");
 });
 
 // #33 Phase 2: a partial direct send must not repeat successful or uncertain parts after close/reopen.

@@ -1,8 +1,9 @@
 import { schedulerBackend } from "./backend.ts";
 
+/** `command` runs an absolute executable; its stdout replaces `text` or `prompt`, and empty output skips the run. */
 export type CronAction =
-	| { type: "send"; chatGuid: string; text: string }
-	| { type: "prompt"; chatGuid: string; prompt: string }
+	| { type: "send"; chatGuid: string; text?: string; command?: string[] }
+	| { type: "prompt"; chatGuid: string; prompt?: string; command?: string[] }
 	| { type: "exec"; argv: string[]; cwd?: string };
 export interface CronJobConfig {
 	id: string;

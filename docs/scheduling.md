@@ -10,7 +10,10 @@ handling. Only the active worker schedules jobs; deployment shadow workers only
 validate and display the configuration.
 
 Supported actions are `send`, `prompt`, and `exec`. Exec jobs use an argv array
-with an absolute executable path and never invoke a shell. Jobs default to
+with an absolute executable path and never invoke a shell. `send` and `prompt`
+may set `command`, the same kind of argv: its stdout replaces `text` or `prompt`,
+and empty output skips the run. A `prompt` runs in a fresh task conversation; its
+sent answer is recorded in the chat conversation. Jobs default to
 `Asia/Shanghai`, reject overlapping runs, and append results to
 `WORKING_DIR/cron/runs.jsonl`.
 
