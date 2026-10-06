@@ -23,7 +23,6 @@ import { loadPrompt } from "./agent/prompt.ts";
 import { Runs, runRecord } from "./agent/run.ts";
 import { deliverScheduled, EXECUTION_KIND, Schedules, schedulingExtension } from "./agent/scheduling.ts";
 import { isReplyEnabled, readSettings } from "./config/settings.ts";
-import { BashProgress } from "./extensions/bash-progress.ts";
 import { memoryExtension } from "./extensions/memory.ts";
 import { messageExtension } from "./extensions/message.ts";
 import { ImageRead } from "./extensions/read-image.ts";
@@ -89,7 +88,6 @@ export async function startService(
 				? await options.extensions()
 				: [
 						CodingTools,
-						BashProgress,
 						ImageRead,
 						await memoryExtension(options.workingDir),
 						webExtension(),

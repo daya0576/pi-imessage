@@ -43,22 +43,10 @@ export function commandPreview(command: unknown) {
 	return characters.length > 120 ? `${characters.slice(0, 119).join("")}…` : screened;
 }
 
-/** Short purpose labels and query previews are screened separately from commands. */
-export function argumentSummary(arguments_: Record<string, unknown>, toolName?: string) {
-	const purpose = arguments_.description;
-	const label =
-		toolName === "bash"
-			? typeof purpose === "string" &&
-				!/secret|token|password|credential|authorization|api.?key|sk-[a-z0-9]|gh[pousr]_|github_pat_|bearer\s|https?:|@/i.test(
-					purpose,
-				)
-				? purpose.replace(/[\r\n\t]/g, " ").slice(0, 80)
-				: "执行命令"
-			: "";
-	const summary = Object.entries(arguments_)
-		.filter(
-			([key]) => key !== "timeout" && (toolName !== "bash" || !["command", "description"].includes(key)),
-		)
+/** Argument previews for non-bash tools; bash requests show only `commandPreview`. */
+export function argumentSummary(arguments_: Record<string, unknown>) {
+	return Object.entries(arguments_)
+		.filter(([key]) => key !== "timeout")
 		.map(([key, value]) => {
 			if (/secret|token|password|credential|authorization|api.?key/i.test(key)) return `${key}=[redacted]`;
 			if (typeof value === "number" || typeof value === "boolean") return `${key}=${value}`;
@@ -89,5 +77,4 @@ export function argumentSummary(arguments_: Record<string, unknown>, toolName?: 
 		})
 		.join(", ")
 		.slice(0, 400);
-	return [label, summary].filter(Boolean).join(" · ");
 }

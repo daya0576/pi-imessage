@@ -54,8 +54,9 @@ export async function startProgress(harness: Harness, workingDir: string, sender
 					type: "tool",
 					parents,
 					name: tool.name,
-					summary: argumentSummary(tool.arguments, tool.name),
-					...(tool.name === "bash" ? { commandPreview: commandPreview(tool.arguments.command) } : {}),
+					...(tool.name === "bash"
+						? { commandPreview: commandPreview(tool.arguments.command) }
+						: { summary: argumentSummary(tool.arguments) }),
 				}
 			: { phase: "request", type: "task", parents, name: task.kind };
 		notice.chatGuid = chatGuid;

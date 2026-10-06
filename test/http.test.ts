@@ -10,7 +10,6 @@ import { chatConversation } from "../src/agent/chats.ts";
 import { Sessions } from "../src/agent/health.ts";
 import { Schedules } from "../src/agent/scheduling.ts";
 import { startService } from "../src/main.ts";
-import { createReadCache } from "../src/web/cache.ts";
 import { startWeb } from "../src/web/server.ts";
 
 // #33 / ADR 0019: retired scheduling surfaces are gone; immediate sends and read-only views remain.
@@ -20,44 +19,6 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 	let web: Awaited<ReturnType<typeof startWeb>> | undefined;
 	try {
 		vi.spyOn(console, "warn").mockImplementation(() => {});
-		// Coalesce readers, retry an invalidated in-flight result, and never retain failures or oversized values.
-		const cache = createReadCache(2, 128);
-		let revision = 0;
-		const stale = Promise.withResolvers<string>();
-		const load = vi
-			.fn()
-			.mockImplementationOnce(() => stale.promise)
-			.mockResolvedValue("new");
-		const pending = [cache.read("shared", () => revision, load), cache.read("shared", () => revision, load)];
-		await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(1));
-		revision++;
-		stale.resolve("old");
-		expect(await Promise.all(pending)).toEqual(["new", "new"]);
-		expect(load).toHaveBeenCalledTimes(2);
-		await cache.read("shared", () => revision, load);
-		expect(load).toHaveBeenCalledTimes(2);
-		const failed = vi.fn().mockRejectedValueOnce(new Error("fixture failure")).mockResolvedValue("ok");
-		await expect(cache.read("failure", () => revision, failed)).rejects.toThrow("fixture failure");
-		expect(await cache.read("failure", () => revision, failed)).toBe("ok");
-		const large = vi.fn().mockResolvedValue("x".repeat(256));
-		await cache.read("large", () => revision, large);
-		await cache.read("large", () => revision, large);
-		expect(large).toHaveBeenCalledTimes(2);
-		const bounded = createReadCache(2);
-		const first = vi.fn().mockResolvedValue("first");
-		await bounded.read("first", () => 0, first);
-		await bounded.read(
-			"second",
-			() => 0,
-			async () => "second",
-		);
-		await bounded.read(
-			"third",
-			() => 0,
-			async () => "third",
-		);
-		await bounded.read("first", () => 0, first);
-		expect(first).toHaveBeenCalledTimes(2);
 		await writeFile(
 			join(directory, "settings.json"),
 			JSON.stringify({ chatAllowlist: { whitelist: ["*"], blacklist: [] } }),
@@ -217,7 +178,6 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 			},
 			BACKGROUND_CONTEXT,
 		);
-		const snapshots = vi.spyOn(agent.harness, "snapshot");
 		const overviewResponse = await fetch(`${base}/chat/data?view=overview`);
 		const overviewText = await overviewResponse.text();
 		const overview = JSON.parse(overviewText);
@@ -294,20 +254,15 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 		const refused = await fetch(base, { headers: { "Accept-Encoding": "gzip;q=0, *;q=1" } });
 		expect(refused.headers.get("content-encoding")).toBeNull();
 		expect(await refused.text()).toBe(uncompressedText);
-		const snapshotCount = snapshots.mock.calls.length;
-		await Promise.all([fetch(`${base}/chat/data?view=overview`), fetch(base)]);
-		expect(snapshots).toHaveBeenCalledTimes(snapshotCount);
 		const detail = await (await fetch(`${base}/chat/data?conversationId=${conversationId}`)).json();
 		expect(detail).toHaveProperty("agent");
 		expect(detail).toHaveProperty("live");
-		const countAfterDetail = snapshots.mock.calls.length;
 		const display = await (
 			await fetch(`${base}/chat/data?conversationId=${conversationId}&view=display`)
 		).json();
 		expect(display.chat.conversationId).toBe(conversationId);
 		expect(display).not.toHaveProperty("agent");
 		expect(display).not.toHaveProperty("live");
-		expect(snapshots).toHaveBeenCalledTimes(countAfterDetail);
 		await writeFile(
 			join(directory, "settings.json"),
 			JSON.stringify({

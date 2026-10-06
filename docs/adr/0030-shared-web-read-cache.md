@@ -1,6 +1,6 @@
 # 0030. Share a versioned web read cache
 
-Status: proposed
+Status: rejected (owner decided on 2026-10-06: a cold read takes about 40 ms, and every commit invalidated the cache anyway; the cache was removed)
 
 **Context.** The chat overview requests each conversation separately and repeats
 reads on refresh and navigation. Large native payloads include model-only data

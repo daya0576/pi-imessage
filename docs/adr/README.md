@@ -21,20 +21,20 @@ Accepted ADR files are never edited; this index records which ones are current.
 | [0012](0012-run-in-owned-conversation.md) | `/run` in an owned conversation | Active |
 | [0013](0013-thin-adapters-around-durable.md) | Thin adapters around Durable | Active; scheduler clause replaced by 0042 |
 | [0016](0016-process-http-transport.md) | One process-owned HTTP transport | Active |
-| [0017](0017-browser-cli-owned-scope.md) | Conversation-scoped browser CLI tool | Accepted, not implemented |
+| [0017](0017-browser-cli-owned-scope.md) | Conversation-scoped browser CLI tool | Accepted, to be implemented |
 | [0018](0018-tasks-without-prompt-api.md) | Ordinary `/stop`; no HTTP `/prompt` or `/send` | Active |
-| [0030](0030-shared-web-read-cache.md) | Shared web read cache | Proposed (implemented) |
 | [0036](0036-workspace-policy-and-neutral-service-id.md) | Workspace policy and neutral service ID | Active |
 | [0040](0040-chat-progress-notices.md) | Chat progress notices | Active; consolidates 0020–0028, 0031 |
 | [0041](0041-restart-and-recovery.md) | Restart and recovery | Active; consolidates 0037–0039 |
 | [0042](0042-background-schedules-and-workspace-extensions.md) | Background schedules and workspace extensions | Active; consolidates 0019, 0032–0035 |
 
-## Replaced
+## Replaced or rejected
 
 | ADR | Decision | Replaced by |
 |---|---|---|
 | [0014](0014-ephemeral-private-storage.md) | Ephemeral private storage | 0018 |
 | [0015](0015-ordinary-stop-keeps-native-inbox.md) | `/stop` keeps the native inbox | 0018 |
+| [0030](0030-shared-web-read-cache.md) | Shared web read cache | Rejected; removed |
 | [0019](0019-remove-scheduled-services.md) | Remove scheduled services | 0042 |
 | [0020](0020-chat-task-progress.md)–[0028](0028-command-preview-120.md) | Progress notice format | 0040 |
 | [0031](0031-quiet-compaction-progress.md) | Quiet six-hour compaction progress | 0040 |

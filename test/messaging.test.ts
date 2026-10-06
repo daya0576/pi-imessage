@@ -234,15 +234,14 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 			),
 		() => fauxAssistantMessage("private child result"),
 		() =>
-			fauxAssistantMessage(
-				fauxToolCall("bash", { command: "printf 'progress fixture'", description: "运行进度测试" }),
-				{ stopReason: "toolUse" },
-			),
+			fauxAssistantMessage(fauxToolCall("bash", { command: "printf 'progress fixture'" }), {
+				stopReason: "toolUse",
+			}),
 		(context) => {
 			const result = context.messages.findLast((message) => message.role === "toolResult");
 			expect(result?.toolName).toBe("bash");
 			expect(JSON.stringify(result)).toContain("progress fixture");
-			return fauxAssistantMessage(fauxToolCall("bash", { command: "exit 7", description: "测试失败标记" }), {
+			return fauxAssistantMessage(fauxToolCall("bash", { command: "exit 7" }), {
 				stopReason: "toolUse",
 			});
 		},
@@ -286,7 +285,6 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 	expect(progressText).toMatch(/✓ \[subagent\/tool\] read \(\d+\.\ds\)/);
 	expect(progressText).toContain("printf 'progress fixture'");
 	expect(progressText).not.toContain("(bash");
-	expect(progressText).not.toContain("运行进度测试");
 	expect(progressText).toContain("→ [tool] read: path=");
 	expect(progressText).toContain("→ [subagent/tool] read: path=");
 	expect(progressText).toMatch(/✓ \[tool\] bash \(\d+\.\ds\)/);
@@ -324,13 +322,6 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 	expect(commandPreview("curl example.com/path")).toBe("curl example．com/path");
 	expect(progressText).not.toContain("timeout=");
 	expect(progressText).not.toContain("https://");
-	expect(
-		argumentSummary({ command: "secret-command-marker", description: "搜索上海天气", timeout: 30 }, "bash"),
-	).toBe("搜索上海天气");
-	expect(
-		argumentSummary({ command: "secret-command-marker", description: "token=secret-token-marker" }, "bash"),
-	).toBe("执行命令");
-	expect(argumentSummary({ command: "printf hi" }, "bash")).toBe("执行命令");
 	expect(argumentSummary({ query: "来源 https://example.test/private" })).not.toContain("https://");
 	expect(notices.at(-1)).toEqual(["iMessage;-;dm", "image read"]);
 	const receipts = (await service.harness.snapshot(DirectSends, BACKGROUND_CONTEXT))?.requests ?? [];

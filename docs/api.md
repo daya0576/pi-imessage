@@ -37,12 +37,8 @@ requests; detail history and its older-page cursors are not reduced to 15
 messages. Existing `/chat/data` and conversation detail responses without these
 view parameters retain their native state shapes.
 
-Pages share a bounded process-local read cache (proposed ADR 0030). Every native
-commit changes its version; file-backed data checks inode, size and modification/
-change times on every request, including same-size edits. Concurrent reads share
-one load and retry if the version changes while loading. There is no fixed stale
-interval, persisted cache or cached model health response. Resolved agent choices
-are read directly, since registry changes need not produce a Durable commit.
+Every request reads current state directly; there is no server-side read cache
+(ADR 0030 was rejected).
 
 Pages load once and refresh only through the Refresh button, memory filtering/
 pagination or explicit navigation. There is no browser SSE connection, periodic
