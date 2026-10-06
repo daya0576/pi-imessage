@@ -38,7 +38,6 @@ export function workspaceExtension(reload: () => Promise<unknown>) {
 				description:
 					"Reload trusted workspace extensions and configuration without interrupting current calls or resetting deadlines. Invalid changes keep the previous definitions.",
 				parameters: Type.Object({}),
-				replay: "unsafe",
 				async execute() {
 					await reload();
 					return { content: [{ type: "text", text: "Workspace extensions and configuration reloaded." }] };

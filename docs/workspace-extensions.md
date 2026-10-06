@@ -8,6 +8,9 @@ directories with their configuration. The
 [system-context](../examples/workspace-extensions/system-context/) example loads
 an optional workspace summary into the prompt (ADR 0036).
 
+Tools without `replay` rerun after an interruption (ADR 0039). Declare
+`replay: "unsafe"` for an effect that must not repeat.
+
 ## Factory and reload
 
 Use a CommonJS factory (`module.exports`) and CommonJS local dependencies

@@ -104,7 +104,12 @@ export async function startService(
 			if (names.has(extension.name)) throw new Error(`Duplicate extension name: ${extension.name}`);
 			names.add(extension.name);
 		}
-		return extensions;
+		// ADR 0039: an interrupted tool reruns on recovery unless it declares `unsafe`.
+		return extensions.map((extension) =>
+			extension.tools
+				? { ...extension, tools: extension.tools.map((tool) => ({ ...tool, replay: tool.replay ?? "safe" })) }
+				: extension,
+		);
 	}
 	const settings = SettingsManager.create(options.workingDir, options.agentDir);
 	let activeExtensions: readonly WorkspaceExtension[] = await loadExtensions();
