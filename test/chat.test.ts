@@ -68,6 +68,16 @@ async function answered(submission: Submission) {
 	return record;
 }
 
+/** The reply-delivery section in effect after replaying system patches in order. */
+function replyDelivery(context: TranscriptContext) {
+	let text: string | undefined;
+	for (const message of context.messages) {
+		if (message.role !== "system" || !message.sections || !("reply-delivery" in message.sections)) continue;
+		text = message.sections["reply-delivery"] ?? undefined;
+	}
+	return text;
+}
+
 it("maps chats separately, passes source GUIDs, and sends only final text", async () => {
 	const requests: TranscriptContext[] = [];
 	const reply = (context: TranscriptContext) => {
@@ -162,7 +172,7 @@ it("admits all busy-chat additions at the next tool boundary without repeating c
 				.flatMap((message) => message.sections?.["chat-steer"] ?? []);
 			expect(sections).toHaveLength(1);
 			expect(sections[0]).toContain("newest explicit correction");
-			expect(sections[0]).toContain("Keep unrelated questions separate");
+			expect(sections[0]).toContain("Answer unrelated questions separately");
 			expect(sections[0]).toContain("Do not restart the task");
 			// A scripted answer verifies our wiring, not a real model's semantic judgment.
 			return fauxAssistantMessage(reply);
@@ -211,13 +221,10 @@ it("reconciles unsent answers with multiple senders and preserves the replaced d
 			const messages = JSON.stringify(context.messages);
 			expect(messages).toContain("from Alex]");
 			expect(messages).toContain("from Blair]");
-			expect(messages).toContain("Do not assume one person's message retracts another person's requirements");
-			const facts = context.messages
-				.filter((message) => message.role === "system")
-				.flatMap((message) => message.sections?.["reply-delivery"] ?? [])
-				.at(-1);
+			expect(messages).toContain("One person's message does not retract another person's requirements");
+			const facts = replyDelivery(context);
 			expect(facts).toContain(oldText);
-			expect(facts).toContain('"status":"unattempted"');
+			expect(facts).toContain(" unattempted: ");
 			nextStarted.resolve();
 			await finishNext.promise;
 			return fauxAssistantMessage(newText);
@@ -317,7 +324,18 @@ it("retains a held draft after reconciliation fails and the service reopens", as
 
 // #33 / ADR 0011: input after a transport claim cannot retract that send or overtake it.
 it("keeps an already claimed reply and sends the subsequent answer only after it settles", async () => {
-	faux.setResponses([fauxAssistantMessage("claimed answer"), fauxAssistantMessage("new answer")]);
+	faux.setResponses([
+		fauxAssistantMessage("claimed answer"),
+		(context) => {
+			expect(replyDelivery(context)).toMatch(/^- #\d+ sending: "claimed answer"$/m);
+			return fauxAssistantMessage("new answer");
+		},
+		(context) => {
+			// Sent answers are not listed.
+			expect(replyDelivery(context)).toContain("None. Recent final answers were sent.");
+			return fauxAssistantMessage("final answer");
+		},
+	]);
 	await answered(await agent.submit({ chatGuid: "chat", guid: "first", text: "Original." }));
 	const started = Promise.withResolvers<void>();
 	const finish = Promise.withResolvers<void>();
@@ -338,6 +356,8 @@ it("keeps an already claimed reply and sends the subsequent answer only after it
 			["chat", "claimed answer"],
 			["chat", "new answer"],
 		]);
+		await answered(await agent.submit({ chatGuid: "chat", guid: "third", text: "Third request." }));
+		expect(faux.state.callCount).toBe(3);
 	} finally {
 		finish.resolve();
 		await sending;
