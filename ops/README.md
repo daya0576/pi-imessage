@@ -152,14 +152,12 @@ the owner-selected unauthenticated bind `0.0.0.0:7750` (trusted networks only).
 A similarly named Pi web job does not control this service. Do not switch
 controllers, install launchd or upgrade Node during a routine restart.
 
-### 2. Choose the stop moment (ADR 0037)
+### 2. Record the baseline (ADR 0038)
 
-Do not wait for idle. From `/chat/data`, stop only when no `pi.tool` task is
-running and no receipt is `sending`; recheck immediately before launching the
-controller. Generations, queued submissions, scheduled occurrences and sleeping
-schedulers do not block. Record the counts of `sending` / `unknown` receipts
-(counts only, no chat text). Never reset cursors, delete state or replay
-uncertain sends. Do not use `/health/model`: it is a paid request.
+Restart at any time; no running work defers it. Before stopping, record the
+counts of `sending` / `unknown` receipts from `/chat/data` (counts only, no chat
+text). Never reset cursors, delete state or replay uncertain sends. Do not use
+`/health/model`: it is a paid request.
 
 ### 3. Run one private controller
 
@@ -228,8 +226,8 @@ launch the controller twice before the first outcome is known. Require:
 2. Fresh `Application starting`, `Agent ready`, `Web server listening`,
    `Messaging ready` and `Application started`; no startup error.
 3. Root and changed endpoints return 200; check UI changes in a browser.
-4. Interrupted work continues; scheduler deadlines are unchanged; `sending` /
-   `unknown` counts are unchanged apart from new sends.
+4. Interrupted work continues; scheduler deadlines are unchanged; receipt
+   counts change only by new sends and sends interrupted by the stop.
 
 On a timeout, lock, occupied port or startup failure, stop and report it. Do not
 force-kill, steal the lock, reinstall dependencies or restore a workspace snapshot.
