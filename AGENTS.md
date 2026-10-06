@@ -63,6 +63,9 @@ with the dependency version pinned in this project before adopting their APIs.
 
 ## Git
 
+- One conversation, one worktree and branch; create or reuse it before editing. Never edit the main checkout.
+- Reuse it after restart; never automatically delete a dirty worktree.
+- Merge and deploy serially; never start a second real message pipeline.
 - After each completed project change, run the required checks, deploy and verify as needed, then commit and push the intended changes to the tracking remote. The owner has given standing authorization; do not wait for another commit/push request.
 - Leave unrelated drafts, temporary files and credentials out of commits. Stop and report a rejected push; never force push.
 - Stage explicit paths; never `git add -A` or `git add .`.
