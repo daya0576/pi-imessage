@@ -8,7 +8,7 @@ A minimal, self-managing iMessage bot powered by [pi](https://github.com/earendi
 
 - **Messages**: DMs, SMS, and group chats, with sender identification and reply context. No BlueBubbles or webhook setup.
 - **Self-managing**: The agent builds its own tools, with web search, page fetch, and browser access through native tools and skills.
-- **Web UI**: Live chat history, scheduled tasks and results, logs, memory, and configuration.
+- **Web UI**: Chat history, native task state, scheduled jobs with their latest ten executions, logs, memory, and configuration.
 - **Memory**: Searchable, traceable records; corrections preserve history. See [structured memory](docs/memory.md).
 - **Quiet operation**: Results go to chat; diagnostics stay in local logs.
 
@@ -71,6 +71,33 @@ always logged. Priority: `blacklist[guid]` > `whitelist[guid]` > `blacklist["*"]
 When enabled, UI automation opens the conversation, pastes RTF, and sends it.
 With `markdown: true`, `**bold**` spans become bold text in Messages.
 
+### Native schedules
+
+Six-hour quiet chat compaction is a Durable background task. To enable the daily
+English card, add this startup-only setting and restart the service safely:
+
+```json
+{
+  "scheduledEnglish": {
+    "enabled": true,
+    "chatGuid": "iMessage;-;+11234567890",
+    "time": "07:45",
+    "historyFile": "/absolute/path/to/work-english-expressions/used.json"
+  }
+}
+```
+
+The clock uses Asia/Shanghai. Learning history is imported once, read-only;
+subsequent progress and generated cards live in Durable. Daily selection keeps
+at most two reviews and one eligible new expression per day, reviews first,
+and at most ten new expressions in a
+rolling thirty-day window, with at least three days between new-learning dates.
+The destination must remain reply-enabled. Saved sends use at-most-once receipts;
+`unknown` is never automatically retried. Missed timer slots do not create a
+backlog of historical cards; already admitted work and its outbox remain durable.
+See the read-only `/scheduled` page for all configured native jobs, their next
+deadline and the latest ten executions. Legacy cron files remain inert.
+
 ### Environment Variables
 
 All variables are optional.
@@ -84,14 +111,13 @@ All variables are optional.
 | `AGENT_IDLE_TIMEOUT_MS` | `120000` | Abort after this much continuous inactivity; model and tool events reset the timer |
 | `AGENT_MAX_PROMPT_DURATION_MS` | `1800000` | Absolute time limit for one prompt, independent of activity |
 
-### Scheduled Tasks and API
+### Web and API
 
-Configure recurring jobs in `WORKING_DIR/cron/jobs.json`, with `send`, `prompt`,
-or `exec` actions. See [scheduled tasks](docs/scheduling.md) for configuration
-and one-time reminders.
-
-The [HTTP API](docs/api.md) supports sending messages, triggering the agent,
-managing scheduled tasks, and checking model health.
+The [HTTP API](docs/api.md) provides read-only chat state and an explicit model
+health check. The agent sends files and extra messages with `send_message`.
+Only configured daily English and six-hour compaction schedules are supported.
+Arbitrary delayed/recurring prompts, reminders, background completion notifications
+and PT Automation remain unsupported; independent system jobs are not managed here.
 
 ## How It Works
 

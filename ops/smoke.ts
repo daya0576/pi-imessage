@@ -12,5 +12,5 @@ if (!args.includes("--live") || !args.includes("--chat") || !args[args.indexOf("
 	const result = await fetch(`${base}/prompt`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chatGuid, prompt: "Reply with: authorized migration smoke received.", requestId }) });
 	if (!result.ok) throw new Error(`Prompt admission failed: ${result.status}`);
 	console.log(await result.json());
-	console.log("Confirm exactly one reply on the destination device, then follow the remaining image/tools/scheduler/rollback checklist in ops/README.md.");
+	console.log("Confirm exactly one reply on the destination device, then follow the remaining image/tools/rollback checklist in ops/README.md.");
 }

@@ -27,6 +27,22 @@ it("reads existing settings without rewriting them and preserves allowlist prece
 			expect(isReplyEnabled(settings, "chat")).toBe(expected);
 			expect(settings.richText).toEqual({ enabled: true, markdown: false });
 		}
+		const scheduledEnglish = {
+			enabled: true,
+			chatGuid: "chat",
+			historyFile: join(directory, "used.json"),
+			time: "07:45",
+		};
+		await writeFile(join(directory, "settings.json"), JSON.stringify({ scheduledEnglish }));
+		expect((await readSettings(directory)).scheduledEnglish).toEqual(scheduledEnglish);
+		for (const invalid of [
+			{ ...scheduledEnglish, time: "25:00" },
+			{ ...scheduledEnglish, historyFile: "relative.json" },
+			{ ...scheduledEnglish, chatGuid: "" },
+		]) {
+			await writeFile(join(directory, "settings.json"), JSON.stringify({ scheduledEnglish: invalid }));
+			await expect(readSettings(directory)).rejects.toThrow("scheduledEnglish");
+		}
 		await writeFile(join(directory, "settings.json"), "{broken");
 		expect(isReplyEnabled(await readSettings(directory), "chat")).toBe(false);
 	} finally {

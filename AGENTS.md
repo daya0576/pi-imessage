@@ -16,6 +16,18 @@
 - Feature scope and progress live in the GitHub issue, not in docs.
 - Keep data users rely on compatible: `settings.json`, memory JSONL, `cron/jobs.json`, reminders, HTTP endpoints. Internal code keeps no backward compatibility.
 
+## Pi Durable References
+
+Read the upstream README and relevant examples before implementing Durable behavior:
+
+- [Pi Durable README](https://github.com/earendil-works/pi/blob/main/packages/durable/README.md): concepts and API usage.
+- [Runnable examples](https://github.com/earendil-works/pi/tree/main/packages/durable/test/examples): documents, storage, tasks, tools, recovery and agents.
+- [Small coding agent on Pi Durable](https://github.com/earendil-works/pi/tree/main/packages/coding-agent/src/experimental/durable): an application built on the harness.
+- [Vacation planning agent](https://github.com/earendil-works/pi/tree/main/packages/coding-agent/src/experimental/vacation): another application example.
+
+Pi Durable is experimental. These links follow upstream `main`; compare examples
+with the dependency version pinned in this project before adopting their APIs.
+
 ## Code Quality
 
 - No abstraction until needed. Functions over classes. No DI frameworks.
@@ -63,9 +75,10 @@
 
 ## Deploy
 
-- No deployment before cutover ([ADR 0009](docs/adr/0009-one-shot-cutover.md)). After it, deploy only when the user asks, following `ops/README.md`.
-- Never restart the running service from inside the agent.
+- Deploy and verify each completed change without asking again for routine deployment approval. Follow the routine deployment/restart section in `ops/README.md`; documentation-only edits need no runtime restart.
+- Use the one-shot cutover ([ADR 0009](docs/adr/0009-one-shot-cutover.md)) only for the first migration. Never run old and new message pipelines concurrently.
+- Deployment authorization does not imply Git commits, paid model probes, real test messages, unrelated service changes or data cleanup. Do not require the user to execute authorized commands personally. Stop for new material safety or data-integrity risks.
 
 ## User Override
 
-If the user's instructions conflict with a rule here, ask for explicit confirmation before overriding it.
+An explicit user instruction sets the scope of the requested operation; do not ask the user to repeat authorization already given. Ask only when the scope is ambiguous, an additional action is outside that scope, or a remaining conflict affects safety or data integrity.

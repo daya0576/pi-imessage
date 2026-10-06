@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { constants, createReadStream } from "node:fs";
 import {
@@ -15,6 +16,7 @@ import {
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { AssistantMessage, UserMessage } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
@@ -25,25 +27,28 @@ import { openHarness } from "../agent/harness.ts";
 import { openModels, readDefaults } from "../agent/models.ts";
 import { Deliveries } from "../agent/replies.ts";
 
+async function fileHash(path: string) {
+	const hash = createHash("sha256");
+	for await (const bytes of createReadStream(path)) hash.update(bytes);
+	return hash.digest("hex");
+}
+
 async function manifest(root: string) {
 	const result: Record<string, string> = {};
 	async function walk(directory: string) {
 		for (const entry of await readdir(directory, { withFileTypes: true })) {
+			if (directory === root && entry.name === "backup-manifest.json") continue;
 			const path = join(directory, entry.name);
 			// Old releases contain symlinks; they are copied as links, never followed.
 			if (entry.isSymbolicLink()) result[relative(root, path)] = `link:${await readlink(path)}`;
 			else if (entry.isDirectory()) await walk(path);
-			else if (entry.isFile()) {
-				const hash = createHash("sha256");
-				for await (const bytes of createReadStream(path)) hash.update(bytes);
-				result[relative(root, path)] = hash.digest("hex");
-			}
+			else if (entry.isFile()) result[relative(root, path)] = await fileHash(path);
 		}
 	}
 	await walk(root);
 	return Object.fromEntries(Object.entries(result).sort(([left], [right]) => left.localeCompare(right)));
 }
-// APFS clones: backup and staging copies of a large workspace take almost no extra disk space.
+// Node's forced clone returns ENOSYS on macOS; the best-effort flag silently makes full copies.
 const copyOptions = {
 	recursive: true,
 	force: false,
@@ -51,6 +56,15 @@ const copyOptions = {
 	verbatimSymlinks: true,
 	mode: constants.COPYFILE_FICLONE,
 };
+async function copyTree(source: string, target: string) {
+	if (process.platform === "darwin") {
+		// System cp uses APFS clones and preserves symlinks without following them.
+		await promisify(execFile)("/bin/cp", ["-cRPn", source, target]);
+	} else {
+		await cp(source, target, copyOptions);
+	}
+}
+
 function within(root: string, path: string) {
 	const part = relative(root, path);
 	return part === "" || (!part.startsWith(`..${sep}`) && part !== ".." && !isAbsolute(part));
@@ -63,6 +77,10 @@ export async function migrate(options: {
 	backup: string;
 	cursor: number;
 	defaults: AgentDefaults;
+	archiveExternalAttachments?: boolean;
+	allowMissingAttachments?: boolean;
+	/** Import an operator-verified, already frozen backup instead of creating another copy. */
+	reuseBackup?: boolean;
 }) {
 	const sourcePath = resolve(options.source);
 	const source = await realpath(sourcePath);
@@ -87,16 +105,22 @@ export async function migrate(options: {
 		)
 	)
 		throw new Error("Target already exists; import runs only once into a new directory");
-	const before = await manifest(source);
-	if (before["backup-manifest.json"] || Object.keys(before).some((file) => file.startsWith(`durable${sep}`)))
-		throw new Error("Source already contains migration/Durable data");
-	await mkdir(backup, { mode: 0o700 });
-	for (const entry of await readdir(source)) await cp(join(source, entry), join(backup, entry), copyOptions);
 	if (
-		JSON.stringify(await manifest(backup)) !== JSON.stringify(before) ||
-		JSON.stringify(await manifest(source)) !== JSON.stringify(before)
+		(await readdir(source)).some((name) =>
+			["backup-manifest.json", "durable", "imported-external-attachments"].includes(name),
+		)
 	)
-		throw new Error("Backup verification failed or source changed; no import performed");
+		throw new Error("Source already contains migration/Durable data");
+	const before = await manifest(options.reuseBackup ? backup : source);
+	if (!options.reuseBackup) {
+		await mkdir(backup, { mode: 0o700 });
+		for (const entry of await readdir(source)) await copyTree(join(source, entry), join(backup, entry));
+		if (
+			JSON.stringify(await manifest(backup)) !== JSON.stringify(before) ||
+			JSON.stringify(await manifest(source)) !== JSON.stringify(before)
+		)
+			throw new Error("Backup verification failed or source changed; no import performed");
+	}
 	await writeFile(
 		join(backup, "backup-manifest.json"),
 		JSON.stringify({ source, cursor: options.cursor, files: before }, null, 2),
@@ -105,8 +129,14 @@ export async function migrate(options: {
 	let owner: Awaited<ReturnType<typeof openHarness>> | undefined;
 	let messages = 0;
 	let chats = 0;
+	const archivedAttachments: Record<string, { file: string; sha256: string }> = {};
+	const missingAttachments = new Set<string>();
 	try {
-		await cp(backup, stage, copyOptions);
+		await mkdir(stage, { mode: 0o700 });
+		// Keep old backup trees only in the verified backup, not in the new workspace.
+		for (const entry of await readdir(backup)) {
+			if (entry !== "backups") await copyTree(join(backup, entry), join(stage, entry));
+		}
 		owner = await openHarness(stage, createModels(), [], {});
 		for (const entry of await readdir(backup, { withFileTypes: true })) {
 			if (!entry.isDirectory()) continue;
@@ -139,24 +169,49 @@ export async function migrate(options: {
 				)
 					throw new Error(`Invalid legacy message: ${entry.name}:${index}`);
 				const paths: string[] = [];
+				const missing: string[] = [];
 				for (const attachment of row.attachments) {
 					if (typeof attachment !== "string") throw new Error("Invalid attachment path");
 					const requested = isAbsolute(attachment) ? attachment : resolve(source, attachment);
 					const path = within(sourcePath, requested)
 						? resolve(source, relative(sourcePath, requested))
 						: requested;
-					if (!within(source, path)) throw new Error(`Archive external attachment before import: ${path}`);
-					const name = `${createHash("sha256").update(relative(source, path)).digest("hex").slice(0, 16)}-${basename(path)}`;
+					let resolved: string;
+					try {
+						resolved = await realpath(path);
+					} catch (error) {
+						if (!options.allowMissingAttachments || (error as NodeJS.ErrnoException).code !== "ENOENT")
+							throw error;
+						missing.push(attachment);
+						missingAttachments.add(attachment);
+						continue;
+					}
+					const name = `${createHash("sha256").update(resolved).digest("hex").slice(0, 16)}-${basename(resolved)}`;
+					let archived = join(backup, relative(source, resolved));
+					if (!within(source, resolved)) {
+						if (!options.archiveExternalAttachments)
+							throw new Error(`Archive external attachment before import: ${path}`);
+						const file = join("imported-external-attachments", name);
+						archived = join(backup, file);
+						if (!archivedAttachments[resolved]) {
+							const sha256 = await fileHash(resolved);
+							await mkdir(dirname(archived), { recursive: true });
+							await copyFile(resolved, archived, constants.COPYFILE_FICLONE | constants.COPYFILE_EXCL);
+							if ((await fileHash(archived)) !== sha256 || (await fileHash(resolved)) !== sha256)
+								throw new Error("External attachment changed during backup");
+							archivedAttachments[resolved] = { file, sha256 };
+						}
+					}
 					const directory = join(stage, "attachments", encodeURIComponent(entry.name));
 					await mkdir(directory, { recursive: true });
-					await copyFile(
-						join(backup, relative(source, path)),
-						join(directory, name),
-						constants.COPYFILE_FICLONE,
-					);
+					await copyFile(archived, join(directory, name), constants.COPYFILE_FICLONE);
 					paths.push(join(target, "attachments", encodeURIComponent(entry.name), name));
 				}
-				const content = [row.text ?? "", ...paths.map((path) => `[Attachment: ${path}]`)]
+				const content = [
+					row.text ?? "",
+					...paths.map((path) => `[Attachment: ${path}]`),
+					...missing.map((path) => `[Missing attachment: ${path}]`),
+				]
 					.filter(Boolean)
 					.join("\n");
 				const model: UserMessage | AssistantMessage = row.fromAgent
@@ -184,7 +239,7 @@ export async function migrate(options: {
 						requestId: `import:${index}`,
 						entry: {
 							kind: row.fromAgent ? AssistantEntry.kind : UserEntry.kind,
-							data: { legacy: true, original: JSON.parse(line) },
+							data: { legacy: true, original: JSON.parse(line), missingAttachments: missing },
 							model: [model],
 						},
 					},
@@ -205,10 +260,38 @@ export async function migrate(options: {
 		}, BACKGROUND_CONTEXT);
 		await owner.close();
 		owner = undefined;
+		const backupManifest = JSON.stringify(
+			{
+				source,
+				cursor: options.cursor,
+				files: {
+					...before,
+					...Object.fromEntries(Object.values(archivedAttachments).map(({ file, sha256 }) => [file, sha256])),
+				},
+				archivedAttachments,
+				missingAttachments: [...missingAttachments],
+				reusedBackup: options.reuseBackup ?? false,
+			},
+			null,
+			2,
+		);
+		await writeFile(join(backup, "backup-manifest.json"), backupManifest);
+		await writeFile(join(stage, "backup-manifest.json"), backupManifest);
 		await writeFile(
 			join(stage, "import-receipt.json"),
 			JSON.stringify(
-				{ source, backup, cursor: options.cursor, messages, chats, completedAt: new Date().toISOString() },
+				{
+					source,
+					backup,
+					cursor: options.cursor,
+					messages,
+					chats,
+					archivedAttachments,
+					missingAttachments: [...missingAttachments],
+					reusedBackup: options.reuseBackup ?? false,
+					excludedWorkspaceDirectories: ["backups"],
+					completedAt: new Date().toISOString(),
+				},
 				null,
 				2,
 			),
@@ -226,10 +309,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
 	void (async () => {
 		const values: Record<string, string> = {};
 		const args = process.argv.slice(2);
-		for (let index = 0; index < args.length; index += 2) {
+		for (let index = 0; index < args.length; index++) {
+			if (["--archive-external-attachments", "--allow-missing-attachments"].includes(args[index])) {
+				values[args[index].slice(2)] = "true";
+				continue;
+			}
 			if (!["--source", "--target", "--backup", "--cursor"].includes(args[index]) || !args[index + 1])
 				throw new Error("Invalid import arguments");
 			values[args[index].slice(2)] = args[index + 1];
+			index++;
 		}
 		if (!["source", "target", "backup", "cursor"].every((key) => values[key]))
 			throw new Error("Source, target, backup and cursor are required");
@@ -243,6 +331,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
 					backup: values.backup,
 					cursor: Number(values.cursor),
 					defaults: await readDefaults(models, values.source, agentDir),
+					archiveExternalAttachments: values["archive-external-attachments"] === "true",
+					allowMissingAttachments: values["allow-missing-attachments"] === "true",
 				}),
 			),
 		);

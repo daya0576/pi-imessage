@@ -66,17 +66,21 @@ it("runs each command once by source GUID and replies without the model", async 
 	await agent.command({ chatGuid: "chat", guid: "help", text: "/help" });
 	await agent.command({ chatGuid: "chat", guid: "stop", text: "/stop" });
 	await agent.command({ chatGuid: "chat", guid: "busy-run", text: "/run soon" });
+	const reset = { chatGuid: "chat", guid: "reset", text: "/new" };
+	await agent.command(reset);
+	await agent.command(reset);
 	expect(replies()).toEqual([
 		"Thinking: high (this chat only)",
 		expect.stringMatching(/thinking: high\nRun: none$/),
 		expect.stringContaining("/stop - stop the current work or /run"),
 		"Nothing is running.",
 		expect.stringContaining("Usage: /run"),
+		"0 msgs - in 0 out 0 ?/128.0k\nModel: faux/faux-1, thinking: high",
 	]);
 	expect(replies()[2]).not.toContain("/run-stop");
 	await writeFile(join(directory, "settings.json"), "{}");
 	await agent.command({ chatGuid: "disabled", guid: "logged", text: "/new" });
-	expect(send).toHaveBeenCalledTimes(5);
+	expect(send).toHaveBeenCalledTimes(6);
 	expect(await chatEntries("disabled")).toContain("/new");
 	expect(faux.state.callCount).toBe(0);
 });
@@ -132,6 +136,17 @@ it("runs in a fork of the chat, routes ordinary messages to it and records it in
 	);
 	await agent.deliver();
 	expect(replies().at(-1)).toBe("back in the chat");
+	expect(faux.state.callCount).toBe(5);
+
+	await agent.command({ chatGuid: "chat", guid: "before-reset", text: "/status" });
+	const before = replies().at(-1);
+	const totals = before?.match(/in \S+ out \S+/)?.[0];
+	expect(totals).toBeDefined();
+	expect(before).toMatch(/\d+\.\d+%\/128\.0k/);
+	await agent.command({ chatGuid: "chat", guid: "reset", text: "/new" });
+	expect(replies().at(-1)).toBe(`0 msgs - ${totals} ?/128.0k\n${before?.split("\n")[1]}`);
+	await agent.command({ chatGuid: "chat", guid: "after-reset", text: "/status" });
+	expect(replies().at(-1)).toBe(`${replies().at(-2)}\nRun: none`);
 	expect(faux.state.callCount).toBe(5);
 });
 

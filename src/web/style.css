@@ -1,0 +1,543 @@
+:root {
+	color-scheme: dark;
+	--nav-width: 160px;
+	--page-space: 32px;
+	--bg: #111;
+	--surface: #1a1a1a;
+	--border: #292929;
+	--text: #ccc;
+	--muted: #888;
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	background: var(--bg);
+	color: var(--text);
+	font: 13px / 1.6 monospace;
+	display: flex;
+	height: 100dvh;
+	overflow: hidden;
+}
+
+* {
+	scrollbar-width: thin;
+	scrollbar-color: #333 transparent;
+}
+
+a {
+	color: inherit;
+	text-underline-offset: 3px;
+}
+
+.app-nav {
+	width: var(--nav-width);
+	flex: 0 0 var(--nav-width);
+	padding: var(--page-space) 12px;
+	border-right: 1px solid var(--border);
+	overflow-y: auto;
+}
+
+.app-nav a {
+	display: block;
+	margin: 0 0 4px;
+	padding: 8px 12px;
+	color: var(--muted);
+	line-height: 24px;
+	white-space: nowrap;
+	text-decoration: none;
+	border-radius: 4px;
+}
+
+.app-nav a:hover {
+	color: #eee;
+	background: #191919;
+}
+
+.app-nav a.active {
+	color: #eee;
+	background: #222;
+}
+
+:focus-visible {
+	outline: 2px solid #aaa;
+	outline-offset: 2px;
+}
+
+.content {
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+	padding: var(--page-space);
+	overflow: auto;
+}
+
+.chat-list {
+	width: 220px;
+	flex: 0 0 220px;
+	padding: var(--page-space) 16px;
+	border-left: 1px solid var(--border);
+	overflow-y: auto;
+}
+
+.chat-list a {
+	display: block;
+	color: inherit;
+	text-decoration: none;
+	line-height: 2;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	opacity: 0.55;
+}
+
+.chat-list a:hover,
+.chat-list a.active {
+	opacity: 1;
+}
+
+h1,
+h2,
+h3,
+strong {
+	font: inherit;
+}
+
+h1,
+h2,
+h3 {
+	margin: 0;
+}
+
+button,
+input,
+select {
+	font: inherit;
+	color: inherit;
+	background: transparent;
+	border: 1px solid #444;
+	border-radius: 3px;
+	padding: 5px 8px;
+	min-width: 0;
+	max-width: 100%;
+}
+
+select {
+	background: var(--bg);
+}
+
+button,
+summary {
+	cursor: pointer;
+}
+
+button:hover {
+	color: #eee;
+	border-color: #777;
+}
+
+.page-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	margin-bottom: 20px;
+}
+
+.connection {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	color: var(--muted);
+	font-size: 11px;
+}
+
+.toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	align-items: end;
+	margin-bottom: 20px;
+}
+
+.toolbar label {
+	display: grid;
+	gap: 4px;
+	min-width: 0;
+}
+
+.toolbar .search {
+	flex: 1 1 220px;
+}
+
+.toolbar select {
+	max-width: 200px;
+}
+
+.card {
+	max-height: min(560px, 70dvh);
+	overflow: auto;
+	background: var(--surface);
+	margin-bottom: 24px;
+	scroll-margin-top: 20px;
+}
+
+.card-header {
+	padding: 12px 16px;
+	border-bottom: 1px solid var(--border);
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.card-header a {
+	text-decoration: none;
+}
+
+.meta {
+	font-size: 11px;
+	opacity: 0.5;
+}
+
+.reply-state {
+	white-space: nowrap;
+	opacity: 0.55;
+}
+
+.card-messages,
+.card-content {
+	padding: 14px 16px;
+}
+
+.card-messages {
+	max-width: 100%;
+	overflow-x: auto;
+}
+
+body.page-chat:not(.conversation-detail) .card-messages {
+	max-height: 260px;
+	overflow: auto;
+}
+
+table {
+	border-collapse: collapse;
+	width: 100%;
+}
+
+td,
+th {
+	vertical-align: top;
+	padding: 2px 0;
+	text-align: left;
+	font-weight: normal;
+}
+
+.c-fix {
+	white-space: nowrap;
+	padding-right: 8px;
+	width: 1%;
+}
+
+.c-sender {
+	text-align: right;
+}
+
+.c-time,
+.c-source,
+.c-channel {
+	opacity: 0.55;
+}
+
+.c-msg {
+	min-width: 180px;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.message-detail summary {
+	list-style: none;
+}
+
+.message-detail summary:hover {
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+
+.message-detail[open] summary {
+	opacity: 0.5;
+	margin-bottom: 8px;
+}
+
+pre {
+	font: inherit;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	margin: 0;
+}
+
+.muted,
+.empty {
+	opacity: 0.55;
+}
+
+.empty {
+	padding: 12px 0;
+}
+
+#notice {
+	border-left: 1px solid #888;
+	padding-left: 12px;
+}
+
+.native-state {
+	margin-top: 24px;
+	opacity: 0.65;
+}
+
+.native-state > pre,
+.record-details > pre {
+	max-height: min(420px, 50dvh);
+	overflow: auto;
+	margin-top: 12px;
+}
+
+.pagination {
+	display: flex;
+	gap: 16px;
+	margin: 16px 0;
+}
+
+.memory-record {
+	max-height: min(560px, 70dvh);
+	overflow: auto;
+	background: var(--surface);
+	padding: 12px 16px;
+	margin-bottom: 6px;
+	overflow-wrap: anywhere;
+}
+
+.row-head {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: space-between;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+
+.memory-text {
+	white-space: pre-wrap;
+	margin: 8px 0;
+}
+
+.record-details {
+	margin-top: 8px;
+}
+
+.record-details-icon {
+	width: max-content;
+	margin-left: auto;
+	padding: 0 4px;
+	list-style: none;
+	opacity: 0.55;
+}
+
+.record-details-icon::-webkit-details-marker {
+	display: none;
+}
+
+.record-details-icon:hover {
+	opacity: 1;
+}
+
+.counts {
+	margin-bottom: 16px;
+	opacity: 0.55;
+}
+
+.setting-table th,
+.setting-table td {
+	padding: 8px 16px;
+	border-bottom: 1px solid var(--border);
+}
+
+.setting-table th {
+	width: 180px;
+	opacity: 0.55;
+}
+
+.setting-table ul {
+	padding-left: 16px;
+	margin: 0;
+}
+
+.schedule-row > .card-content {
+	overflow-x: auto;
+}
+
+body.page-logs #view {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-height: 0;
+	gap: 16px;
+}
+
+body.page-logs .content {
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+body.page-logs .card {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	margin: 0;
+	overflow: hidden;
+}
+
+body.page-logs .card-content {
+	overflow: auto;
+	flex: 1;
+}
+
+body.page-logs .native-state {
+	flex: 0 0 auto;
+	max-height: 30%;
+	overflow: auto;
+}
+
+.task-table td,
+.task-table th {
+	padding: 4px 12px 4px 0;
+}
+
+.task-tree {
+	list-style: none;
+	margin: 4px 0;
+	padding-left: 24px;
+	border-left: 1px solid var(--border);
+}
+
+.task-root {
+	padding: 14px 16px;
+	border-left: 0;
+}
+
+.task-tree li {
+	margin: 4px 0;
+}
+
+.task-tree details > pre {
+	padding: 8px 0 8px 16px;
+}
+
+.schedule-row {
+	background: var(--surface);
+	margin-bottom: 6px;
+	overflow-x: auto;
+}
+
+.schedule-summary {
+	display: grid;
+	grid-template-columns: 16px minmax(160px, 1fr) minmax(400px, 2fr) minmax(240px, 1.2fr) minmax(100px, 0.6fr);
+	min-width: 980px;
+	align-items: center;
+	gap: 10px;
+	padding: 12px 16px;
+	list-style: none;
+}
+
+.schedule-summary::-webkit-details-marker {
+	display: none;
+}
+
+.schedule-summary::before {
+	content: "+";
+	opacity: 0.55;
+}
+
+.schedule-row[open] > .schedule-summary::before {
+	content: "-";
+}
+
+.schedule-name,
+.schedule-next,
+.schedule-last,
+.schedule-status {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.schedule-next,
+.schedule-last,
+.schedule-status {
+	opacity: 0.55;
+	white-space: nowrap;
+}
+
+[hidden] {
+	display: none;
+}
+
+@media (max-width: 900px) {
+	.chat-list {
+		display: none;
+	}
+}
+
+@media (max-width: 600px) {
+	:root {
+		--page-space: 16px;
+	}
+
+	body {
+		flex-direction: column;
+	}
+
+	.app-nav {
+		width: 100%;
+		flex: 0 0 57px;
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		padding: 8px 12px;
+		border-right: 0;
+		border-bottom: 1px solid var(--border);
+		overflow-x: auto;
+		overflow-y: hidden;
+	}
+
+	.app-nav a {
+		flex: 0 0 auto;
+		margin: 0;
+		padding: 8px 12px;
+	}
+
+	.card-header {
+		gap: 8px;
+		overflow-wrap: anywhere;
+	}
+
+	.c-time,
+	.c-source {
+		display: none;
+	}
+
+	.page-header {
+		gap: 8px;
+	}
+
+	.setting-table th {
+		width: 100px;
+	}
+}

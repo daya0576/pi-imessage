@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -6,7 +6,11 @@ import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { expect, it, vi } from "vitest";
 import { compactionReply } from "../src/agent/commands.ts";
+import { DirectSends } from "../src/agent/direct-send.ts";
+import { applyEnglish, parseEnglishAnswer, planEnglish, readLearningHistory } from "../src/agent/english.ts";
+import { EnglishLearning, ScheduledOutbox, Schedules } from "../src/agent/scheduling.ts";
 import { startService } from "../src/main.ts";
+import { readSchedules } from "../src/web/schedules.ts";
 
 // #33: host scheduling stays quiet, native no-ops do not infer, and admission failures preserve context.
 it("schedules quiet native compaction, skips empty/reset chats and preserves context on failure", async () => {
@@ -80,9 +84,236 @@ it("schedules quiet native compaction, skips empty/reset chats and preserves con
 		expect(compactionReply(completed)).toBe("Compaction result unavailable.");
 		await conversation.reset(undefined, BACKGROUND_CONTEXT);
 		expect(await agent.compact()).toEqual([]);
+		await agent.close();
+
+		// #33 / ADR 0032: native deadlines, learning and the outbox survive reopening.
+		const scheduledDir = join(directory, "scheduled");
+		await mkdir(scheduledDir);
+		const source = join(scheduledDir, "used.json");
+		const original = JSON.stringify({
+			entries: [
+				{
+					date: "2026-10-06",
+					expressions: ["One", "Two", "Three", "Four"],
+					paragraph: "One Two Three Four. Original paragraph.",
+				},
+			],
+			reviews: {},
+			extra: { retained: true },
+		});
+		await writeFile(source, original);
+		const settings = {
+			chatAllowlist: { whitelist: ["*"], blacklist: [] },
+			scheduledEnglish: {
+				enabled: true,
+				chatGuid: "english-chat",
+				time: "07:45",
+				historyFile: source,
+			},
+		};
+		await writeFile(join(scheduledDir, "settings.json"), JSON.stringify(settings));
+		let now = Date.parse("2026-10-07T07:40:00+08:00");
+		vi.spyOn(Date, "now").mockImplementation(() => now);
+		const scheduledOptions = {
+			workingDir: scheduledDir,
+			agentDir: join(scheduledDir, "agent"),
+			runtime: { models, defaults: { model: { provider: model.provider, modelId: model.id } } },
+			extensions: () => [],
+			send,
+			sendAttachment: vi.fn(),
+		};
+		agent = await startService(scheduledOptions);
+		const jobs = (await agent.harness.snapshot(Schedules, BACKGROUND_CONTEXT))?.items;
+		const english = jobs?.find((job) => job.kind === "english");
+		const compact = jobs?.find((job) => job.kind === "compaction");
+		if (!english || !compact) throw new Error("Missing native jobs");
+		const deadline = await agent.harness.getTask(english.taskId, BACKGROUND_CONTEXT);
+		expect(deadline).toMatchObject({
+			background: true,
+			state: { checkpoint: { phase: "sleep", at: Date.parse("2026-10-07T07:45:00+08:00") } },
+		});
+		const imported = (
+			await agent.harness.snapshot(EnglishLearning, english.conversationId, BACKGROUND_CONTEXT)
+		)?.history;
+		if (!imported) throw new Error("Missing learning history");
+		expect(imported.extra).toEqual({ retained: true });
+		const plan = planEnglish(imported, "2026-10-07");
+		expect(plan.reviews.map((review) => review.expression)).toEqual(["One", "Two"]);
+		expect(plan.newExpression).toBe(false);
+		expect(() => parseEnglishAnswer(JSON.stringify({ reviews: [], newExpression: null }), plan)).toThrow();
+		const reviewAnswer = {
+			reviews: plan.reviews.map((review) => ({ expression: review.expression, meaning: "复习释义" })),
+			newExpression: null,
+		};
+		const copy = structuredClone(imported);
+		const card = applyEnglish(copy, plan, reviewAnswer);
+		expect(card.split("Original paragraph.")).toHaveLength(2); // Printed exactly once for the source card.
+		expect(copy.reviews["2026-10-06|four"]).toBeUndefined(); // Unshown expressions are not completed.
+		expect(copy.reviews["2026-10-06|one"].completedDays).toEqual([1]);
+		const newPlan = planEnglish({ entries: [], reviews: {} }, "2026-10-07");
+		const newAnswer = parseEnglishAnswer(
+			JSON.stringify({
+				reviews: [],
+				newExpression: {
+					expression: "Let's align on this.",
+					meaning: "我们对齐一下",
+					paragraph: "Let's align on this. What do you need from me?",
+				},
+			}),
+			newPlan,
+		);
+		const newHistory = { entries: [], reviews: {} };
+		applyEnglish(newHistory, newPlan, newAnswer);
+		expect(planEnglish(newHistory, "2026-10-08").newExpression).toBe(false);
+		const quota = {
+			entries: Array.from({ length: 10 }, (_, index) => ({
+				date: "2026-10-04",
+				expressions: [`Expression ${index}`],
+				paragraph: "Original.",
+			})),
+			reviews: {},
+		};
+		expect(planEnglish(quota, "2026-10-08").newExpression).toBe(false);
+
+		await agent.close();
+		const manualRun = { jobId: "compact-chats", requestId: "fixture-manual-once" };
+		agent = await startService({ ...scheduledOptions, runScheduled: manualRun });
+		agent.harness.resume();
+		await vi.waitFor(
+			async () => {
+				if (!agent) throw new Error("Missing service");
+				const maintenance = (await readSchedules(agent.harness)).jobs.find(
+					(job) => job.kind === "compaction",
+				);
+				expect(maintenance?.runs[0].status).toBe("completed");
+				expect(maintenance?.nextAt).toBe(Date.parse("2026-10-07T13:40:00+08:00"));
+			},
+			{ timeout: 5000 },
+		);
+		await agent.close();
+		agent = await startService({ ...scheduledOptions, runScheduled: manualRun });
+		expect(
+			(await readSchedules(agent.harness)).jobs.find((job) => job.kind === "compaction")?.runs,
+		).toHaveLength(1);
+		await agent.close();
+		now = Date.parse("2026-10-07T07:46:00+08:00");
+		faux.setResponses([fauxAssistantMessage(JSON.stringify(reviewAnswer))]);
+		agent = await startService(scheduledOptions);
+		agent.harness.resume();
+		await agent.harness.waitForIdle(BACKGROUND_CONTEXT); // Does not wait for the sleeping scheduler.
+		await vi.waitFor(
+			async () =>
+				expect(
+					(await agent?.harness.snapshot(EnglishLearning, english.conversationId, BACKGROUND_CONTEXT))?.cards[
+						"2026-10-07"
+					],
+				).toBeDefined(),
+			{ timeout: 5000 },
+		);
+		expect((await agent.harness.snapshot(ScheduledOutbox, BACKGROUND_CONTEXT))?.items).toHaveLength(1);
+		expect(await readFile(source, "utf8")).toBe(original);
+		const calls = faux.state.callCount;
+		await agent.close();
+		agent = await startService(scheduledOptions);
+		expect(
+			(await agent.harness.snapshot(Schedules, BACKGROUND_CONTEXT))?.items.find(
+				(job) => job.kind === "english",
+			)?.taskId,
+		).toBe(english.taskId);
+		send.mockClear();
+		await agent.deliver();
+		expect(send).toHaveBeenCalledTimes(1);
+		expect(send.mock.calls[0]).toEqual(["english-chat", card]);
+		await agent.deliver();
+		expect(send).toHaveBeenCalledTimes(1);
+		expect(faux.state.callCount).toBe(calls);
+		let view = await readSchedules(agent.harness);
+		expect(view.jobs.find((job) => job.kind === "english")?.runs[0].delivery).toBe("sent");
+
+		// An interrupted receipt is not replayed, even when its outbox item remains.
+		await agent.harness.commit(async (tx) => {
+			(await tx.doc(DirectSends)).requests[0].textStatus = "sending";
+			(await tx.doc(ScheduledOutbox)).items.push({
+				chatGuid: "english-chat",
+				requestId: `scheduled:${english.id}:2026-10-07`,
+				text: card,
+			});
+		}, BACKGROUND_CONTEXT);
+		await agent.close();
+		agent = await startService(scheduledOptions);
+		await agent.deliver();
+		expect(send).toHaveBeenCalledTimes(1);
+		view = await readSchedules(agent.harness);
+		expect(view.jobs.find((job) => job.kind === "english")?.runs[0].delivery).toBe("unknown");
+		await agent.close();
+
+		// Missing multiple days before today's slot waits; no historical English card is generated.
+		now = Date.parse("2026-10-10T07:40:00+08:00");
+		agent = await startService(scheduledOptions);
+		agent.harness.resume();
+		await vi.waitFor(
+			async () =>
+				expect(await agent?.harness.getTask(english.taskId, BACKGROUND_CONTEXT)).toMatchObject({
+					state: { checkpoint: { phase: "sleep", at: Date.parse("2026-10-10T07:45:00+08:00") } },
+				}),
+			{ timeout: 5000 },
+		);
+		expect(faux.state.callCount).toBe(calls);
+		await vi.waitFor(
+			async () => {
+				if (!agent) throw new Error("Missing service");
+				const maintenance = (await readSchedules(agent.harness)).jobs.find(
+					(job) => job.kind === "compaction",
+				);
+				expect(maintenance?.phase).toBe("sleep");
+				expect(maintenance?.runs[0].status).toBe("completed");
+			},
+			{ timeout: 5000 },
+		);
+		await agent.close();
+		settings.scheduledEnglish.enabled = false;
+		await writeFile(join(scheduledDir, "settings.json"), JSON.stringify(settings));
+		for (let index = 0; index < 12; index++) {
+			now += 6 * 3600000;
+			agent = await startService(scheduledOptions);
+			agent.harness.resume();
+			await vi.waitFor(
+				async () => {
+					if (!agent) throw new Error("Missing service");
+					const current = await readSchedules(agent.harness);
+					expect(current.jobs.find((job) => job.kind === "compaction")?.phase).toBe("sleep");
+					expect(current.jobs.find((job) => job.kind === "compaction")?.runs[0]).toMatchObject({
+						status: "completed",
+						input: { startedAt: now },
+					});
+				},
+				{ timeout: 5000 },
+			);
+			await agent.close();
+		}
+		agent = await startService(scheduledOptions);
+		view = await readSchedules(agent.harness);
+		expect(view.jobs.find((job) => job.kind === "compaction")?.runs).toHaveLength(10);
+		expect(view.recent).toHaveLength(10);
+		expect(view.recent.map((run) => run.id)).toEqual(view.recent.map((run) => run.id).sort((a, b) => b - a));
+		expect(faux.state.callCount).toBe(calls);
+		expect(send).toHaveBeenCalledTimes(1); // Maintenance remains quiet.
+		await agent.harness.abortTask(compact.taskId, BACKGROUND_CONTEXT);
+		await agent.harness.waitForTask(compact.taskId, BACKGROUND_CONTEXT);
+		await agent.close();
+		agent = await startService(scheduledOptions);
+		expect((await readSchedules(agent.harness)).jobs.find((job) => job.kind === "compaction")?.status).toBe(
+			"aborted",
+		);
+		await writeFile(source, "{broken");
+		await expect(readLearningHistory(source)).rejects.toThrow();
+		expect(
+			(await agent.harness.snapshot(EnglishLearning, english.conversationId, BACKGROUND_CONTEXT))?.history
+				?.extra,
+		).toEqual({ retained: true });
 	} finally {
 		await agent?.close();
 		vi.restoreAllMocks();
 		await rm(directory, { recursive: true, force: true });
 	}
-});
+}, 30000);

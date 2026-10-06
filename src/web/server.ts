@@ -1,46 +1,33 @@
-import { open, readdir, readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { open, readdir, readFile, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join } from "node:path";
+import { promisify } from "node:util";
+import { gzip } from "node:zlib";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { type ConversationId, type Cursor, type Harness, LiveDoc } from "@earendil-works/pi-durable";
+import {
+	type ConversationId,
+	type Cursor,
+	type Harness,
+	LiveDoc,
+	type TaskId,
+} from "@earendil-works/pi-durable";
 import { Chats } from "../agent/chats.ts";
 import { DirectSends } from "../agent/direct-send.ts";
-import { Sessions } from "../agent/isolated.ts";
+import { Sessions } from "../agent/health.ts";
 import { Deliveries } from "../agent/replies.ts";
+import { Schedules } from "../agent/scheduling.ts";
 import { readSettings } from "../config/settings.ts";
+import { createReadCache } from "./cache.ts";
+import { displayHistory, historyActivity } from "./history.ts";
+import { memoryPage, parseMemoryFile } from "./memory.ts";
+import { renderPage } from "./page.ts";
+import { readSchedules } from "./schedules.ts";
+import { readTaskTree } from "./tasks.ts";
 
 export interface WebAgent {
 	harness: Harness;
 	health(): Promise<{ ok: boolean; model: string; latencyMs: number; checkedAt: string }>;
-}
-export interface ScheduledAPI {
-	data(): unknown;
-	listReminders(status?: string): unknown;
-	createReminder(input: {
-		chatGuid: string;
-		text: string;
-		scheduledAt: string;
-		idempotencyKey?: string;
-	}): unknown;
-	cancelReminder(id: string): unknown;
-	runCron(id: string): Promise<unknown>;
-	setCronEnabled(id: string, enabled: boolean): unknown;
-}
-
-async function body(request: IncomingMessage): Promise<Record<string, unknown>> {
-	let text = "";
-	let size = 0;
-	const decoder = new TextDecoder("utf-8", { fatal: true });
-	for await (const chunk of request) {
-		size += chunk.byteLength;
-		if (size > 1024 * 1024) throw new Error("Request exceeds 1 MiB");
-		text += decoder.decode(chunk, { stream: true });
-	}
-	text += decoder.decode();
-	const parsed: unknown = JSON.parse(text || "{}");
-	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-		throw new Error("Expected a JSON object");
-	return parsed as Record<string, unknown>;
 }
 function readCursor(value: string | null): Cursor | undefined {
 	if (!value) return;
@@ -49,53 +36,143 @@ function readCursor(value: string | null): Cursor | undefined {
 	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Invalid cursor");
 	return parsed as Cursor;
 }
-function required(value: unknown, name: string): string {
-	if (typeof value !== "string" || !value.trim()) throw new Error(`${name} is required`);
-	return value;
-}
-function redact(value: unknown): string {
+function redact(value: unknown, compact = false, truncateStrings = true): string {
 	return JSON.stringify(
 		value,
 		(key, item) =>
 			/^(authorization|password|apiKey|accessToken|refreshToken|secret)$/i.test(key)
 				? "[redacted]"
-				: typeof item === "string" && item.length > 50000
+				: truncateStrings && typeof item === "string" && item.length > 50000
 					? `${item.slice(0, 50000)}\n[truncated]`
 					: item,
-		2,
+		compact ? undefined : 2,
 	)
 		.replace(/\b(?:sk-[\w-]{8,}|gh[pousr]_[\w]{8,})\b/g, "[redacted]")
 		.replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [redacted]");
 }
-function json(response: ServerResponse, status: number, value: unknown) {
+const compress = promisify(gzip);
+async function send(response: ServerResponse, status: number, contentType: string, text: string) {
+	const encodings = new Map(
+		(response.req.headers["accept-encoding"] ?? "").split(",").map((item) => {
+			const [name, ...parameters] = item.trim().toLowerCase().split(";");
+			const quality = parameters
+				.map((parameter) => parameter.trim())
+				.find((parameter) => parameter.startsWith("q="));
+			return [name.trim(), quality ? Number(quality.slice(2)) : 1] as const;
+		}),
+	);
+	const body = Buffer.from(text);
+	const useGzip = body.length >= 1024 && (encodings.get("gzip") ?? encodings.get("*") ?? 0) > 0;
+	const payload = useGzip ? await compress(body) : body;
 	response.writeHead(status, {
-		"Content-Type": "application/json; charset=utf-8",
+		"Content-Type": contentType,
 		"Cache-Control": "no-store",
 		"X-Content-Type-Options": "nosniff",
+		Vary: "Accept-Encoding",
+		"Content-Length": payload.length,
+		...(useGzip ? { "Content-Encoding": "gzip" } : {}),
 	});
-	response.end(redact(value));
+	response.end(payload);
 }
-function escapeHtml(text: string) {
-	return text.replace(
-		/[&<>"']/g,
-		(value) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[value] ?? value,
-	);
+function json(
+	response: ServerResponse,
+	status: number,
+	value: unknown,
+	compact = false,
+	truncateStrings = true,
+) {
+	return send(response, status, "application/json; charset=utf-8", redact(value, compact, truncateStrings));
 }
 
-/** Read-only pages and explicit compatible API actions. Viewing pages never submits model or delivery work. */
+/** Read-only pages and an explicit model health check. Viewing pages never starts work. */
 export async function startWeb(options: {
 	workingDir: string;
 	agent: WebAgent;
-	scheduled?: ScheduledAPI;
 	host?: string;
 	port?: number;
-	automation?: () => unknown;
 }) {
 	const streams = new Map<ServerResponse, () => void>();
+	const cache = createReadCache();
+	let revision = 0;
+	const instance = randomUUID();
+	function viewRevision() {
+		return `${instance}:${revision}`;
+	}
+	function nativeRead<T>(key: string, load: () => Promise<T>) {
+		return cache.read(`native:${key}`, () => revision, load);
+	}
+	async function fileRead<T>(path: string | URL, load: () => Promise<T>, variant = "default") {
+		return cache.read(
+			`file:${variant}:${path}`,
+			async () => {
+				try {
+					const info = await stat(path, { bigint: true });
+					return `${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
+				} catch (error) {
+					if ((error as NodeJS.ErrnoException).code === "ENOENT") return "missing";
+					throw error;
+				}
+			},
+			load,
+		);
+	}
+	function settings() {
+		return fileRead(join(options.workingDir, "settings.json"), () => readSettings(options.workingDir));
+	}
+	function history(id: ConversationId, cursor?: Cursor) {
+		return nativeRead(`history:${id}:${JSON.stringify(cursor)}`, async () => {
+			const conversation = await options.agent.harness.conversation(id, BACKGROUND_CONTEXT);
+			if (!conversation) throw new Error("Conversation not found");
+			return conversation.entries({}, 100, cursor, BACKGROUND_CONTEXT);
+		});
+	}
+	function delivery(id: ConversationId) {
+		return nativeRead(`delivery:${id}`, () =>
+			options.agent.harness.snapshot(Deliveries, id, BACKGROUND_CONTEXT),
+		);
+	}
+	async function overview() {
+		const [view, configuration] = await Promise.all([
+			nativeRead("overview", async () => {
+				const chats = await nativeRead("chats", () =>
+					options.agent.harness.snapshot(Chats, BACKGROUND_CONTEXT),
+				);
+				const conversations = await Promise.all(
+					(chats?.items ?? []).map(async (chat) => {
+						try {
+							const [entries, receipt] = await Promise.all([
+								history(chat.conversationId),
+								delivery(chat.conversationId),
+							]);
+							const { items, groupName } = displayHistory(entries, 15);
+							return {
+								...chat,
+								updatedAt: historyActivity(entries),
+								history: { items, groupName },
+								delivery: {
+									answers: Object.fromEntries(items.map((entry) => [entry.id, receipt?.answers[entry.id]])),
+									drafts: Object.fromEntries(items.map((entry) => [entry.id, receipt?.drafts?.[entry.id]])),
+								},
+							};
+						} catch (error) {
+							return { ...chat, error: error instanceof Error ? error.message : String(error) };
+						}
+					}),
+				);
+				if (conversations.some((chat) => "error" in chat)) cache.delete("native:overview");
+				return { conversations, revision: viewRevision() };
+			}),
+			settings(),
+		]);
+		return { ...view, settings: { chatAllowlist: configuration.chatAllowlist } };
+	}
 	const server = createServer((request, response) => {
 		void handle(request, response).catch((error) => {
 			if (!response.headersSent)
-				json(response, 400, { ok: false, error: error instanceof Error ? error.message : String(error) });
+				void json(response, 400, {
+					ok: false,
+					error: error instanceof Error ? error.message : String(error),
+				}).catch(() => response.destroy());
 			else response.end();
 		});
 	});
@@ -110,68 +187,27 @@ export async function startWeb(options: {
 			request.headers["sec-fetch-site"] === "cross-site" ||
 			(request.headers.origin && new URL(request.headers.origin).host !== request.headers.host)
 		) {
-			json(response, 403, { error: "Cross-origin requests are not allowed" });
+			await json(response, 403, { error: "Cross-origin requests are not allowed" });
 			return;
 		}
 		if (request.method === "GET" && url.pathname === "/health/model") {
 			try {
-				json(response, 200, await options.agent.health());
+				await json(response, 200, await options.agent.health());
 			} catch (error) {
-				json(response, 503, { ok: false, error: error instanceof Error ? error.message : String(error) });
-			}
-			return;
-		}
-		const scheduled = options.scheduled;
-		if (url.pathname === "/reminders") {
-			if (!scheduled) {
-				json(response, 503, { ok: false, error: "Scheduler is not enabled" });
-				return;
-			}
-			if (request.method === "GET") {
-				json(response, 200, scheduled.listReminders(url.searchParams.get("status") ?? undefined));
-				return;
-			}
-			if (request.method === "POST") {
-				const input = await body(request);
-				json(
-					response,
-					200,
-					scheduled.createReminder({
-						chatGuid: required(input.chatGuid, "chatGuid"),
-						text: required(input.text, "text"),
-						scheduledAt: required(input.scheduledAt, "scheduledAt"),
-						idempotencyKey: typeof input.idempotencyKey === "string" ? input.idempotencyKey : undefined,
-					}),
-				);
-				return;
-			}
-		}
-		if (request.method === "DELETE" && url.pathname.startsWith("/reminders/") && scheduled) {
-			json(response, 200, scheduled.cancelReminder(decodeURIComponent(url.pathname.slice(11))));
-			return;
-		}
-		if (request.method === "GET" && url.pathname === "/scheduled/data") {
-			json(response, scheduled ? 200 : 503, scheduled?.data() ?? { error: "Scheduler is not enabled" });
-			return;
-		}
-		const cron = url.pathname.match(/^\/cron\/jobs\/([^/]+)\/(run|enabled)$/);
-		if (request.method === "POST" && cron && scheduled) {
-			const id = decodeURIComponent(cron[1]);
-			if (cron[2] === "run") json(response, 200, await scheduled.runCron(id));
-			else {
-				const input = await body(request);
-				if (typeof input.enabled !== "boolean") throw new Error("enabled must be boolean");
-				json(response, 200, scheduled.setCronEnabled(id, input.enabled));
+				await json(response, 503, {
+					ok: false,
+					error: error instanceof Error ? error.message : String(error),
+				});
 			}
 			return;
 		}
 		if (request.method !== "GET") {
-			json(response, 404, { error: "Not found" });
+			await json(response, 404, { error: "Not found" });
 			return;
 		}
 		if (url.pathname === "/events") {
 			response.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store" });
-			response.write('data: {"updated":true}\n\n');
+			response.write(`event: ready\ndata: ${JSON.stringify({ revision: viewRevision() })}\n\n`);
 			const unsubscribe = options.agent.harness.subscribeCommits(() => {
 				if (!response.write('data: {"updated":true}\n\n')) {
 					unsubscribe();
@@ -189,8 +225,24 @@ export async function startWeb(options: {
 			});
 			return;
 		}
+		const asset =
+			url.pathname === "/assets/style.css"
+				? "style.css"
+				: url.pathname === "/assets/app.js"
+					? "app.js"
+					: undefined;
+		if (asset) {
+			const path = new URL(asset, import.meta.url);
+			await send(
+				response,
+				200,
+				asset.endsWith(".css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8",
+				await fileRead(path, () => readFile(path, "utf8")),
+			);
+			return;
+		}
 		let value: unknown;
-		let nextCursor: Cursor | undefined;
+		let compact = false;
 		const page = url.pathname.replace(/\/data$/, "");
 		if (page === "/" || page === "/chat") {
 			const id = url.searchParams.get("conversationId");
@@ -201,53 +253,97 @@ export async function startWeb(options: {
 					BACKGROUND_CONTEXT,
 				);
 				if (!conversation) {
-					json(response, 404, { error: "Conversation not found" });
+					await json(response, 404, { error: "Conversation not found" });
 					return;
 				}
-				const history = await conversation.entries(
-					{},
-					100,
-					readCursor(url.searchParams.get("cursor")),
-					BACKGROUND_CONTEXT,
-				);
-				nextCursor = history.next;
-				value = {
-					history,
-					agent: await conversation.agent(BACKGROUND_CONTEXT),
-					delivery: await options.agent.harness.snapshot(Deliveries, conversation.id, BACKGROUND_CONTEXT),
+				const cursor = readCursor(url.searchParams.get("cursor"));
+				const detail = await nativeRead(`detail:${id}:${JSON.stringify(cursor)}`, async () => ({
+					history: await history(conversation.id, cursor),
+					delivery: await delivery(conversation.id),
 					live: await options.agent.harness.snapshot(LiveDoc, conversation.id, BACKGROUND_CONTEXT),
-				};
+					revision: viewRevision(),
+				}));
+				if (!url.pathname.endsWith("/data") || url.searchParams.get("view") === "display") {
+					const [chats, configuration] = await Promise.all([
+						nativeRead("chats", () => options.agent.harness.snapshot(Chats, BACKGROUND_CONTEXT)),
+						settings(),
+					]);
+					value = {
+						history: displayHistory(detail.history),
+						delivery: detail.delivery,
+						chat: chats?.items.find((chat) => chat.conversationId === conversation.id),
+						settings: { chatAllowlist: configuration.chatAllowlist },
+						revision: detail.revision,
+					};
+					compact = true;
+				} else
+					value = {
+						history: detail.history,
+						delivery: detail.delivery,
+						live: detail.live,
+						agent: await conversation.agent(BACKGROUND_CONTEXT),
+					};
+			} else if (!url.pathname.endsWith("/data") || url.searchParams.get("view") === "overview") {
+				value = await overview();
+				compact = true;
 			} else
 				value = {
-					chats: await options.agent.harness.snapshot(Chats, BACKGROUND_CONTEXT),
-					sessions: await options.agent.harness.snapshot(Sessions, BACKGROUND_CONTEXT),
-					tasks: await options.agent.harness.commit((tx) => tx.scanTasks({}, 100), BACKGROUND_CONTEXT),
+					...(await nativeRead("index", async () => ({
+						chats: await nativeRead("chats", () => options.agent.harness.snapshot(Chats, BACKGROUND_CONTEXT)),
+						sessions: await options.agent.harness.snapshot(Sessions, BACKGROUND_CONTEXT),
+						tasks: await nativeRead("tasks:", () =>
+							options.agent.harness.commit((tx) => tx.scanTasks({}, 100), BACKGROUND_CONTEXT),
+						),
+						sends: await options.agent.harness.snapshot(DirectSends, BACKGROUND_CONTEXT),
+					}))),
 					inspection: await options.agent.harness.inspect(BACKGROUND_CONTEXT),
-					sends: await options.agent.harness.snapshot(DirectSends, BACKGROUND_CONTEXT),
 				};
-		} else if (page === "/settings") value = await readSettings(options.workingDir);
-		else if (page === "/scheduled") value = scheduled?.data() ?? { error: "Scheduler is not enabled" };
-		else if (page === "/automation") value = options.automation?.() ?? { tasks: [] };
-		else if (page === "/logs") {
-			const tasks = await options.agent.harness.commit(
-				(tx) => tx.scanTasks({}, 100, readCursor(url.searchParams.get("cursor"))),
-				BACKGROUND_CONTEXT,
+		} else if (page === "/scheduled") {
+			value = await nativeRead("schedules", () => readSchedules(options.agent.harness));
+			compact = true;
+		} else if (page === "/tasks") {
+			value = await nativeRead("task-tree", async () => ({
+				...(await readTaskTree(options.agent.harness)),
+				schedules: await options.agent.harness.snapshot(Schedules, BACKGROUND_CONTEXT),
+				chats: await nativeRead("chats", () => options.agent.harness.snapshot(Chats, BACKGROUND_CONTEXT)),
+				sessions: await nativeRead("sessions", () =>
+					options.agent.harness.snapshot(Sessions, BACKGROUND_CONTEXT),
+				),
+				revision: viewRevision(),
+			}));
+			compact = true;
+		} else if (url.pathname === "/tasks/task/data") {
+			const id = url.searchParams.get("taskId");
+			if (!id || !/^\d+$/.test(id) || !Number.isSafeInteger(Number(id))) throw new Error("Invalid task ID");
+			value = await nativeRead(`task:${id}`, () =>
+				options.agent.harness.getTask(Number(id) as TaskId, BACKGROUND_CONTEXT),
 			);
-			nextCursor = tasks.next;
-			let hostLog = "";
-			try {
-				const file = await open(join(options.workingDir, "service.log"), "r");
-				try {
-					const size = (await file.stat()).size;
-					const buffer = Buffer.alloc(Math.min(size, 50000));
-					const read = await file.read(buffer, 0, buffer.length, Math.max(0, size - buffer.length));
-					hostLog = buffer.subarray(0, read.bytesRead).toString();
-				} finally {
-					await file.close();
-				}
-			} catch (error) {
-				if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+			if (!value) {
+				await json(response, 404, { error: "Task not found" });
+				return;
 			}
+		} else if (page === "/settings") value = await settings();
+		else if (page === "/logs") {
+			const cursor = readCursor(url.searchParams.get("cursor"));
+			const tasks = await nativeRead(`tasks:${JSON.stringify(cursor) ?? ""}`, () =>
+				options.agent.harness.commit((tx) => tx.scanTasks({}, 100, cursor), BACKGROUND_CONTEXT),
+			);
+			const hostLog = await fileRead(join(options.workingDir, "service.log"), async () => {
+				try {
+					const file = await open(join(options.workingDir, "service.log"), "r");
+					try {
+						const size = (await file.stat()).size;
+						const buffer = Buffer.alloc(Math.min(size, 50000));
+						const read = await file.read(buffer, 0, buffer.length, Math.max(0, size - buffer.length));
+						return buffer.subarray(0, read.bytesRead).toString();
+					} finally {
+						await file.close();
+					}
+				} catch (error) {
+					if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+					return "";
+				}
+			});
 			value = { tasks, hostLog };
 		} else if (page === "/memory") {
 			const root = join(options.workingDir, "skills", "file-memory", "namespaces");
@@ -255,56 +351,63 @@ export async function startWeb(options: {
 				if (error.code === "ENOENT") return [];
 				throw error;
 			});
-			value = await Promise.all(
-				files
-					.filter((file) => file.endsWith(".jsonl"))
-					.slice(0, 100)
-					.map(async (file) => ({
+			const namespaces = files.filter((file) => file.endsWith(".jsonl")).sort();
+			if (!url.pathname.endsWith("/data") || url.searchParams.get("view") === "records") {
+				const records = await Promise.all(
+					namespaces.map((file) =>
+						fileRead(
+							join(root, file),
+							async () => parseMemoryFile(await readFile(join(root, file), "utf8"), file.slice(0, -6)),
+							"records",
+						),
+					),
+				);
+				value = memoryPage(records, url.searchParams);
+				compact = true;
+			} else {
+				// Keep the raw namespace API shape, but never cut a JSONL record in half.
+				value = await Promise.all(
+					namespaces.map(async (file) => ({
 						namespace: file.slice(0, -6),
-						records: (await readFile(join(root, file), "utf8")).slice(0, 50000),
+						records: await fileRead(join(root, file), () => readFile(join(root, file), "utf8")),
 					})),
-			);
+				);
+			}
 		} else {
-			json(response, 404, { error: "Not found" });
+			await json(response, 404, { error: "Not found" });
 			return;
 		}
 		if (url.pathname.endsWith("/data")) {
-			json(response, 200, value);
+			await json(response, 200, value, compact, page !== "/memory");
 			return;
 		}
-		response.writeHead(200, {
-			"Content-Type": "text/html; charset=utf-8",
-			"Cache-Control": "no-store",
-			"X-Content-Type-Options": "nosniff",
-		});
-		const next = new URL(url);
-		if (nextCursor)
-			next.searchParams.set("cursor", Buffer.from(JSON.stringify(nextCursor)).toString("base64url"));
-		const conversations = await options.agent.harness.commit(
-			(tx) => tx.scanConversations({}, 100),
-			BACKGROUND_CONTEXT,
-		);
-		const links = conversations.items
-			.map((conversation) => `<a href="/chat?conversationId=${conversation.id}">${conversation.id}</a>`)
-			.join(" | ");
-		const dataPath = page === "/" ? "/chat/data" : `${page}/data`;
-		const dataURL = JSON.stringify(dataPath + url.search).replaceAll("<", "\\u003c");
-		response.end(
-			`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>pi-imessage</title><style>body{font:13px/1.6 monospace;max-width:1000px;margin:20px auto;padding:0 16px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:inherit}</style></head><body><nav><a href="/">State</a> | <a href="/settings">Settings</a> | <a href="/scheduled">Scheduled</a> | <a href="/memory">Memory</a> | <a href="/logs">Logs</a> | <a href="/automation">Automation</a></nav><p>Conversations: ${links}</p><pre id="state">${escapeHtml(redact(value))}</pre>${nextCursor ? `<a href="${escapeHtml(next.pathname + next.search)}">Next page</a>` : ""}<script>const state=document.getElementById('state');const events=new EventSource('/events');let pending=false;events.onmessage=()=>{if(pending)return;pending=true;setTimeout(async()=>{try{const response=await fetch(${dataURL});if(response.ok)state.textContent=JSON.stringify(await response.json(),null,2);}finally{pending=false;}},1000);};setInterval(()=>events.onmessage(),5000);</script></body></html>`,
+		await send(
+			response,
+			200,
+			"text/html; charset=utf-8",
+			renderPage(page, redact(value, compact, page !== "/memory")),
 		);
 	}
+	const unsubscribeCache = options.agent.harness.subscribeCommits((publication) => {
+		if (publication.changes.length) revision++;
+	});
 	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
 		server.listen(options.port ?? 7750, options.host ?? "localhost", () => {
 			server.off("error", reject);
 			resolve();
 		});
+	}).catch((error) => {
+		unsubscribeCache();
+		throw error;
 	});
 	const address = server.address();
 	if (!address || typeof address === "string") throw new Error("Missing web server address");
 	return {
 		address,
 		async close() {
+			unsubscribeCache();
+			cache.clear();
 			for (const [stream, unsubscribe] of streams) {
 				unsubscribe();
 				stream.end();

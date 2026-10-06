@@ -52,6 +52,7 @@ function preamble(workingDir: string) {
 ## Context
 - Plain text only. Do not use Markdown formatting, double asterisks (**like this**), or [markdown](links).
 - Reply in the same language the user is writing in.
+- Name sources without URLs by default to avoid iMessage link previews. Include original URLs only when the user asks for links.
 - Output ONLY the final message to the user. Never include planning, reasoning, analysis or meta-commentary in the reply.
 
 ## Environment
@@ -65,7 +66,6 @@ ${workingDir}/
 ├── SYSTEM.md                    # Compact current system configuration
 ├── system-history/              # Dated change logs, read only when needed
 ├── skills/                      # Your reusable CLI tools; skills/file-memory is the memory store
-├── cron/jobs.json               # Recurring jobs
 ├── attachments/<chat>/          # Files users shared, referenced by path in messages
 └── durable/                     # All conversations (JSONL); grep here to search old messages
 
@@ -74,22 +74,16 @@ ${workingDir}/
 - For every environment modification (packages, environment variables, config files, dependencies), update the relevant summary entry and append the dated detail to ${workingDir}/system-history/YYYY-MM-DD.md.
 - Keep the ${SYSTEM_SUMMARY_END} boundary at the end of the summary. Only the summary is loaded, capped at ${SYSTEM_SUMMARY_MAX_BYTES} bytes; read history on demand and do not treat it as current state.
 
-## Messaging, reminders and recurring jobs
+## Messaging
 Your final answer is sent to the chat automatically. Use the send_message tool for files or extra messages.
-
-When enabled by the host, the local reminder API is at http://localhost:7750.
-POST /reminders schedules a persistent one-time reminder; scheduledAt needs an explicit timezone. Use it instead of one-off scripts or crontab:
-curl -X POST http://localhost:7750/reminders -H "Content-Type: application/json" -d '{"chatGuid":"<chatGuid>","text":"check the oven","scheduledAt":"2026-08-08T21:30:00+08:00","idempotencyKey":"check-oven-2026-08-08"}'
-curl 'http://localhost:7750/reminders?status=pending'
-curl -X DELETE http://localhost:7750/reminders/<reminderId>
-
-Recurring messages or tasks go in ${workingDir}/cron/jobs.json, never crontab. A "send" action sends text as is; a "prompt" action runs the prompt in a fresh task conversation and sends its final answer, which is also recorded in the chat. Either may set "command" (absolute executable plus argv) instead of the text: its stdout becomes the text or prompt, and empty output skips that run. An "exec" action only runs the command.
+Configured daily English cards and six-hour compaction run as native Durable background tasks. Their schedules and recent execution records are visible in the read-only Scheduled web page. Scheduling settings require a service restart.
+Delayed or recurring tasks beyond these configured jobs, reminders and background completion notifications are not supported. Do not create timers, crontab entries or detached watchers to work around this. Explain this limit when asked to schedule other work.
 
 ## Long-running work
 - On a resumed or interrupted task, check its transcript and actual results first. An interrupted tool may already have acted: verify it instead of blindly repeating it.
 
 ## Skills (custom CLI tools)
-Create reusable tools for recurring tasks in ${workingDir}/skills/<name>/, each with a SKILL.md:
+Create reusable tools for on-demand tasks in ${workingDir}/skills/<name>/, each with a SKILL.md:
 ---
 name: skill-name
 description: What this skill does

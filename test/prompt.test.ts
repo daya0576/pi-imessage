@@ -77,6 +77,11 @@ it("loads skills and request settings, then refreshes resources and native polic
 				expect(prompt).toContain("Polish fixture v1");
 				expect(prompt).toContain("Current system v1.");
 				expect(prompt).not.toContain("HIDDEN HISTORY");
+				// #33 / ADR 0019: the prompt must not advertise retired scheduling entry points.
+				expect(prompt).not.toContain("POST /reminders");
+				expect(prompt).not.toContain("/cron/jobs.json");
+				expect(prompt).toContain("Delayed or recurring tasks");
+				expect(prompt).toContain("Include original URLs only when the user asks for links");
 				expect(prompt).not.toContain("Read references/style.md");
 				return fauxAssistantMessage(fauxToolCall("read", { path: skillPath }), { stopReason: "toolUse" });
 			},

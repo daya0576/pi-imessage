@@ -11,14 +11,13 @@ import { finalReplyText } from "../extensions/final-text.ts";
 import type { MessageSender } from "../transport/send.ts";
 import { Chats } from "./chats.ts";
 import { DirectSends } from "./direct-send.ts";
-import { Sessions } from "./isolated.ts";
 import { Deliveries, type DeliveryStatus } from "./replies.ts";
 import { RUN_RECORD, Runs, runRecord } from "./run.ts";
 
 export type SendText = MessageSender["sendMessage"];
 
 /**
- * A conversation whose final answers go to a chat. Runs and tasks also record sent replies in the chat
+ * A conversation whose final answers go to a chat. Runs also record sent replies in the chat
  * conversation, so the chat's context holds what the user saw, not how it was produced.
  */
 type Target = { conversationId: ConversationId; chatGuid: string; chat?: ConversationId; label?: string };
@@ -26,12 +25,8 @@ type Target = { conversationId: ConversationId; chatGuid: string; chat?: Convers
 async function targets(harness: Harness): Promise<Target[]> {
 	const chats = (await harness.snapshot(Chats, BACKGROUND_CONTEXT))?.items ?? [];
 	const runs = (await harness.snapshot(Runs, BACKGROUND_CONTEXT))?.items ?? [];
-	const sessions = (await harness.snapshot(Sessions, BACKGROUND_CONTEXT))?.items ?? [];
 	return [
 		...chats,
-		...sessions
-			.filter((session) => session.deliver)
-			.map((session) => ({ ...session, label: `task ${session.label}` })),
 		...runs.map((run) => ({
 			conversationId: run.conversationId,
 			chatGuid: run.chatGuid,

@@ -1,4 +1,4 @@
-import { access, copyFile, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -10,14 +10,22 @@ import {
 	fauxProvider,
 	fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
-import { Harness } from "@earendil-works/pi-durable";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { CompactionTask, Harness } from "@earendil-works/pi-durable";
 import Database from "better-sqlite3";
 import sharp from "sharp";
+import { getGlobalDispatcher } from "undici";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Chats, WatchCursor } from "../src/agent/chats.ts";
+import { compactChats } from "../src/agent/compaction.ts";
 import type { SendText } from "../src/agent/deliver.ts";
+import { DirectSends } from "../src/agent/direct-send.ts";
+import * as modelConfig from "../src/agent/models.ts";
+import { argumentSummary, commandPreview, formatProgress } from "../src/agent/progress-format.ts";
 import { Deliveries } from "../src/agent/replies.ts";
-import { startMessaging, startService } from "../src/main.ts";
+import { Schedules } from "../src/agent/scheduling.ts";
+import { startApplication, startMessaging, startService } from "../src/main.ts";
+import * as httpTransport from "../src/transport/http.ts";
 import { createWatcher } from "../src/transport/watch.ts";
 
 let directory: string;
@@ -58,6 +66,7 @@ beforeEach(async () => {
 	send.mockReset().mockResolvedValue(undefined);
 	onError.mockReset();
 	vi.spyOn(console, "warn").mockImplementation(() => {});
+	vi.spyOn(console, "log").mockImplementation(() => {});
 	options = {
 		workingDir: directory,
 		agentDir: join(directory, "agent"),
@@ -90,7 +99,6 @@ function insert(guid: string, text: string | null, chat = 1) {
 // #33 Phase 2: test our polling, routing and attachment boundaries, not the Messages service.
 it("automatically routes DM, group and SMS, archives attachments and logs disabled chats", async () => {
 	const intervals = vi.spyOn(globalThis, "setInterval");
-	const clearInterval = vi.spyOn(globalThis, "clearInterval");
 	const contexts: TranscriptContext[] = [];
 	const reply = (context: TranscriptContext) => {
 		contexts.push(context);
@@ -146,10 +154,15 @@ it("automatically routes DM, group and SMS, archives attachments and logs disabl
 	expect(faux.state.callCount).toBe(3);
 	expect((await service.harness.snapshot(WatchCursor, BACKGROUND_CONTEXT))?.rowid).toBe(last);
 	expect(onError).not.toHaveBeenCalled();
-	const compaction = intervals.mock.calls.findIndex(([, duration]) => duration === 6 * 60 * 60 * 1000);
-	expect(compaction).toBeGreaterThanOrEqual(0);
+	expect(intervals.mock.calls.some(([, duration]) => duration === 6 * 60 * 60 * 1000)).toBe(false);
+	const schedules = (await service.harness.snapshot(Schedules, BACKGROUND_CONTEXT))?.items;
+	expect(schedules).toHaveLength(1);
+	if (!schedules?.[0]) throw new Error("Missing scheduled compaction");
+	expect(await service.harness.getTask(schedules[0].taskId, BACKGROUND_CONTEXT)).toMatchObject({
+		kind: "imessage.schedule",
+		background: true,
+	});
 	await service.close();
-	expect(clearInterval).toHaveBeenCalledWith(intervals.mock.results[compaction].value);
 });
 
 // #33 Phase 2: exercise real local HEIC conversion and image reading without storing image bytes.
@@ -202,15 +215,127 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 			expect(result?.isError).toBe(false);
 			expect(result?.content.some((part) => part.type === "image")).toBe(false);
 			expect(JSON.stringify(result)).toContain("/tmp/unrelated-image.jpg");
+			return fauxAssistantMessage(fauxToolCall("subagent", { task: "Read the reference file privately" }), {
+				stopReason: "toolUse",
+			});
+		},
+		() =>
+			fauxAssistantMessage(
+				fauxToolCall("read", {
+					path: trap,
+					offset: 1,
+					query: "上海浦东 私立医院",
+					apiKey: "secret-notice-marker",
+					command: "secret-command-marker",
+					url: "https://user:secret-url-marker@example.test/path?token=secret-query-marker",
+					nested: { token: "secret-object-marker" },
+				}),
+				{ stopReason: "toolUse" },
+			),
+		() => fauxAssistantMessage("private child result"),
+		() =>
+			fauxAssistantMessage(
+				fauxToolCall("bash", { command: "printf 'progress fixture'", description: "运行进度测试" }),
+				{ stopReason: "toolUse" },
+			),
+		(context) => {
+			const result = context.messages.findLast((message) => message.role === "toolResult");
+			expect(result?.toolName).toBe("bash");
+			expect(JSON.stringify(result)).toContain("progress fixture");
+			return fauxAssistantMessage(fauxToolCall("bash", { command: "exit 7", description: "测试失败标记" }), {
+				stopReason: "toolUse",
+			});
+		},
+		(context) => {
+			const result = context.messages.findLast((message) => message.role === "toolResult");
+			expect(result?.isError).toBe(true);
 			return fauxAssistantMessage("image read");
 		},
 	]);
+	// #33 / ADR 0020: all native calls are routed, including owned child conversations.
+	const settingsPath = join(directory, "settings.json");
+	const settings = JSON.parse(await readFile(settingsPath, "utf8"));
+	await writeFile(settingsPath, JSON.stringify({ ...settings, progressMessages: true }));
+	send.mockRejectedValueOnce(new Error("Progress may already have acted"));
 	await service.poll();
-	await vi.waitFor(async () => {
-		await service?.poll();
-		expect(send).toHaveBeenCalledTimes(1);
-	});
-	expect(textCalls()).toEqual([["iMessage;-;dm", "image read"]]);
+	await vi.waitFor(
+		async () => {
+			await service?.poll();
+			expect(textCalls().at(-1)).toEqual(["iMessage;-;dm", "image read"]);
+		},
+		{ timeout: 5000 },
+	);
+	const notices = textCalls();
+	expect(notices.every(([chat]) => chat === "iMessage;-;dm")).toBe(true);
+	expect(notices.filter(([, text]) => text.startsWith("→ [tool] "))).toHaveLength(5);
+	expect(notices.filter(([, text]) => text.startsWith("→ [subagent/tool] "))).toHaveLength(1);
+	expect(notices.map(([, text]) => text).join("\n")).toContain(`path=${trap}`);
+	const progressText = notices.map(([, text]) => text).join("\n");
+	expect(progressText).not.toContain("Read the reference file privately");
+	expect(progressText).not.toContain("pi.generation");
+	expect(progressText).not.toMatch(/\[(?:task|tool) #\d+/);
+	expect(progressText).toContain("query=上海浦东 私立医院");
+	expect(progressText).not.toMatch(/secret-(notice|command|url|query|object)-marker/);
+	expect(progressText).toContain("apiKey=[redacted]");
+	expect(progressText).toContain("url=example．test");
+	expect(progressText).toContain("→ [tool] bash: printf 'progress fixture'");
+	expect(notices.filter(([, text]) => text.startsWith("✓ "))).toHaveLength(5);
+	expect(notices.filter(([, text]) => text.startsWith("× "))).toEqual([
+		["iMessage;-;dm", expect.stringMatching(/^× \[tool\] bash \(\d+\.\ds\)$/)],
+	]);
+	expect(progressText).toMatch(/✓ \[subagent\/tool\] read \(\d+\.\ds\)/);
+	expect(progressText).toContain("printf 'progress fixture'");
+	expect(progressText).not.toContain("(bash");
+	expect(progressText).not.toContain("运行进度测试");
+	expect(progressText).toContain("→ [tool] read: path=");
+	expect(progressText).toContain("→ [subagent/tool] read: path=");
+	expect(progressText).toMatch(/✓ \[tool\] bash \(\d+\.\ds\)/);
+	expect(
+		formatProgress({
+			type: "tool",
+			parents: [],
+			name: "bash",
+			phase: "request",
+			summary: "查上海天气",
+			commandPreview: "printf hi",
+		}),
+	).toBe("→ [tool] bash: printf hi");
+	expect(
+		formatProgress({
+			type: "tool",
+			parents: [],
+			name: "bash",
+			phase: "response",
+			success: true,
+			elapsedMs: 800,
+		}),
+	).toBe("✓ [tool] bash (0.8s)");
+	expect(commandPreview("printf hi")).toBe("printf hi");
+	expect(commandPreview("x".repeat(120))).toBe("x".repeat(120));
+	expect(commandPreview("printf\n  hi")).toBe("printf hi");
+	expect(commandPreview("x".repeat(121))).toBe(`${"x".repeat(119)}…`);
+	expect(Array.from(commandPreview("汉".repeat(121)))).toHaveLength(120);
+	expect(commandPreview(`${"x".repeat(200)} token=secret-command-marker`)).not.toContain(
+		"secret-command-marker",
+	);
+	expect(commandPreview("curl https://user:secret-url-marker@example.test")).toContain("hidden");
+	expect(commandPreview("cat ~/.env")).toContain("hidden");
+	expect(commandPreview("curl https://example.com/path")).toBe("curl https：／／example．com／path");
+	expect(commandPreview("curl example.com/path")).toBe("curl example．com/path");
+	expect(progressText).not.toContain("timeout=");
+	expect(progressText).not.toContain("https://");
+	expect(
+		argumentSummary({ command: "secret-command-marker", description: "搜索上海天气", timeout: 30 }, "bash"),
+	).toBe("搜索上海天气");
+	expect(
+		argumentSummary({ command: "secret-command-marker", description: "token=secret-token-marker" }, "bash"),
+	).toBe("执行命令");
+	expect(argumentSummary({ command: "printf hi" }, "bash")).toBe("执行命令");
+	expect(argumentSummary({ query: "来源 https://example.test/private" })).not.toContain("https://");
+	expect(notices.at(-1)).toEqual(["iMessage;-;dm", "image read"]);
+	const receipts = (await service.harness.snapshot(DirectSends, BACKGROUND_CONTEXT))?.requests ?? [];
+	expect(receipts.filter((receipt) => receipt.requestId.startsWith("progress:"))).toHaveLength(12);
+	expect(receipts.filter((receipt) => receipt.textStatus === "unknown")).toHaveLength(1);
 	expect(await sharp(archivedPath).metadata()).toMatchObject({ format: "jpeg", width: 16, height: 12 });
 	expect(await readdir(archive)).toHaveLength(1);
 	expect(imageData).not.toBe("");
@@ -221,11 +346,33 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 	expect(history).toContain(archivedPath);
 	expect(history).not.toContain(imageData);
 	expect(history).not.toContain('"type":"image"');
+	expect(history).not.toContain("→ bash:");
+	expect(history).not.toContain("✓ bash");
 	expect((await service.harness.snapshot(WatchCursor, BACKGROUND_CONTEXT))?.rowid).toBe(rowid);
+	await service.close();
+	service = await startMessaging(options);
+	await service.poll();
+	expect(send).toHaveBeenCalledTimes(13); // No historical or uncertain notice replay.
+	faux.setResponses([fauxAssistantMessage("healthy"), fauxAssistantMessage("quiet answer")]);
+	await service.health();
+	await service.poll();
+	expect(send).toHaveBeenCalledTimes(13); // Tool-less health remains private.
+	await writeFile(settingsPath, JSON.stringify({ ...settings, progressMessages: false }));
+	insert("quiet", "Another question");
+	await service.poll();
+	await vi.waitFor(async () => {
+		await service?.poll();
+		expect(send).toHaveBeenCalledTimes(14);
+	});
+	expect(textCalls().at(-1)).toEqual(["iMessage;-;dm", "quiet answer"]);
 });
 
 // #33 Phase 3: command rows must settle without becoming model input or blocking following source rows.
-it("routes commands separately and advances to the following ordinary message", async () => {
+it("routes commands and hides only six-hour compaction progress", async () => {
+	await writeFile(
+		join(directory, "settings.json"),
+		JSON.stringify({ chatAllowlist: { whitelist: ["*"], blacklist: [] }, progressMessages: true }),
+	);
 	faux.setResponses([fauxAssistantMessage("ordinary reply")]);
 	service = await startMessaging(options);
 	insert("help", "/help");
@@ -241,6 +388,65 @@ it("routes commands separately and advances to the following ordinary message", 
 	]);
 	expect(faux.state.callCount).toBe(1);
 	expect((await service.harness.snapshot(WatchCursor, BACKGROUND_CONTEXT))?.rowid).toBe(last);
+	// Scheduled native compactions emit neither admission nor settlement notices.
+	const tasks = await compactChats(service.harness);
+	expect(tasks).toHaveLength(1);
+	for (const task of tasks) await service.harness.waitForTask(task, BACKGROUND_CONTEXT);
+	await service.poll();
+	expect(send).toHaveBeenCalledTimes(4);
+	expect((await service.harness.snapshot(DirectSends, BACKGROUND_CONTEXT))?.requests ?? []).not.toEqual(
+		expect.arrayContaining([expect.objectContaining({ requestId: expect.stringMatching(/^progress:/) })]),
+	);
+	// Explicit /compact retains both progress phases and its command result.
+	insert("manual-compact", "/compact");
+	await vi.waitFor(async () => {
+		await service?.poll();
+		expect(send).toHaveBeenCalledTimes(7);
+	});
+	expect(textCalls()).toEqual(
+		expect.arrayContaining([
+			["iMessage;-;dm", "Nothing to compact."],
+			["iMessage;-;dm", "→ [task] pi.compaction"],
+			["iMessage;-;dm", expect.stringMatching(/^✓ \[task\] pi\.compaction \(\d+\.\ds\)$/)],
+		]),
+	);
+	const chat = (await service.harness.snapshot(Chats, BACKGROUND_CONTEXT))?.items[0];
+	if (!chat) throw new Error("Missing chat");
+	// Native task fixtures exercise routing for automatic threshold/overflow admission and settlement.
+	for (const reason of ["threshold", "overflow"] as const) {
+		const task = await service.harness.commit(
+			(tx) =>
+				tx.createTask(
+					CompactionTask,
+					{ reason },
+					{
+						conversationId: chat.conversationId,
+						ownership: { kind: "conversation" },
+					},
+				),
+			BACKGROUND_CONTEXT,
+		);
+		await service.harness.waitForTask(task, BACKGROUND_CONTEXT);
+		await vi.waitFor(async () => {
+			if (!service) throw new Error("Missing service");
+			const receipts = (await service.harness.snapshot(DirectSends, BACKGROUND_CONTEXT))?.requests ?? [];
+			expect(receipts).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						requestId: `progress:${task}`,
+						text: "→ [task] pi.compaction",
+						textStatus: "sent",
+					}),
+					expect.objectContaining({
+						requestId: `progress:${task}:done`,
+						text: expect.stringMatching(/^✓ \[task\] pi\.compaction \(\d+\.\ds\)$/),
+						textStatus: "sent",
+					}),
+				]),
+			);
+		});
+	}
+	expect(send).toHaveBeenCalledTimes(11);
 	expect(onError).not.toHaveBeenCalled();
 });
 
@@ -363,6 +569,145 @@ it("releases ownership on watcher failure and joins an in-flight automatic send 
 		expect(send).toHaveBeenCalledTimes(1);
 	} finally {
 		gate.resolve();
+	}
+	await service.close();
+	service = undefined;
+	// #33 / ADR 0016: production wiring installs HTTP before auth, reloads it and cleans up failures.
+	const previousDispatcher = getGlobalDispatcher();
+	for (const name of ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "NO_PROXY", "no_proxy"])
+		vi.stubEnv(name, "");
+	await mkdir(options.agentDir, { recursive: true });
+	await mkdir(join(directory, ".pi"), { recursive: true });
+	await writeFile(join(options.agentDir, "auth.json"), "{}");
+	await writeFile(join(options.agentDir, "models.json"), "{}");
+	await writeFile(
+		join(options.agentDir, "settings.json"),
+		JSON.stringify({ httpProxy: "http://127.0.0.1:1", httpIdleTimeoutMs: 100 }),
+	);
+	await writeFile(
+		join(directory, ".pi", "settings.json"),
+		JSON.stringify({ httpProxy: "http://project.invalid:1234", httpIdleTimeoutMs: 0 }),
+	);
+	const openTransport = vi.spyOn(httpTransport, "openHttpTransport");
+	const openModels = vi.spyOn(modelConfig, "openModels").mockImplementation(async () => {
+		expect(getGlobalDispatcher()).not.toBe(previousDispatcher);
+		throw new Error("isolated auth failure");
+	});
+	// #33 / ADR 0019: stale task configuration must not create workers or mutate stored state.
+	await mkdir(join(directory, "cron"));
+	await mkdir(join(directory, "automation"));
+	const retiredState = [
+		"cron/jobs.json",
+		"automation/jobs.json",
+		"reminders.db",
+		"scheduled-prompts.db",
+		"background.db",
+	];
+	for (const path of retiredState) await writeFile(join(directory, path), "retained invalid fixture");
+	const applicationOptions = { ...options, web: false as const };
+	let application: Awaited<ReturnType<typeof startApplication>> | undefined;
+	try {
+		const logs = vi.mocked(console.log);
+		logs.mockClear();
+		await expect(startApplication({ ...applicationOptions, runtime: undefined })).rejects.toThrow(
+			"isolated auth failure",
+		);
+		expect(logs.mock.calls.map(([, event]) => event)).toEqual([
+			"Application starting",
+			"Application resources closed",
+		]);
+		logs.mockClear();
+		await expect(
+			startApplication({ ...applicationOptions, web: { host: "127.0.0.1", port: -1 } }),
+		).rejects.toThrow();
+		expect(logs.mock.calls.map(([, event]) => event)).toEqual([
+			"Application starting",
+			"Agent ready",
+			"Application resources closed",
+		]);
+		logs.mockClear();
+		expect(getGlobalDispatcher()).toBe(previousDispatcher);
+		expect(openTransport).toHaveBeenLastCalledWith({ proxy: "http://127.0.0.1:1", idleTimeoutMs: 0 });
+		// Injected runtimes do not install a process dispatcher, even in the full application.
+		application = await startApplication(applicationOptions);
+		expect(logs.mock.calls.map(([, event]) => event)).toEqual([
+			"Application starting",
+			"Agent ready",
+			"Web server disabled",
+			"Messaging ready",
+			"Application started",
+		]);
+		expect(logs).toHaveBeenCalledWith(expect.any(String), "Messaging ready", {
+			cursor: expect.any(Number),
+			intervalMs: options.intervalMs,
+			scheduling: "durable-background-tasks",
+		});
+		for (const [timestamp] of logs.mock.calls)
+			expect(timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+		expect(getGlobalDispatcher()).toBe(previousDispatcher);
+		expect(openTransport).toHaveBeenCalledTimes(1);
+		await application.close();
+		await application.close();
+		expect(logs.mock.calls.filter(([, event]) => event === "Application resources closed")).toHaveLength(1);
+		application = undefined;
+		const installed = await ModelRuntime.create({
+			authPath: join(options.agentDir, "auth.json"),
+			modelsPath: join(options.agentDir, "models.json"),
+			refreshOnCreate: false,
+		});
+		vi.spyOn(installed, "getModel").mockReturnValue(faux.getModel());
+		const stream = vi.spyOn(installed, "streamSimple").mockImplementation(() => {
+			throw new Error("Unexpected model request");
+		});
+		openModels.mockResolvedValue(installed);
+		if (!options.runtime) throw new Error("Missing isolated defaults");
+		vi.spyOn(modelConfig, "readDefaults").mockResolvedValue(options.runtime.defaults);
+		logs.mockClear();
+		application = await startApplication({
+			...applicationOptions,
+			runtime: undefined,
+			web: { host: "127.0.0.1", port: 0 },
+		});
+		expect(logs.mock.calls.map(([, event]) => event)).toEqual([
+			"Application starting",
+			"Agent ready",
+			"Web server listening",
+			"Messaging ready",
+			"Application started",
+		]);
+		expect(logs).toHaveBeenCalledWith(expect.any(String), "Web server listening", {
+			host: "127.0.0.1",
+			port: application.web?.address.port,
+		});
+		expect(application.web?.address.port).toBeGreaterThan(0);
+		logs.mockClear();
+		await application.messaging.poll();
+		expect(logs).not.toHaveBeenCalled();
+		const beforeReload = getGlobalDispatcher();
+		await writeFile(
+			join(options.agentDir, "settings.json"),
+			JSON.stringify({ httpProxy: "http://127.0.0.1:2", httpIdleTimeoutMs: 100 }),
+		);
+		const owned = openTransport.mock.results[1].value as ReturnType<typeof httpTransport.openHttpTransport>;
+		const reload = vi.spyOn(owned, "reload");
+		insert("reload-http", "/reload");
+		await application.messaging.poll();
+		expect(reload).toHaveBeenCalledWith({ proxy: "http://127.0.0.1:2", idleTimeoutMs: 0 });
+		expect(logs).toHaveBeenCalledWith(expect.any(String), "Agent reloaded", {
+			model: options.runtime.defaults.model,
+		});
+		expect(JSON.stringify(logs.mock.calls)).not.toContain("http://127.0.0.1:2");
+		expect(getGlobalDispatcher()).not.toBe(beforeReload);
+		expect(stream).not.toHaveBeenCalled();
+		for (const path of retiredState)
+			expect(await readFile(join(directory, path), "utf8")).toBe("retained invalid fixture");
+		expect(await readdir(join(directory, "automation"))).toEqual(["jobs.json"]);
+		expect(await readdir(join(directory, "cron"))).toEqual(["jobs.json"]);
+		await application.close();
+		expect(getGlobalDispatcher()).toBe(previousDispatcher);
+	} finally {
+		await application?.close();
+		vi.unstubAllEnvs();
 	}
 });
 

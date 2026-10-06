@@ -12,10 +12,3 @@ The HEIC integration test exercises the application's real `/usr/bin/sips` conve
 into a temporary workspace. It records argv and returns configured JSON, with
 explicit failure and cancellation modes. It does not read personal memories or
 reimplement the store's validation, deduplication, or correction logic.
-
-## Scheduler service
-
-`scheduler-service.cjs` is a minimal external API fixture for the host adapters.
-It supplies callback boundaries and fixed parse results, not cron/timezone/retry
-algorithms. Application tests use temporary storage and faux models; the installed
-shared service is checked separately using a code-only copy and temporary data.

@@ -5,6 +5,7 @@ import {
 	type Cursor,
 	type DocumentReader,
 	defineExtension,
+	ResetEntry,
 	type Storage,
 	section,
 } from "@earendil-works/pi-durable";
@@ -23,7 +24,7 @@ const steeringInstructions = [
 	"An assistant entry in history is not proof of message delivery. Do not claim that text or a file was sent without a transport result.",
 ].join("\n");
 
-/** Chat and /run conversations only; isolated HTTP, cron and subagent conversations do not get it. */
+/** Chat and /run conversations only; health and subagent conversations do not get it. */
 async function isChat(read: DocumentReader, conversationId: ConversationId, context: Context) {
 	if ((await read.snapshot(Chats, context))?.items.some((chat) => chat.conversationId === conversationId))
 		return true;
@@ -48,6 +49,11 @@ export function chatBehavior(storage: Storage) {
 				do {
 					const page = await storage.scanEntries({ conversationId }, 100, cursor, context);
 					for (const entry of page.items) {
+						// Reset starts a new context; archived replies are not current unsent drafts.
+						if (ResetEntry.is(entry)) {
+							boundary = true;
+							break;
+						}
 						if (!AssistantEntry.is(entry)) continue;
 						const text = finalReplyText(entry.model?.[0]);
 						if (!text) continue;

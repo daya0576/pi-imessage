@@ -116,11 +116,12 @@ export async function runCommand(options: {
 			return { reply: "Stopped." };
 		}
 		case "/new":
-			// The run task belongs to the chat conversation, so this abort stops it too.
-			await conversation.abort(BACKGROUND_CONTEXT);
-			await conversation.reset(undefined, BACKGROUND_CONTEXT);
-			return { reply: "Started an empty context." };
 		case "/status": {
+			if (name === "/new") {
+				// The run task belongs to the chat conversation, so this abort stops it too.
+				await conversation.abort(BACKGROUND_CONTEXT);
+				await conversation.reset(undefined, BACKGROUND_CONTEXT);
+			}
 			const agent = await conversation.agent(BACKGROUND_CONTEXT);
 			const context = await conversation.context(BACKGROUND_CONTEXT);
 			const usage = Object.values(
@@ -131,19 +132,23 @@ export async function runCommand(options: {
 			);
 			const window =
 				agent.model && options.models.getModel(agent.model.provider, agent.model.modelId)?.contextWindow;
-			const used = last?.role === "assistant" ? last.usage.totalTokens : 0;
+			const used = last?.role === "assistant" ? last.usage.totalTokens : undefined;
 			return {
 				reply: [
 					[
 						`${context.messages.filter((message) => message.role === "user").length} msgs -`,
 						`in ${tokens(usage.reduce((sum, item) => sum + item.input, 0))}`,
 						`out ${tokens(usage.reduce((sum, item) => sum + item.output, 0))}`,
-						window ? `${((used / window) * 100).toFixed(1)}%/${tokens(window)}` : "",
+						window
+							? `${used === undefined ? "?" : `${((used / window) * 100).toFixed(1)}%`}/${tokens(window)}`
+							: "",
 					]
 						.join(" ")
 						.trim(),
 					`Model: ${agent.model ? `${agent.model.provider}/${agent.model.modelId}` : "unset"}, thinking: ${agent.thinkingLevel}`,
-					`Run: ${run ? `until ${new Date(run.deadline).toISOString()}` : "none"}`,
+					...(name === "/status"
+						? [`Run: ${run ? `until ${new Date(run.deadline).toISOString()}` : "none"}`]
+						: []),
 				].join("\n"),
 			};
 		}

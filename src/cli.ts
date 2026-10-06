@@ -12,7 +12,7 @@ import { createMessageSender } from "./transport/send.ts";
 export async function main(args = process.argv.slice(2)) {
 	if (args.includes("--help") || args[0] === "help") {
 		console.log(
-			"pi-imessage [serve]\npi-imessage import --source PATH --target PATH --backup PATH --cursor NUMBER\npi-imessage install (write launchd job only)\nSee ops/README.md for operator-only installation, cutover and rollback.",
+			"pi-imessage [serve]\npi-imessage serve --run-scheduled JOB --request-id ID (one explicit run at startup)\npi-imessage import --source PATH --target PATH --backup PATH --cursor NUMBER\npi-imessage install (write launchd job only)\nSee ops/README.md for operator-only installation, cutover and rollback.",
 		);
 		return;
 	}
@@ -40,7 +40,6 @@ export async function main(args = process.argv.slice(2)) {
 			"WEB_PORT",
 			"WEB_ENABLED",
 			"MESSAGES_DB_PATH",
-			"PI_SCHEDULER_SERVICE_PATH",
 			"BRAVE_API_KEY",
 			"BRAVE_SEARCH_API_KEY",
 			"HTTP_PROXY",
@@ -79,41 +78,54 @@ export async function main(args = process.argv.slice(2)) {
 		return;
 	}
 	if (args.length && args[0] !== "serve") throw new Error("Unknown command; see --help");
+	let runScheduled: { jobId: string; requestId: string } | undefined;
+	if (args.length > 1) {
+		if (
+			args.length !== 5 ||
+			args[1] !== "--run-scheduled" ||
+			args[3] !== "--request-id" ||
+			!args[2].trim() ||
+			!args[4].trim()
+		)
+			throw new Error("Usage: serve --run-scheduled JOB --request-id ID");
+		runScheduled = { jobId: args[2], requestId: args[4] };
+	}
 	const dbPath = process.env.MESSAGES_DB_PATH ?? join(homedir(), "Library", "Messages", "chat.db");
 	const sender = createMessageSender({ attachmentsRoot: join(workingDir, "attachments"), dbPath });
 	const app = await startApplication({
 		workingDir,
 		agentDir,
+		...(runScheduled ? { runScheduled } : {}),
 		dbPath,
 		send: sender.sendMessage,
 		sendAttachment: sender.sendAttachment,
-		onError: (error) => console.error("Messaging poll failed", error),
+		onError: (error) => console.error(new Date().toISOString(), "Messaging poll failed", error),
 		web:
 			process.env.WEB_ENABLED === "false"
 				? false
 				: { host: process.env.WEB_HOST ?? "localhost", port: Number(process.env.WEB_PORT ?? 7750) },
 	});
-	console.log("pi-imessage started", workingDir);
 	let closing = false;
-	const stop = () => {
+	const stop = (signal: string) => {
 		if (closing) return;
 		closing = true;
+		console.log(new Date().toISOString(), "Shutdown requested", { signal });
 		void app.close().then(
 			() => {
-				console.log("pi-imessage stopped");
+				console.log(new Date().toISOString(), "pi-imessage stopped");
 			},
 			(error) => {
-				console.error("Shutdown failed", error);
+				console.error(new Date().toISOString(), "Shutdown failed", error);
 				process.exitCode = 1;
 			},
 		);
 	};
-	process.once("SIGINT", stop);
-	process.once("SIGTERM", stop);
+	process.once("SIGINT", () => stop("SIGINT"));
+	process.once("SIGTERM", () => stop("SIGTERM"));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)
 	void main().catch((error) => {
-		console.error(error instanceof Error ? error.message : error);
+		console.error(new Date().toISOString(), "Command failed", error instanceof Error ? error.message : error);
 		process.exitCode = 1;
 	});

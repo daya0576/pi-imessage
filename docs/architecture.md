@@ -6,7 +6,7 @@
 ┌────────────────────────────────────────────┐
 │ 1  main.ts · cli.ts · migrate/              │
 ├────────────────────────────────────────────┤
-│ 2  web/ · scheduler/ · automation/          │
+│ 2  web/                                    │
 ├────────────────────────────────────────────┤
 │ 3  agent/                                  │
 ├────────────────────────────────────────────┤
@@ -32,15 +32,26 @@ cannot import each other; imports within a package are allowed.
 | 1 | `main.ts`, `cli.ts` | Startup, wiring and installation. |
 | 1 | `migrate/` | One-time history import; writes directly to Durable storage. |
 | 2 | `web/` | HTTP API; read-only pages for chat history and live state. |
-| 2 | `scheduler/` | Cron jobs and one-time reminders. |
-| 2 | `automation/` | PT browser tasks. |
-| 3 | `agent/` | Harness, models, chat mapping, commands, delivery, prompt, `/run` and scheduled compaction. |
+| 3 | `agent/` | Harness, models, chat mapping, commands, delivery, prompt, `/run`, native background schedules and English learning. |
 | 4 | `extensions/` | Native tools: memory, subagents, image reading, web search and page fetch. |
 | 5 | `transport/` | Poll chat.db, archive attachments, send text and files through Messages.app. No agent logic. |
 | 6 | `config/` | Settings, environment variables and chat allowlist. |
 
 Planned enforcement: `test/architecture.test.ts`. Rationale: [ADRs](adr/).
 
+
+### Native schedules
+
+`agent/scheduling.ts` registers an extension with native task definitions. A
+job's dedicated conversation owns a background scheduler, whose checkpoint saves
+the next deadline. Each occurrence is a child execution task; terminal native
+receipts supply Web history, not a parallel UI log. Six-hour maintenance calls
+native compaction. English selection and quota enforcement are deterministic in
+`agent/english.ts`; its isolated, tool-less model conversation supplies wording.
+Learning progress, the actual card and the outgoing item commit atomically.
+The host delivery poll uses existing direct-send receipts and passive chat records.
+`web/schedules.ts` projects these native records, including latest-ten history.
+See [ADR 0032](adr/0032-native-background-schedules.md).
 
 ## 2. Workflow
 
@@ -69,11 +80,6 @@ agent/deliver.ts
                            v
                       Messages.app -> User
 ```
-
-Each chat has its own conversation. `/stop` aborts current work.
-Only final answers go to chat; commentary and diagnostics stay local.
-After a restart, unfinished sends become `unknown`, never automatically resent.
-The web UI reads through Harness APIs, not directly from JSONL files.
 
 ### Inside the Harness
 

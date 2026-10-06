@@ -24,7 +24,7 @@ import type { MessageSender } from "../src/transport/send.ts";
 let directory: string;
 let agent: Awaited<ReturnType<typeof startService>>;
 let faux: FauxProviderHandle;
-let options: Required<Parameters<typeof startService>[0]>;
+let options: Required<Omit<Parameters<typeof startService>[0], "runScheduled">>;
 const send = vi.fn<SendText>();
 const sendAttachment = vi.fn<MessageSender["sendAttachment"]>();
 const textCalls = () => send.mock.calls.map(([chatGuid, text]) => [chatGuid, text]);
@@ -571,6 +571,7 @@ it("starts quietly and wires default coding/image tools, model defaults and work
 		"read",
 		"save_memory",
 		"search_memory",
+		"send_message",
 		"subagent",
 		"web_search",
 		"write",

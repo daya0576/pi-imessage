@@ -8,8 +8,6 @@ it("keeps source imports within a package or pointing down the architecture", as
 		host: 1,
 		migrate: 1,
 		web: 2,
-		scheduler: 2,
-		automation: 2,
 		agent: 3,
 		extensions: 4,
 		transport: 5,

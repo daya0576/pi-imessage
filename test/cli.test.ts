@@ -127,6 +127,13 @@ it("loads CLI environment without overriding explicit values and retains proxy c
 		expect(JSON.parse(response.stdout)).toEqual(["proxied", "direct"]);
 		expect(proxyRequests).toBe(1);
 		expect(directRequests).toBe(1);
+		// #33 / ADR 0016: exercise the late process-owned setup under the same daemon flags.
+		const transport = await execute(
+			job.ProgramArguments[0],
+			[...job.ProgramArguments.slice(1, -2), resolve("test/fixtures/http-transport.ts")],
+			{ env: { HOME: directory, PATH: process.env.PATH }, timeout: 15_000 },
+		);
+		expect(transport.stdout).toContain("HTTP transport verified");
 		const original = await readFile(plist, "utf8");
 		await expect(
 			execute(process.execPath, ["--experimental-strip-types", cli, "install"], {
@@ -183,6 +190,17 @@ NO_PROXY="127.0.0.1,localhost"
 			timeout: 10_000,
 		});
 		expect(quiet.stdout).toContain("Import and help remained quiet");
+		await expect(
+			execute(
+				process.execPath,
+				["--experimental-strip-types", cli, "serve", "--run-scheduled", "fixture-job"],
+				{
+					cwd: directory,
+					env: explicit,
+					timeout: 10_000,
+				},
+			),
+		).rejects.toThrow("Usage: serve --run-scheduled JOB --request-id ID");
 		const overridePath = join(directory, "alternate & config.env");
 		await writeFile(overridePath, 'WEB_PORT="7799"\nBRAVE_API_KEY="alternate fixture value"\n');
 		const override = { ...explicit, WEB_PORT: undefined, DOTENV_CONFIG_PATH: overridePath };
@@ -219,7 +237,6 @@ NO_PROXY="127.0.0.1,localhost"
 			const preflightEnvironment = {
 				...explicit,
 				PI_BROWSER_CLI_PATH: browserCli,
-				PI_SCHEDULER_SERVICE_PATH: resolve("test/fixtures/scheduler-service.cjs"),
 			};
 			const preflight = await execute(
 				process.execPath,
