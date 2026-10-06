@@ -1,7 +1,7 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
-import { createRegistry, type Extension } from "@earendil-works/pi-durable";
+import { type Cursor, createRegistry, type Extension } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import {
 	type AgentDefaults,
@@ -23,6 +23,7 @@ import { loadPrompt } from "./agent/prompt.ts";
 import { Runs, runRecord } from "./agent/run.ts";
 import { deliverScheduled, EXECUTION_KIND, Schedules, schedulingExtension } from "./agent/scheduling.ts";
 import { isReplyEnabled, readSettings } from "./config/settings.ts";
+import { createBrowser } from "./extensions/browser.ts";
 import { memoryExtension } from "./extensions/memory.ts";
 import { messageExtension } from "./extensions/message.ts";
 import { ImageRead } from "./extensions/read-image.ts";
@@ -64,6 +65,7 @@ export async function startService(
 		};
 	}
 	const defaults = { ...runtime.defaults, model: { ...runtime.defaults.model } };
+	const browser = await createBrowser(options.workingDir, options.agentDir);
 	if (!runtime.models.getModel(defaults.model.provider, defaults.model.modelId))
 		throw new Error(`Model is unavailable: ${defaults.model.provider}/${defaults.model.modelId}`);
 	async function loadExtensions(): Promise<WorkspaceExtension[]> {
@@ -91,6 +93,7 @@ export async function startService(
 						ImageRead,
 						await memoryExtension(options.workingDir),
 						webExtension(),
+						browser.extension,
 						Subagent,
 						workspaceExtension(reload),
 					]),
@@ -121,6 +124,8 @@ export async function startService(
 	const scheduling = schedulingExtension(harness, defaults);
 	let progress: Awaited<ReturnType<typeof startProgress>>;
 	try {
+		// The native owner lock is acquired before cleaning up browsers left by a previous process.
+		await browser.close();
 		if (owner.registry.snapshot().extension(scheduling.extension.name))
 			throw new Error(`Duplicate extension name: ${scheduling.extension.name}`);
 		owner.registry.install(scheduling.extension);
@@ -158,7 +163,7 @@ export async function startService(
 			sendAttachment: options.sendAttachment,
 		});
 	} catch (error) {
-		await owner.close();
+		await owner.close(browser.close);
 		throw error;
 	}
 
@@ -312,6 +317,31 @@ export async function startService(
 					chatGuid: snapshot.chatGuid,
 					guid: snapshot.guid,
 					text: snapshot.text,
+					async closeBrowsers(chatId) {
+						const ids = new Set([
+							chatId,
+							...((await harness.snapshot(Runs, BACKGROUND_CONTEXT))?.items ?? [])
+								.filter((run) => run.chat === chatId)
+								.map((run) => run.conversationId),
+						]);
+						const conversations = await harness.commit(async (tx) => {
+							const records = [];
+							let cursor: Cursor | undefined;
+							do {
+								const page = await tx.scanConversations({}, 100, cursor);
+								records.push(...page.items);
+								cursor = page.next;
+							} while (cursor);
+							return records;
+						}, BACKGROUND_CONTEXT);
+						let previous = 0;
+						do {
+							previous = ids.size;
+							for (const child of conversations)
+								if (child.owner && ids.has(child.owner.conversationId)) ids.add(child.id);
+						} while (ids.size !== previous);
+						await browser.close([...ids]);
+					},
 				});
 				const reply = async () => {
 					let text = result.reply;
@@ -410,7 +440,7 @@ export async function startService(
 			closing ??= (async () => {
 				await Promise.allSettled([...operations]);
 				await progress.close();
-				await owner.close();
+				await owner.close(browser.close);
 			})();
 			return closing;
 		},

@@ -48,6 +48,13 @@ code fails explicitly on restart. The assistant's `reload_extensions` tool uses
 the same service owner. See [workspace extensions](workspace-extensions.md),
 ADR 0035 and ADR 0036.
 
+The built-in native `browser` extension wraps the pinned pi-browser CLI with
+host-derived conversation scopes. Browser children get private HOME/cache,
+profile/output and cwd; other coding tools are unchanged. The host owns scoped
+stop/reset/shutdown/restart cleanup, while Durable owns invocation state and
+unsafe replay policy. Read-only contexts do not offer the tool. This is not an
+OS sandbox; see [browser operations and retention](browser.md) and ADR 0017.
+
 
 ### Native schedules
 

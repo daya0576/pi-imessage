@@ -64,9 +64,11 @@ export async function openHarness(
 				harness,
 				storage,
 				registry,
-				close() {
+				close(beforeUnlock?: () => Promise<void>) {
 					closing ??= (async () => {
 						await harness.close(BACKGROUND_CONTEXT);
+						// External browser resources must be closed before another owner can resume this workspace.
+						await beforeUnlock?.();
 						await lock.close();
 						await unlink(lockPath);
 					})();

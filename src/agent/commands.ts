@@ -3,6 +3,7 @@ import type { Models, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import {
 	type AgentChange,
 	type CompactionResult,
+	type ConversationId,
 	type Harness,
 	LiveDoc,
 	type SubmissionRecord,
@@ -62,6 +63,7 @@ export async function runCommand(options: {
 	models: Models;
 	defaults: AgentDefaults;
 	reload: () => Promise<AgentDefaults>;
+	closeBrowsers?: (chat: ConversationId) => Promise<void>;
 	chatGuid: string;
 	guid: string;
 	text: string;
@@ -87,13 +89,17 @@ export async function runCommand(options: {
 			if (run) {
 				await harness.abortTask(run.taskId, BACKGROUND_CONTEXT);
 				await harness.waitForTask(run.taskId, BACKGROUND_CONTEXT);
+				await options.closeBrowsers?.(conversation.id);
 				return { reply: "Stopped." };
 			}
 			// Abort the generation that owns the current inputs, not the conversation, so later queued
 			// messages stay in the inbox (ADR 0015). Retry while generation hands the same inputs over.
 			const live = async () => (await harness.snapshot(LiveDoc, conversation.id, BACKGROUND_CONTEXT))?.run;
 			const stopping = await live();
-			if (!stopping) return { reply: "Nothing is running." };
+			if (!stopping) {
+				await options.closeBrowsers?.(conversation.id);
+				return { reply: "Nothing is running." };
+			}
 			for (
 				let current: typeof stopping | undefined = stopping;
 				current?.inputs[0] === stopping.inputs[0];
@@ -102,6 +108,7 @@ export async function runCommand(options: {
 				await harness.abortTask(current.taskId, BACKGROUND_CONTEXT);
 				await harness.waitForTask(current.taskId, BACKGROUND_CONTEXT);
 			}
+			await options.closeBrowsers?.(conversation.id);
 			// A passive note gives Durable a boundary to place the queued messages.
 			await conversation.submit(
 				{
@@ -120,6 +127,7 @@ export async function runCommand(options: {
 			if (name === "/new") {
 				// The run task belongs to the chat conversation, so this abort stops it too.
 				await conversation.abort(BACKGROUND_CONTEXT);
+				await options.closeBrowsers?.(conversation.id);
 				await conversation.reset(undefined, BACKGROUND_CONTEXT);
 			}
 			const agent = await conversation.agent(BACKGROUND_CONTEXT);

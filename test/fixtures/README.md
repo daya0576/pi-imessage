@@ -12,3 +12,10 @@ The HEIC integration test exercises the application's real `/usr/bin/sips` conve
 into a temporary workspace. It records argv and returns configured JSON, with
 explicit failure and cancellation modes. It does not read personal memories or
 reimplement the store's validation, deduplication, or correction logic.
+
+## Browser CLI
+
+`browser-cli.cjs` is a fake argv/environment subprocess boundary, not a browser
+engine. It records only fixture inputs in private temporary scopes and provides
+controlled output, failure and cancellation. Real pinned CLI/Chrome behavior is
+covered separately by the loopback-only `ops/browser-smoke.mjs` fixture.

@@ -564,6 +564,7 @@ it("starts quietly and wires default coding/image tools, model defaults and work
 	expect(resolved?.model).toEqual(options.runtime.defaults.model);
 	expect(resolved?.tools.map((tool) => tool.name).sort()).toEqual([
 		"bash",
+		"browser",
 		"edit",
 		"fetch_content",
 		"get_search_results",
@@ -577,8 +578,10 @@ it("starts quietly and wires default coding/image tools, model defaults and work
 		"web_search",
 		"write",
 	]);
-	// ADR 0039: every built-in tool reruns after an interruption.
-	expect(resolved?.tools.every((tool) => tool.replay === "safe")).toBe(true);
+	// ADR 0039: built-ins default to safe; browser mutations explicitly opt out of replay (ADR 0017).
+	expect(resolved?.tools.every((tool) => tool.replay === (tool.name === "browser" ? "unsafe" : "safe"))).toBe(
+		true,
+	);
 	expect(resolved?.tools.find((tool) => tool.name === "read")?.description).toContain(
 		"Images are kept as file references",
 	);

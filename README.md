@@ -8,7 +8,7 @@ A minimal, self-managing iMessage bot powered by [Pi Durable](https://github.com
 
 - **Minimal**: No BlueBubbles or webhook setup. Runs directly on your Mac alongside Messages.app.
 - **Messages**: DMs, SMS, and group chats, with sender identification and reply context.
-- **Self-managing**: The agent builds its own tools, with web search, page fetch, and browser access through native tools and skills.
+- **Self-managing**: The agent builds its own tools, with native web search, page fetch, and a [conversation-owned browser](docs/browser.md).
 - **Web UI**: Chat history, native task state, scheduled jobs with their latest ten executions, logs, memory, and configuration.
 - **Memory**: Searchable, traceable records; corrections preserve history. See [structured memory](docs/memory.md).
 
