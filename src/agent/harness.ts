@@ -26,7 +26,11 @@ export async function openHarness(
 			const registry = createRegistry();
 			registry.install(chatBehavior(storage));
 			registry.install(RunExtension);
-			for (const extension of extensions) registry.install(extension);
+			for (const extension of extensions) {
+				if (registry.snapshot().extension(extension.name))
+					throw new Error(`Duplicate extension name: ${extension.name}`);
+				registry.install(extension);
+			}
 			const env = new NodeExecutionEnv({ cwd: workingDir });
 			const harness = await Harness.open(
 				storage,

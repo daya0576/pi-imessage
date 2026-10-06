@@ -1,7 +1,7 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
-import type { Extension } from "@earendil-works/pi-durable";
+import { createRegistry, type Extension } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import {
 	type AgentDefaults,
@@ -29,6 +29,7 @@ import { messageExtension } from "./extensions/message.ts";
 import { ImageRead } from "./extensions/read-image.ts";
 import { Subagent } from "./extensions/subagent.ts";
 import { webExtension } from "./extensions/web.ts";
+import { loadWorkspaceExtensions } from "./extensions/workspace.ts";
 import { archiveAttachments } from "./transport/attachments.ts";
 import { openHttpTransport } from "./transport/http.ts";
 import type { MessageSender } from "./transport/send.ts";
@@ -66,7 +67,7 @@ export async function startService(
 	if (!runtime.models.getModel(defaults.model.provider, defaults.model.modelId))
 		throw new Error(`Model is unavailable: ${defaults.model.provider}/${defaults.model.modelId}`);
 	async function loadExtensions() {
-		return [
+		const extensions = [
 			await loadPrompt(options.workingDir, options.agentDir),
 			...(!options.extensions
 				? [
@@ -91,22 +92,36 @@ export async function startService(
 						ImageRead,
 						await memoryExtension(options.workingDir),
 						webExtension(),
+						...(await loadWorkspaceExtensions(options.workingDir)),
 						Subagent,
 					]),
 		];
+		const names = new Set<string>();
+		for (const extension of extensions) {
+			if (names.has(extension.name)) throw new Error(`Duplicate extension name: ${extension.name}`);
+			names.add(extension.name);
+		}
+		return extensions;
 	}
 	const settings = SettingsManager.create(options.workingDir, options.agentDir);
+	let activeExtensions: readonly Extension[] = await loadExtensions();
 	const owner = await openHarness(
 		options.workingDir,
 		withCodexFast(runtime.models),
-		await loadExtensions(),
+		activeExtensions,
 		requestSettings(settings),
 	);
 	const { harness, storage } = owner;
 	const scheduling = schedulingExtension(harness, defaults);
-	owner.registry.install(scheduling.extension);
 	let progress: Awaited<ReturnType<typeof startProgress>>;
 	try {
+		if (owner.registry.snapshot().extension(scheduling.extension.name))
+			throw new Error(`Duplicate extension name: ${scheduling.extension.name}`);
+		owner.registry.install(scheduling.extension);
+		for (const { record } of (await harness.inspect(BACKGROUND_CONTEXT)).tasks) {
+			if (!owner.registry.snapshot().task(record.kind))
+				throw new Error(`Missing definition for unfinished task: ${record.kind}`);
+		}
 		await scheduling.initialize(await readSettings(options.workingDir));
 		if (options.runScheduled)
 			await scheduling.runOnce(options.runScheduled.jobId, options.runScheduled.requestId);
@@ -126,7 +141,37 @@ export async function startService(
 		if (installed)
 			Object.assign(defaults, await readDefaults(installed, options.workingDir, options.agentDir));
 		await settings.reload();
-		for (const extension of await loadExtensions()) owner.registry.install(extension);
+		const next = await loadExtensions();
+		const nextNames = new Set(next.map((extension) => extension.name));
+		const activeNames = new Set(activeExtensions.map((extension) => extension.name));
+		const unfinished = new Set(
+			(await harness.inspect(BACKGROUND_CONTEXT)).tasks.map(({ record }) => record.kind),
+		);
+		const retained = activeExtensions
+			.filter((extension) => !nextNames.has(extension.name))
+			.map((extension) => ({
+				name: extension.name,
+				tasks: extension.tasks?.filter((task) => unfinished.has(task.definition.name)),
+			}))
+			.filter((extension) => extension.tasks?.length);
+		const candidate = createRegistry();
+		const names = new Set<string>();
+		for (const extension of [
+			...owner.registry
+				.snapshot()
+				.installed()
+				.filter((extension) => !activeNames.has(extension.name)),
+			...retained,
+			...next,
+		]) {
+			if (names.has(extension.name)) throw new Error(`Duplicate extension name: ${extension.name}`);
+			names.add(extension.name);
+			candidate.install(extension);
+		}
+		// Validate the complete replacement first; the synchronous publication does not stop running calls.
+		for (const extension of activeExtensions) owner.registry.uninstall(extension);
+		for (const extension of [...retained, ...next]) owner.registry.install(extension);
+		activeExtensions = [...retained, ...next];
 		console.log(new Date().toISOString(), "Agent reloaded", { model: defaults.model });
 		return { ...defaults, model: { ...defaults.model } };
 	}

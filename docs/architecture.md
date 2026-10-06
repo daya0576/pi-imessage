@@ -33,11 +33,19 @@ cannot import each other; imports within a package are allowed.
 | 1 | `migrate/` | One-time history import; writes directly to Durable storage. |
 | 2 | `web/` | HTTP API; read-only pages for chat history and live state. |
 | 3 | `agent/` | Harness, models, chat mapping, commands, delivery, prompt, `/run`, native background schedules and English learning. |
-| 4 | `extensions/` | Native tools: memory, subagents, image reading, web search and page fetch. |
+| 4 | `extensions/` | Native tools and explicit loading of trusted workspace tool extensions. |
 | 5 | `transport/` | Poll chat.db, archive attachments, send text and files through Messages.app. No agent logic. |
 | 6 | `config/` | Settings, environment variables and chat allowlist. |
 
-Planned enforcement: `test/architecture.test.ts`. Rationale: [ADRs](adr/).
+Enforcement: `test/architecture.test.ts`. Rationale: [ADRs](adr/).
+
+Personal tool code lives under `WORKING_DIR/extensions/<name>/index.ts` with
+its own `config.json`. Startup and `/reload` scan direct child directories. Native
+CommonJS module factories (`module.exports`) receive the pinned Durable primitives;
+the loader never scans skills or attachments, installs dependencies or adapts SDK
+extensions. Source and configuration reload without interrupting current calls.
+Failed reloads retain old definitions; unfinished native tasks keep required code.
+English and generic business scheduling migration remain separate. See ADR 0035.
 
 
 ### Native schedules
