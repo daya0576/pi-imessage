@@ -6,7 +6,6 @@ it("keeps source imports within a package or pointing down the architecture", as
 	const root = resolve("src");
 	const layers: Record<string, number> = {
 		host: 1,
-		migrate: 1,
 		web: 2,
 		agent: 3,
 		extensions: 4,

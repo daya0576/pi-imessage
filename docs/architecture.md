@@ -4,7 +4,7 @@
 
 ```text
 ┌────────────────────────────────────────────┐
-│ 1  main.ts · cli.ts · migrate/              │
+│ 1  main.ts · cli.ts                        │
 ├────────────────────────────────────────────┤
 │ 2  web/                                    │
 ├────────────────────────────────────────────┤
@@ -22,15 +22,13 @@
 ### Notes
 
 These are folders under `src/`, not separate npm packages.
-The root `main.ts` and `cli.ts` files form one host package. `migrate/` is a
-separate top-layer executable: the CLI invokes it by process argv, not an import.
+The root `main.ts` and `cli.ts` files form one host package.
 Lower layer numbers may import higher ones. Different packages in the same layer
 cannot import each other; imports within a package are allowed.
 
 | Layer | Package | Responsibility |
 |---|---|---|
 | 1 | `main.ts`, `cli.ts` | Startup, wiring and installation. |
-| 1 | `migrate/` | One-time history import; writes directly to Durable storage. |
 | 2 | `web/` | HTTP API; read-only pages for chat history and live state. |
 | 3 | `agent/` | Harness, models, chat mapping, commands, delivery, prompt, `/run`, native background scheduling and maintenance. |
 | 4 | `extensions/` | Built-in native tools and loading of trusted workspace business extensions. |

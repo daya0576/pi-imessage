@@ -29,7 +29,6 @@ pi-imessage install     # write a launchd job; loading it is a separate operator
 
 Enable replies for your chats by adding their GUIDs to the [settings allowlist](#settings).
 For installation and service operations, see [ops/README.md](ops/README.md).
-Upgrading from the legacy service? Follow the [migration guide](ops/CUTOVER.md).
 
 ## Commands
 

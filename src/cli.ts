@@ -1,10 +1,9 @@
 #!/usr/bin/env -S node --use-env-proxy --experimental-strip-types
-import { execFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { parseEnv, promisify } from "node:util";
+import { parseEnv } from "node:util";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { startApplication } from "./main.ts";
 import { createMessageSender } from "./transport/send.ts";
@@ -12,7 +11,7 @@ import { createMessageSender } from "./transport/send.ts";
 export async function main(args = process.argv.slice(2)) {
 	if (args.includes("--help") || args[0] === "help") {
 		console.log(
-			"pi-imessage [serve]\npi-imessage serve --run-scheduled JOB --request-id ID (one explicit run at startup)\npi-imessage import --source PATH --target PATH --backup PATH --cursor NUMBER\npi-imessage install (write launchd job only)\nSee ops/README.md for operator-only installation, cutover and rollback.",
+			"pi-imessage [serve]\npi-imessage serve --run-scheduled JOB --request-id ID (one explicit run at startup)\npi-imessage install (write launchd job only)\nSee ops/README.md for operator-only installation, deployment and restart.",
 		);
 		return;
 	}
@@ -63,19 +62,6 @@ export async function main(args = process.argv.slice(2)) {
 		console.log(
 			`Wrote ${path}. Not loaded. Follow ops/README.md for controller handover; never run two services.`,
 		);
-		return;
-	}
-	if (args[0] === "import") {
-		const result = await promisify(execFile)(
-			process.execPath,
-			[
-				"--experimental-strip-types",
-				fileURLToPath(new URL("./migrate/migrate.ts", import.meta.url)),
-				...args.slice(1),
-			],
-			{ maxBuffer: 1024 * 1024 },
-		);
-		console.log(result.stdout.trim());
 		return;
 	}
 	if (args.length && args[0] !== "serve") throw new Error("Unknown command; see --help");

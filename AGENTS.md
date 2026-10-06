@@ -88,7 +88,7 @@ with the dependency version pinned in this project before adopting their APIs.
 
 - Deploy and verify each completed change without asking again for routine deployment approval. Follow the routine deployment/restart section in `ops/README.md`; documentation-only edits need no runtime restart.
 - Run the service from a fixed release directory, never the main checkout: [Release directories](ops/README.md#release-directories).
-- Use [ops/CUTOVER.md](ops/CUTOVER.md) ([ADR 0009](docs/adr/0009-one-shot-cutover.md)) only for the first migration. Never run old and new message pipelines concurrently.
+- Never run old and new message pipelines concurrently.
 - Routine commits and pushes are separately authorized under Git above. Deployment authorization does not include paid model probes, real test messages, unrelated service changes or data cleanup. Do not require the user to execute authorized commands personally. Stop for new material safety or data-integrity risks.
 
 ## User Override

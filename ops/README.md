@@ -12,8 +12,7 @@ Never run old/new pipelines concurrently or use production data in tests.
 Implementation readiness and open decisions are tracked in GitHub #33.
 
 For ordinary updates, use [Routine deployment and restart](#routine-deployment-and-restart).
-For the first migration from the legacy service, use the separate
-[cutover and migration rollback guide](CUTOVER.md). Do not rerun it for ordinary updates.
+The one-time legacy migration is archived at tag `archive/legacy-migration` (ADR 0043).
 
 ## Prerequisites
 
@@ -116,7 +115,6 @@ unrelated legacy jobs as part of this migration.
 | Web `app.js` / `style.css` only | Verify the served assets; no restart (the file cache checks metadata). |
 | Documentation only | Commit and push; no reload or restart. |
 | Configuration supported by `/reload` | Reload; restart only for startup-only configuration. Never send an iMessage to trigger it. |
-| First legacy-to-Durable migration | [CUTOVER.md](CUTOVER.md) only. |
 
 Deploying means the change is live and verified, then committed and pushed.
 
