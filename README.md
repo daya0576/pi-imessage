@@ -1,6 +1,6 @@
 # pi-imessage
 
-A minimal, self-managing iMessage bot powered by Pi Durable.
+A minimal, self-managing iMessage bot powered by [Pi Durable](https://github.com/earendil-works/pi/tree/main/packages/durable).
 
 <img height="420" src="docs/screenshot.png" />
 
