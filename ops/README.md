@@ -139,6 +139,27 @@ restarting an unchanged process. Delivery also includes committing and pushing
 the intended changes under the owner's standing authorization. HEAD alone does
 not identify a dirty deployment.
 
+### Release directories
+
+The service runs a fixed commit, never the main checkout, so merged or
+half-edited files do not go live on the next restart.
+
+```sh
+SHA=$(git -C /Users/clawbot/pi-imessage-next rev-parse HEAD)
+RELEASE=/Users/clawbot/pi-imessage-releases/$SHA
+git -C /Users/clawbot/pi-imessage-next worktree add --detach "$RELEASE" "$SHA"
+(cd "$RELEASE" && npm ci --ignore-scripts)
+```
+
+- The controller starts the new process from `$RELEASE`; `WORKING_DIR` and the
+  agent directory do not change.
+- Never edit a release directory. Rollback is a routine restart from the
+  previous one.
+- Keep the latest three. Remove an older one with `git worktree remove` (no
+  `--force`) only when no process or launchd plist uses it.
+- The main checkout is only for merging. The first restart under this rule
+  moves the service out of it.
+
 ### 1. Identify once; retain the evidence
 
 ```sh
