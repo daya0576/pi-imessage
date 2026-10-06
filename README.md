@@ -13,7 +13,7 @@ A minimal, self-managing iMessage bot powered by [Pi Durable](https://github.com
 
 ## Quick Start
 
-Just point your Pi coding agent at this README and ask it to set up pi-imessage.
+> Just point your Pi coding agent at this README and ask it to set up pi-imessage.
 
 Prerequisites: macOS with Messages.app, Node.js 22.22.2 or newer, Python 3
 (shared memory writer), Full Disk Access for the terminal, and an authenticated
