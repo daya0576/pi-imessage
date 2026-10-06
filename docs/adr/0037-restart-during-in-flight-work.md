@@ -1,6 +1,6 @@
 # 0037. Restart during in-flight work
 
-Status: proposed
+Status: accepted
 
 **Problem.** Routine deployment waits for an idle service. An active chat can keep
 the service busy for a long time, so a finished change stays undeployed.
