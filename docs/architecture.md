@@ -134,7 +134,7 @@ Conversation / Tasks                                                      Model 
 |       ▶ phase=call; state=pending                                         |                     |
 |         Resolve tool; validate arguments                                  |                     |
 |       ▶ phase=execute; state=running                                      |                     |
-|         Save arguments + replay=unsafe; pi.live tool running              |                     |
+|         Save arguments + replay=safe; pi.live tool running                |                     |
 |         -------------------------------- execute command="pwd" --------------------------------->
 |         <----------------------------- result: current directory -------------------------------|
 |         Entry 14 (main.jsonl) - pi.tool-result, byTaskId=12               |                     |

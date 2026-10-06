@@ -577,6 +577,8 @@ it("starts quietly and wires default coding/image tools, model defaults and work
 		"web_search",
 		"write",
 	]);
+	// ADR 0039: every built-in tool reruns after an interruption.
+	expect(resolved?.tools.every((tool) => tool.replay === "safe")).toBe(true);
 	expect(resolved?.tools.find((tool) => tool.name === "read")?.description).toContain(
 		"Images are kept as file references",
 	);

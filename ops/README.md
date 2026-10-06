@@ -110,110 +110,68 @@ unrelated legacy jobs as part of this migration.
 
 ### Choose the smallest operation
 
-| Change | Deployment action |
+| Change | Action |
 |---|---|
-| Server, agent, transport or imported TypeScript modules | Restart the one owning service; verify the changed behavior. |
-| Web `app.js` / `style.css` only | Verify the served assets and refresh the browser. The existing file cache checks file metadata; no process restart is needed. |
-| Documentation only | Update the source checkout and check the diff. No runtime reload or restart is needed. |
-| Configuration supported by `/reload` | Use the documented reload path; restart only for startup-only configuration. Do not manufacture an iMessage to trigger it. |
-| First legacy-to-Durable migration | Follow [CUTOVER.md](CUTOVER.md). Do not rerun the importer against the existing workspace. |
+| Server, agent, transport or imported TypeScript | Restart from a new release directory; verify the change. |
+| Web `app.js` / `style.css` only | Verify the served assets; no restart (the file cache checks metadata). |
+| Documentation only | Commit and push; no reload or restart. |
+| Configuration supported by `/reload` | Reload; restart only for startup-only configuration. Never send an iMessage to trigger it. |
+| First legacy-to-Durable migration | [CUTOVER.md](CUTOVER.md) only. |
 
-Deploying means the intended change is available and verified. It does not mean
-restarting an unchanged process. Delivery also includes committing and pushing
-the intended changes under the owner's standing authorization. HEAD alone does
-not identify a dirty deployment.
+Deploying means the change is live and verified, then committed and pushed.
 
 ### Release directories
 
-The service runs a fixed commit, never the main checkout, so merged or
-half-edited files do not go live on the next restart.
+The service runs a fixed commit, never the main checkout:
 
 ```sh
-SHA=$(git -C /Users/clawbot/pi-imessage-next rev-parse HEAD)
+SHA=$(git -C /Users/clawbot/pi-imessage-next rev-parse origin/main)
 RELEASE=/Users/clawbot/pi-imessage-releases/$SHA
 git -C /Users/clawbot/pi-imessage-next worktree add --detach "$RELEASE" "$SHA"
-(cd "$RELEASE" && npm ci --ignore-scripts)
+(cd "$RELEASE" && npm ci --ignore-scripts && node --experimental-strip-types ops/preflight.mjs)
 ```
 
-- The controller starts the new process from `$RELEASE`; `WORKING_DIR` and the
-  agent directory do not change.
-- Never edit a release directory. Rollback is a routine restart from the
-  previous one.
-- Keep the latest three. Remove an older one with `git worktree remove` (no
-  `--force`) only when no process or launchd plist uses it.
-- The main checkout is only for merging. The first restart under this rule
-  moves the service out of it.
+Never edit a release directory; rollback is a routine restart from the previous
+one. Keep the latest three; remove older ones with `git worktree remove` (no
+`--force`) when no process or plist uses them. A release directory has no `.env`:
+set `DOTENV_CONFIG_PATH` to the main checkout's `.env`.
 
-### 1. Identify once; retain the evidence
+### 1. Identify the running service
 
 ```sh
-cd /Users/clawbot/pi-imessage-next
-git rev-parse HEAD
-git status --short
 launchctl list | grep -Ei 'pi-imessage|pi-web' || true
-lsof -nP -iTCP:7750 -sTCP:LISTEN
-# Set PID from the listener, never from this document or a previous deployment.
+lsof -nP -iTCP:7750 -sTCP:LISTEN          # take PID from here, never from notes
 ps -p "$PID" -o pid,ppid,lstart,command
-lsof -a -p "$PID" -d cwd,txt,1,2 -Fn
+lsof -a -p "$PID" -d cwd,1,2 -Fn
 ```
 
-Identify the controller, executable, source directory, startup time, selected
-workspace/agent directory and actual log destinations. A similarly named Pi web
-job is not evidence that it controls this service. Do not stop unrelated jobs.
+The claw baseline is a **Terminal foreground process** (not launchd) running from
+a release directory, with `WORKING_DIR=~/.pi/imessage-next`,
+`PI_CODING_AGENT_DIR=~/.pi/agent`, Node 22, logs in `WORKING_DIR/service.log`, and
+the owner-selected unauthenticated bind `0.0.0.0:7750` (trusted networks only).
+A similarly named Pi web job does not control this service. Do not switch
+controllers, install launchd or upgrade Node during a routine restart.
 
-The verified claw baseline is a **Terminal foreground process**, not a loaded
-Durable launchd job. It uses `/Users/clawbot/pi-imessage-next`, the selected Node
-22 executable, `~/.pi/imessage-next`, and `~/.pi/agent`. Its current log destination
-is `WORKING_DIR/service.log`, resolving through the workspace symlink. These are
-starting hints, not substitutes for the commands above. Preserve the configured
-bind; the owner-selected `0.0.0.0:7750` is unauthenticated and for trusted networks
-only. Do not switch controllers, install launchd, or upgrade Node as part of a
-routine restart.
+### 2. Record the baseline (ADR 0038)
 
-Read `/chat/data` for **counts** of `inspection.tasks` and
-`inspection.submissions`. Prefer an idle restart. Native `imessage.schedule`
-background tasks in a `sleep` checkpoint with a future deadline are expected;
-they do not block restart and their checkpoints must be retained. Active
-occurrences, generations, tools, queued submissions or an imminent scheduler
-wake still defer the stop. If new work appears before stopping, defer and
-recheck; do not abort it merely to deploy. Inspect relevant
-reply/send receipts and record counts of `sending` / `unknown`, without dumping
-chat text. Existing unknown receipts do not require resending or block an idle
-restart. Never reset cursors, delete state or replay uncertain effects.
+Restart at any time; no running work defers it. Before stopping, record the
+counts of `sending` / `unknown` receipts from `/chat/data` (counts only, no chat
+text). Never reset cursors, delete state or replay uncertain sends. Do not use
+`/health/model`: it is a paid request.
 
-### 2. Check only what changed
+### 3. Run one private controller
 
-For code, run `npm run check` and the affected test files. Before a commit, run
-full `npm test` as required by `AGENTS.md`. Reuse passing results for the same
-source; do not rerun the full suite after an unchanged read-only inspection.
-Run the safe preflight for a new Node/dependency/permission environment, or an
-unverified fresh launch. Reuse it when that environment is unchanged. Keep full
-check output. Do not use `/health/model` as a startup probe: it is a paid request.
+In a `mktemp -d /tmp/pi-imessage-restart.XXXXXX` directory with `umask 077`:
 
-Record changed-source hashes or an equivalent source fingerprint alongside HEAD
-and dirty paths. Recheck the fingerprint and service identity immediately before
-stopping. Unrelated drafts must remain intact. If they introduce a new runtime
-risk, resolve that scope before deploying the whole checkout.
-
-### 3. Prepare one private, independent controller
-
-Create a private directory with `mktemp -d /tmp/pi-imessage-restart.XXXXXX` and
-`umask 077`. Prepare **all** files before opening the controller:
-
-- `environment.sh`: shell-quoted exports of the selected process environment
-  overrides. Capture in memory or directly into a mode-600 file; never print
-  `ps eww`, credentials, complete plists or the full environment to tool output.
-  Preserve `WORKING_DIR`, `PI_CODING_AGENT_DIR`, `DOTENV_CONFIG_PATH`, Web/DB
-  overrides, proxy/bypass variables (both cases), `NODE_OPTIONS`, search keys,
-  HOME/locale, `TZ` and PATH. Read cwd `.env` only to resolve values not overridden by
-  the running process. Retain `~/.pi/agent/bin` and the selected Node directory in
-  PATH; do not silently substitute the tool runner's environment.
-- `control.sh`: shell-quoted values for `OLD_PID`, `OLD_STARTED` (exact `ps`
-  startup-time output), `EXPECTED_COMMAND`, `REPO`, `NODE`, `WORKING_DIR`,
-  `WEB_PORT`, `LOG_FILE` and `DEPLOY_DIR`, all resolved from step 1.
-- `restart.command`: the following one-shot controller. Compare the prepared
-  source fingerprint and idle-work counts before launching it. Do not edit a
-  controller while it runs.
+- `environment.sh`: shell-quoted exports of the running process's `WORKING_DIR`,
+  `PI_CODING_AGENT_DIR`, `DOTENV_CONFIG_PATH`, Web/DB overrides, proxy variables
+  (both cases), `NODE_OPTIONS`, search keys, HOME, locale, `TZ` and PATH (keep
+  `~/.pi/agent/bin` and the Node directory). Write it directly; never print
+  values, `ps eww` output or credentials.
+- `control.sh`: shell-quoted `OLD_PID`, `OLD_STARTED` (exact `ps -o lstart=`),
+  `EXPECTED_COMMAND`, `REPO` (the release directory), `NODE`, `WORKING_DIR`,
+  `WEB_PORT` and `LOG_FILE`.
+- `restart.command`:
 
 ```sh
 #!/bin/bash
@@ -252,55 +210,27 @@ exec 3>&-
 exec "$NODE" --use-env-proxy --experimental-strip-types src/cli.ts serve >> "$LOG_FILE" 2>&1
 ```
 
-For the verified Terminal controller, launch through the normal application
-launcher:
+Launch it once with `chmod 700` and `open -a Terminal "$DEPLOY_DIR/restart.command"`
+(`osascript` `do script` times out on claw). The separate Terminal keeps the
+controller alive when the initiating agent's own turn is interrupted. For a
+launchd controller, use that job's lifecycle instead; never `launchctl kickstart -k`
+from inside the service.
 
-```sh
-chmod 700 "$DEPLOY_DIR/restart.command"
-open -a Terminal "$DEPLOY_DIR/restart.command"
-```
+### 4. Verify
 
-This path succeeded on claw; `osascript` with Terminal `do script` timed out.
-Use `open` first, rather than rediscovering the AppleScript path. This is not
-permission to bypass macOS privacy/security prompts. Stop on a permission denial.
-The independent Terminal also avoids killing the initiating agent's own turn.
+Read `controller.log`, `new.pid`, the service log and the listener first. Never
+launch the controller twice before the first outcome is known. Require:
 
-If the actual controller is launchd instead, use that identified job's lifecycle
-and preserve its reviewed configuration; do not launch a Terminal copy alongside
-it. A loaded KeepAlive job can respawn after a bare PID kill. Never use legacy
-blue-green scripts or `launchctl kickstart -k` from inside the service-owned agent.
-
-### 4. Verify the result, not the invocation
-
-A timeout or disconnected tool does not prove the controller failed. Read
-`controller.log`, `new.pid`, the selected service log and the listener first.
-**Do not launch the controller a second time** until the first outcome is known.
-
-Require:
-
-1. Old PID absent; owner lock released during the handover; exactly one new
-   service/listener with the expected executable, cwd, configuration and PATH.
-   A new owner lock after startup is normal.
+1. Old PID gone; exactly one new process and listener, cwd in the release
+   directory.
 2. Fresh `Application starting`, `Agent ready`, `Web server listening`,
-   `Messaging ready` and `Application started` records; no startup failure.
-3. Root HTTP 200 and a read-only check of the changed API/assets. For UI work,
-   verify the changed behavior in the browser, not just the page's status code.
-4. Pending/uncertain receipt state preserved without manual replay. Use existing
-   continuation evidence if available; do not initiate a model call or send a
-   test message without separate authorization. Report that verification limit.
+   `Messaging ready` and `Application started`; no startup error.
+3. Root and changed endpoints return 200; check UI changes in a browser.
+4. Interrupted work continues; scheduler deadlines are unchanged; receipt
+   counts change only by new sends and sends interrupted by the stop.
 
-On a remaining lock, occupied port, shutdown timeout or startup failure, stop and
-report the specific blocker. Keep state and logs intact. Do not force-kill,
-steal the lock, reinstall dependencies or restore a workspace snapshot to make
-readiness appear successful. Inspect the failure before attempting a controlled
-recovery with the same state and correct startup configuration.
-
-Record deployment time, source fingerprint (including dirty state), new PID,
-checks and unverified limits in structured memory via `pi-memory`. Service logs
-retain the lifecycle evidence. Remove completed ad-hoc controller scripts and
-private environment snapshots from `/tmp`; retain any needed sanitized receipt.
-Then report **deployed and verified**, or the concrete blocker. Do not stop at
-"tests passed" or "rule remembered" when runtime deployment is still required.
-
-All release gates, unresolved behavior decisions and verification evidence live
-in GitHub #33. This document is an operating procedure, not a completion claim.
+On a timeout, lock, occupied port or startup failure, stop and report it. Do not
+force-kill, steal the lock, reinstall dependencies or restore a workspace snapshot.
+Record the deployment (time, commit, PID, checks, unverified limits) with
+`pi-memory`, delete the `/tmp` controller directory, and report **deployed and
+verified** or the blocker. Release gates and evidence live in GitHub #33.
