@@ -11,11 +11,9 @@ Accepted ADR files are never edited; this index records which ones are current.
 | [0002](0002-module-layering.md) | Modules in strict layers | Active |
 | [0003](0003-replies-at-most-once.md) | Replies are sent at most once | Active |
 | [0004](0004-native-extensions.md) | Native Durable extensions, not an SDK adapter | Active; Codex tier clause replaced by 0036 |
-| [0005](0005-history-migration.md) | Import old history once | Active (done) |
 | [0006](0006-jsonl-storage.md) | One JSONL storage, backed up by hand | Active |
 | [0007](0007-images-by-path.md) | Store images as file paths | Active |
 | [0008](0008-compaction-and-run.md) | Six-hour compaction | Active; `/run` clause replaced by 0012 |
-| [0009](0009-one-shot-cutover.md) | Switch over in one step | Active (done) |
 | [0010](0010-test-budget.md) | About 40 tests | Active |
 | [0011](0011-reconcile-unsent-answers.md) | Reconcile unsent answers | Active |
 | [0012](0012-run-in-owned-conversation.md) | `/run` in an owned conversation | Active |
@@ -27,11 +25,15 @@ Accepted ADR files are never edited; this index records which ones are current.
 | [0040](0040-chat-progress-notices.md) | Chat progress notices | Active; consolidates 0020–0028, 0031 |
 | [0041](0041-restart-and-recovery.md) | Restart and recovery | Active; consolidates 0037–0039 |
 | [0042](0042-background-schedules-and-workspace-extensions.md) | Background schedules and workspace extensions | Active; consolidates 0019, 0032–0035 |
+| [0043](0043-remove-legacy-migration.md) | Remove the legacy migration code | Active; archived at tag `archive/legacy-migration` |
+| [0044](0044-message-channels.md) | Organize message sources as channels | Proposed |
 
 ## Replaced or rejected
 
 | ADR | Decision | Replaced by |
 |---|---|---|
+| [0005](0005-history-migration.md) | Import old history once | 0043 (done) |
+| [0009](0009-one-shot-cutover.md) | Switch over in one step | 0043 (done) |
 | [0014](0014-ephemeral-private-storage.md) | Ephemeral private storage | 0018 |
 | [0015](0015-ordinary-stop-keeps-native-inbox.md) | `/stop` keeps the native inbox | 0018 |
 | [0030](0030-shared-web-read-cache.md) | Shared web read cache | Rejected; removed |
