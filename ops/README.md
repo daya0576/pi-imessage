@@ -1,9 +1,13 @@
 # Operations: deployment, restart and first cutover
 
 The owner has authorized deployment after each completed change, including
-verification. Do not ask again for routine deployment in that scope. This does
-not authorize Git commits, paid probes, test messages, data cleanup or unrelated
-service changes. Stop for a new material safety or data-integrity risk.
+verification, plus committing and pushing each completed intended project change
+after the required checks. Do not ask again for routine deployment or commit/push
+approval in that scope. Stage explicit intended paths; exclude unrelated drafts,
+temporary files and credentials. Verify the pushed remote revision; stop on a
+rejected push, never force push. This does not authorize paid probes, test messages,
+data cleanup or unrelated service changes. Stop for a new material safety or
+data-integrity risk.
 Never run old/new pipelines concurrently or use production data in tests.
 Implementation readiness and open decisions are tracked in GitHub #33.
 
@@ -104,8 +108,9 @@ application does not open a second log file.
 | First legacy-to-Durable migration | Follow the cutover section below. Do not rerun the importer against the existing workspace. |
 
 Deploying means the intended change is available and verified. It does not mean
-restarting an unchanged process. A Git commit is not required unless separately
-requested, and HEAD alone does not identify a dirty deployment.
+restarting an unchanged process. Delivery also includes committing and pushing
+the intended changes under the owner's standing authorization. HEAD alone does
+not identify a dirty deployment.
 
 ### 1. Identify once; retain the evidence
 

@@ -63,7 +63,8 @@ with the dependency version pinned in this project before adopting their APIs.
 
 ## Git
 
-- Commit only when the user asks.
+- After each completed project change, run the required checks, deploy and verify as needed, then commit and push the intended changes to the tracking remote. The owner has given standing authorization; do not wait for another commit/push request.
+- Leave unrelated drafts, temporary files and credentials out of commits. Stop and report a rejected push; never force push.
 - Stage explicit paths; never `git add -A` or `git add .`.
 - Never `git reset --hard`, `git checkout .`, `git clean -fd`, `git stash`, `--no-verify`, or force push.
 - Message: `type(scope): summary`, with type one of `feat`, `fix`, `refactor`, `test`, `docs`, `chore`.
@@ -77,7 +78,7 @@ with the dependency version pinned in this project before adopting their APIs.
 
 - Deploy and verify each completed change without asking again for routine deployment approval. Follow the routine deployment/restart section in `ops/README.md`; documentation-only edits need no runtime restart.
 - Use the one-shot cutover ([ADR 0009](docs/adr/0009-one-shot-cutover.md)) only for the first migration. Never run old and new message pipelines concurrently.
-- Deployment authorization does not imply Git commits, paid model probes, real test messages, unrelated service changes or data cleanup. Do not require the user to execute authorized commands personally. Stop for new material safety or data-integrity risks.
+- Routine commits and pushes are separately authorized under Git above. Deployment authorization does not include paid model probes, real test messages, unrelated service changes or data cleanup. Do not require the user to execute authorized commands personally. Stop for new material safety or data-integrity risks.
 
 ## User Override
 
