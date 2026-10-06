@@ -93,10 +93,15 @@ it("loads skills and request settings, then refreshes resources and native polic
 				expect(prompt).not.toContain("POST /reminders");
 				expect(prompt).not.toContain("/cron/jobs.json");
 				expect(prompt).toContain("create or update a trusted workspace extension");
-				// #33: messaging guidance must agree with workspace-owned native scheduling.
-				expect(prompt).toContain("Delayed and recurring work must use native Durable tasks");
+				// #35: extensions remain available, without requiring them for scheduled work.
+				expect(prompt).toContain("Apply workspace extension changes with reload_extensions");
+				expect(prompt).not.toContain("For delayed or recurring work");
+				expect(prompt).not.toContain("Delayed and recurring work must use");
 				expect(prompt).not.toContain("Delayed and recurring work is not supported");
-				expect(prompt).toContain("never use external timers, operating-system jobs or a second pipeline");
+				expect(prompt).not.toContain("never use external timers");
+				expect(prompt).not.toContain("Do not use skills, attachments, detached timers");
+				expect(prompt).not.toContain("crontab");
+				expect(prompt).not.toContain("second pipeline");
 				expect(prompt).not.toContain("For every environment modification");
 				expect(prompt).toContain("Include original URLs only when the user asks for links");
 				expect(prompt).not.toContain("Read references/style.md");

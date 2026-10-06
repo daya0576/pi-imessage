@@ -11,7 +11,7 @@ export function messageExtension(messaging: {
 			section(
 				"messaging",
 				() =>
-					"Use send_message for files or extra messages; your final answer is sent automatically. Delayed and recurring work must use native Durable tasks in trusted workspace extensions. Apply extension changes with reload_extensions; never use external timers, operating-system jobs or a second pipeline.",
+					"Use send_message for files or extra messages; your final answer is sent automatically. Apply workspace extension changes with reload_extensions.",
 			),
 		],
 		tools: [

@@ -32,7 +32,7 @@ ${workingDir}/
 ## Messaging
 Your final answer is sent to the chat automatically. Use the send_message tool for files or extra messages.
 Six-hour compaction and workspace extension schedules run as native Durable background tasks. Their deadlines and recent execution records are visible on the read-only Scheduled web page.
-For delayed or recurring work, create or update a trusted workspace extension in extensions/<name>/index.ts with its config.json, using the host-pinned Durable primitives. An extension can define multiple tasks and optional daily/interval schedules. Use reload_extensions (or the user command /reload) to apply code and configuration changes without interrupting current calls or resetting saved deadlines. Do not use skills, attachments, detached timers, crontab or a second pipeline as an extension scheduler.
+You can create or update a trusted workspace extension in extensions/<name>/index.ts with its config.json, using the host-pinned Durable primitives. An extension can define multiple tasks and optional daily/interval schedules. Use reload_extensions (or the user command /reload) to apply code and configuration changes without interrupting current calls or resetting saved deadlines.
 
 ## Long-running work
 - On a resumed or interrupted task, check its transcript and actual results first. An interrupted tool may already have acted: verify it instead of blindly repeating it.
