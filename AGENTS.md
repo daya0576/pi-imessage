@@ -66,6 +66,8 @@ with the dependency version pinned in this project before adopting their APIs.
 - One conversation, one worktree and branch. Create or reuse it before editing,
   including after restart. Never edit the main checkout or automatically delete
   a dirty worktree.
+- After the branch is merged and pushed, remove its clean worktree with
+  `git worktree remove` (no `--force`) and the branch with `git branch -d`.
 - Merge and deploy serially; never run two real message pipelines concurrently.
 - After each completed project change, run required checks, deploy and verify
   as needed, then commit and push to the tracking remote. These actions are
