@@ -11,7 +11,7 @@ import { createMessageSender } from "./transport/send.ts";
 export async function main(args = process.argv.slice(2)) {
 	if (args.includes("--help") || args[0] === "help") {
 		console.log(
-			"pi-imessage [serve]\npi-imessage serve --run-scheduled JOB --request-id ID (one explicit run at startup)\npi-imessage install (write launchd job only)\nSee ops/README.md for operator-only installation, deployment and restart.",
+			"pi-imessage [serve]\npi-imessage install (write launchd job only)\nSee ops/README.md for operator-only installation, deployment and restart.",
 		);
 		return;
 	}
@@ -65,25 +65,14 @@ export async function main(args = process.argv.slice(2)) {
 		return;
 	}
 	if (args.length && args[0] !== "serve") throw new Error("Unknown command; see --help");
-	let runScheduled: { jobId: string; requestId: string } | undefined;
-	if (args.length > 1) {
-		if (
-			args.length !== 5 ||
-			args[1] !== "--run-scheduled" ||
-			args[3] !== "--request-id" ||
-			!args[2].trim() ||
-			!args[4].trim()
-		)
-			throw new Error("Usage: serve --run-scheduled JOB --request-id ID");
-		runScheduled = { jobId: args[2], requestId: args[4] };
-	}
+	if (args.length > 1)
+		throw new Error("Unknown serve arguments; use workspace configuration and reload_extensions");
 	const dbPath = process.env.MESSAGES_DB_PATH ?? join(homedir(), "Library", "Messages", "chat.db");
 	// Incoming archives stay in the workspace; outgoing staging uses Messages' readable root.
 	const sender = createMessageSender({ dbPath });
 	const app = await startApplication({
 		workingDir,
 		agentDir,
-		...(runScheduled ? { runScheduled } : {}),
 		dbPath,
 		send: sender.sendMessage,
 		sendAttachment: sender.sendAttachment,

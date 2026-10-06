@@ -204,7 +204,7 @@ NO_PROXY="127.0.0.1,localhost"
 					timeout: 10_000,
 				},
 			),
-		).rejects.toThrow("Usage: serve --run-scheduled JOB --request-id ID");
+		).rejects.toThrow("Unknown serve arguments");
 		const overridePath = join(directory, "alternate & config.env");
 		await writeFile(overridePath, 'WEB_PORT="7799"\nBRAVE_API_KEY="alternate fixture value"\n');
 		const override = { ...explicit, WEB_PORT: undefined, DOTENV_CONFIG_PATH: overridePath };

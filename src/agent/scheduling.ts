@@ -45,6 +45,22 @@ export const Schedules = defineDoc<{ items: Schedule[] }>({
 	initial: () => ({ items: [] }),
 });
 
+export const RunRequests = defineDoc<{
+	items: {
+		id: string;
+		jobId: string;
+		requestedAt: "now" | number;
+		at: number;
+		taskId: TaskId;
+		enabled: boolean;
+	}[];
+}>({
+	kind: "imessage.schedule-requests",
+	version: 1,
+	scope: "session",
+	initial: () => ({ items: [] }),
+});
+
 function nextAt(schedule: Schedule, previous: number, now: number) {
 	if (schedule.time !== undefined) return nextDaily(schedule.time, now);
 	const interval = schedule.intervalMs ?? SIX_HOURS;
@@ -56,6 +72,7 @@ type ExecutionInput = {
 	dueAt: number;
 	startedAt: number;
 	date: string;
+	requestId?: string;
 };
 type ExecutionResult = { summary: string; requestId?: string; finishedAt: number };
 type ExecutionState =
@@ -64,10 +81,12 @@ type ExecutionState =
 	| { phase: "execute"; execution: TaskId<ExecutionResult> };
 type ScheduleState =
 	| { phase: "sleep"; at: number }
-	| { phase: "advance"; at: number; execution: TaskId<ExecutionResult> };
+	| { phase: "advance"; at: number; execution: TaskId<ExecutionResult> }
+	| { phase: "retry"; at: number; execution: TaskId<ExecutionResult> };
 
 /** Durable owns cadence and execution receipts; extensions own business tasks and documents. */
 export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
+	let admissionReady = true;
 	const Execution = defineTask<ExecutionInput, ExecutionState, ExecutionResult>({
 		name: EXECUTION_KIND,
 		version: 2,
@@ -135,22 +154,40 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 			await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context);
 		},
 	});
-	const Scheduler = defineTask<{ jobId: string; firstAt: number }, ScheduleState, null>({
+	const Scheduler = defineTask<{ jobId: string; firstAt: number; requestId?: string }, ScheduleState, null>({
 		name: "imessage.schedule",
-		version: 1,
+		version: 2,
+		migrate(input, checkpoint) {
+			return { input: input as { jobId: string; firstAt: number }, checkpoint: checkpoint as ScheduleState };
+		},
 		initial: (input) => ({ phase: "sleep", at: input.firstAt }),
 		phases: {
 			async sleep(task, runtime, context) {
 				const { at } = task.state.checkpoint;
 				await runtime.sleep(at, context);
+				// Due-now work must not start between the configuration commit and registry publication.
+				if (!admissionReady) {
+					await runtime.sleep(runtime.now() + 100, context);
+					await runtime.commit(() => ({ status: "running", checkpoint: task.state.checkpoint }), context);
+					return;
+				}
 				await runtime.commit(async (tx) => {
 					const schedule = (await tx.doc(Schedules)).items.find((item) => item.id === task.input.jobId);
 					if (!schedule) throw new Error("Scheduled job is missing");
+					if (
+						task.input.requestId &&
+						!(await tx.doc(RunRequests)).items.find((item) => item.id === task.input.requestId)?.enabled
+					)
+						return { status: "terminal", outcome: { status: "completed", result: null } };
 					const now = runtime.now();
 					const beforeToday = schedule.time !== undefined && now < dailyTime(schedule.time, now);
-					if (!schedule.enabled || beforeToday)
+					if (!schedule.enabled)
+						return task.input.requestId
+							? { status: "terminal", outcome: { status: "completed", result: null } }
+							: { status: "running", checkpoint: { phase: "sleep", at: nextAt(schedule, at, now) } };
+					if (!task.input.requestId && beforeToday)
 						return { status: "running", checkpoint: { phase: "sleep", at: nextAt(schedule, at, now) } };
-					// A manual occurrence and a deadline share the same non-overlap boundary.
+					// All triggers of a job share its non-overlap boundary.
 					for (const status of ["pending", "running", "waiting", "completing"] as const) {
 						const existing = (
 							await tx.scanTasks({ conversationId: schedule.conversationId, kind: EXECUTION_KIND, status }, 1)
@@ -158,14 +195,24 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 						if (existing)
 							return {
 								status: "waiting",
-								checkpoint: { phase: "advance", at, execution: existing.id as TaskId<ExecutionResult> },
+								checkpoint: {
+									phase: task.input.requestId ? "retry" : "advance",
+									at,
+									execution: existing.id as TaskId<ExecutionResult>,
+								},
 								on: [existing.id],
 								policy: "allSettled",
 							};
 					}
 					const execution = await tx.createTask(
 						Execution,
-						{ jobId: schedule.id, dueAt: at, startedAt: now, date: localDate(now) },
+						{
+							jobId: schedule.id,
+							dueAt: at,
+							startedAt: now,
+							date: localDate(now),
+							...(task.input.requestId ? { requestId: task.input.requestId } : {}),
+						},
 						{ ownership: { kind: "task", taskId: task.id } },
 					);
 					return {
@@ -176,7 +223,20 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 					};
 				}, context);
 			},
+			async retry(task, runtime, context) {
+				await runtime.commit(
+					() => ({ status: "running", checkpoint: { phase: "sleep", at: task.state.checkpoint.at } }),
+					context,
+				);
+			},
 			async advance(task, runtime, context) {
+				if (task.input.requestId) {
+					await runtime.commit(
+						() => ({ status: "terminal", outcome: { status: "completed", result: null } }),
+						context,
+					);
+					return;
+				}
 				await runtime.commit(async (tx) => {
 					const schedule = (await tx.doc(Schedules)).items.find((item) => item.id === task.input.jobId);
 					if (!schedule) throw new Error("Scheduled job is missing");
@@ -203,33 +263,8 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 	});
 	return {
 		extension: defineExtension({ name: "scheduling", tasks: [Scheduler, Execution] }),
-		async runOnce(jobId: string, requestId: string) {
-			if (!jobId.trim() || !requestId.trim() || requestId.length > 200)
-				throw new Error("Job and request ID are required");
-			return harness.commit(async (tx) => {
-				const schedule = (await tx.doc(Schedules)).items.find((item) => item.id === jobId);
-				if (!schedule?.enabled) throw new Error("Scheduled job is missing or disabled");
-				const existing = schedule.manualRuns?.[requestId];
-				if (existing) return existing;
-				for (const status of ["pending", "running", "waiting", "completing"] as const)
-					if (
-						(await tx.scanTasks({ conversationId: schedule.conversationId, kind: EXECUTION_KIND, status }, 1))
-							.items.length
-					)
-						throw new Error("Scheduled job is already executing");
-				const now = Date.now();
-				const execution = await tx.createTask(
-					Execution,
-					{ jobId, dueAt: now, startedAt: now, date: localDate(now) },
-					{ conversationId: schedule.conversationId, ownership: { kind: "conversation" }, background: true },
-				);
-				schedule.manualRuns ??= {};
-				schedule.manualRuns[requestId] = execution;
-				return execution;
-			}, BACKGROUND_CONTEXT);
-		},
 		/** May join a host reload commit. Existing task IDs and absolute deadlines are never reset. */
-		async initialize(extensions: readonly WorkspaceExtension[], transaction?: Tx) {
+		async initialize(extensions: readonly WorkspaceExtension[], transaction?: Tx, publish?: () => void) {
 			validateSchedules(extensions);
 			const timezone = new Intl.DateTimeFormat().resolvedOptions().timeZone;
 			const initialize = async (tx: Tx) => {
@@ -285,9 +320,52 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 				}
 				const ids = new Set(definitions.map((definition) => definition.id));
 				for (const item of state.items) if (!ids.has(item.id)) item.enabled = false;
+				const requests = await tx.doc(RunRequests);
+				for (const extension of extensions)
+					for (const request of extension.runRequests ?? []) {
+						const existing = requests.items.find((item) => item.id === request.id);
+						if (existing) {
+							if (existing.jobId !== request.scheduleId || existing.requestedAt !== request.at)
+								throw new Error(`Run request ID already used with different configuration: ${request.id}`);
+							existing.enabled = true;
+							continue;
+						}
+						const schedule = state.items.find((item) => item.id === request.scheduleId);
+						if (!schedule?.enabled) throw new Error("Run request target is unavailable");
+						if (schedule.manualRuns?.[request.id])
+							throw new Error("Run request ID belongs to a historical operator run");
+						const at = request.at === "now" ? Date.now() : request.at;
+						const taskId = await tx.createTask(
+							Scheduler,
+							{ jobId: schedule.id, firstAt: at, requestId: request.id },
+							{
+								conversationId: schedule.conversationId,
+								ownership: { kind: "conversation" },
+								background: true,
+							},
+						);
+						requests.items.push({
+							id: request.id,
+							jobId: schedule.id,
+							requestedAt: request.at,
+							at,
+							taskId,
+							enabled: true,
+						});
+					}
+				const declaredRequests = new Set(
+					extensions.flatMap((extension) => (extension.runRequests ?? []).map((request) => request.id)),
+				);
+				for (const request of requests.items) if (!declaredRequests.has(request.id)) request.enabled = false;
 			};
-			if (transaction) await initialize(transaction);
-			else await harness.commit(initialize, BACKGROUND_CONTEXT);
+			admissionReady = false;
+			try {
+				if (transaction) await initialize(transaction);
+				else await harness.commit(initialize, BACKGROUND_CONTEXT);
+				publish?.();
+			} finally {
+				admissionReady = true;
+			}
 		},
 	};
 }

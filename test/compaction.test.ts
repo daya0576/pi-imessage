@@ -11,7 +11,7 @@ import { defineDoc } from "@earendil-works/pi-durable";
 import { expect, it, vi } from "vitest";
 import { compactionReply } from "../src/agent/commands.ts";
 import { DirectSends } from "../src/agent/direct-send.ts";
-import { ScheduledOutbox, Schedules } from "../src/agent/scheduling.ts";
+import { RunRequests, ScheduledOutbox, Schedules } from "../src/agent/scheduling.ts";
 import { startService } from "../src/main.ts";
 import { readSchedules } from "../src/web/schedules.ts";
 
@@ -169,29 +169,36 @@ module.exports = ({ config, defineDoc, defineTask, defineExtension, ScheduledOut
 			if (job) job.timezone = "Pacific/Honolulu";
 		}, BACKGROUND_CONTEXT);
 		await agent.close();
-		const manualRun = { jobId: "compact-chats", requestId: "fixture-manual-once" };
-		agent = await startService({ ...scheduledOptions, runScheduled: manualRun });
-		expect(await agent.harness.getTask(daily.taskId, BACKGROUND_CONTEXT)).toEqual(deadline);
-		expect((await readSchedules(agent.harness)).jobs.find((job) => job.id === daily.id)?.timezone).toBe(
-			timezone,
+		const runRequests = [{ id: "fixture-now", scheduleId: daily.id, at: "now" }];
+		await writeFile(
+			join(fixture, "config.json"),
+			JSON.stringify({ time: "07:45", chatGuid: "fixture-chat", runRequests }),
 		);
+		agent = await startService(scheduledOptions);
+		expect(await agent.harness.getTask(daily.taskId, BACKGROUND_CONTEXT)).toMatchObject({
+			state: deadline?.state,
+		});
 		agent.harness.resume();
-		await vi.waitFor(
-			async () => {
-				if (!agent) throw new Error("Missing service");
-				const maintenance = (await readSchedules(agent.harness)).jobs.find(
-					(job) => job.kind === "compaction",
-				);
-				expect(maintenance?.runs[0].status).toBe("completed");
-				expect(maintenance?.nextAt).toBe(Date.parse("2026-10-07T13:40:00"));
-			},
-			{ timeout: 5000 },
-		);
+		await vi.waitFor(async () => {
+			if (!agent) throw new Error("Missing service");
+			expect(
+				(await readSchedules(agent.harness)).jobs.find((job) => job.id === daily.id)?.runs[0].status,
+			).toBe("completed");
+		});
+		const request = (await agent.harness.snapshot(RunRequests, BACKGROUND_CONTEXT))?.items[0];
+		if (!request) throw new Error("Missing one-off trigger");
+		expect(await agent.harness.getTask(request.taskId, BACKGROUND_CONTEXT)).toMatchObject({
+			kind: "imessage.schedule",
+			background: true,
+		});
+		send.mockClear();
+		await agent.deliver();
 		await agent.close();
-		agent = await startService({ ...scheduledOptions, runScheduled: manualRun });
-		expect(
-			(await readSchedules(agent.harness)).jobs.find((job) => job.kind === "compaction")?.runs,
-		).toHaveLength(1);
+		agent = await startService(scheduledOptions);
+		expect((await readSchedules(agent.harness)).jobs.find((job) => job.id === daily.id)?.runs).toHaveLength(
+			1,
+		);
+		expect((await agent.harness.snapshot(RunRequests, BACKGROUND_CONTEXT))?.items[0]).toEqual(request);
 		await agent.close();
 
 		// An admitted occurrence pauses; restart without its code fails instead of disabling the work.
@@ -229,7 +236,6 @@ module.exports = ({ config, defineDoc, defineTask, defineExtension, ScheduledOut
 			{ timeout: 5000 },
 		);
 		expect((await agent.harness.snapshot(ScheduledOutbox, BACKGROUND_CONTEXT))?.items).toHaveLength(1);
-		send.mockClear();
 		await agent.deliver();
 		await agent.deliver();
 		expect(send.mock.calls).toEqual([["fixture-chat", "v1"]]);
@@ -279,7 +285,10 @@ module.exports = ({ config, defineDoc, defineTask, defineExtension, ScheduledOut
 			},
 			{ timeout: 5000 },
 		);
-		expect((await agent.harness.snapshot(effects, BACKGROUND_CONTEXT))?.values).toEqual(["v1:fixture-daily"]);
+		expect((await agent.harness.snapshot(effects, BACKGROUND_CONTEXT))?.values).toEqual([
+			"v1:fixture-daily",
+			"v1:fixture-daily",
+		]);
 		await agent.close();
 		await writeFile(join(fixture, "config.json"), JSON.stringify({ time: "07:45", enabled: false }));
 		for (let index = 0; index < 12; index++) {
@@ -345,11 +354,15 @@ module.exports = ({ config, defineDoc, defineTask, defineExtension, ScheduledOut
 		).rejects.toThrow("Duplicate workspace task");
 		await writeFile(join(fixture, "index.ts"), fixtureSource.replace('"v1"', '"v2"'));
 		await writeFile(join(fixture, "config.json"), JSON.stringify({ time: "22:59", intervalMs: 100 }));
-		await agent.close();
-		agent = await startService({
-			...scheduledOptions,
-			runScheduled: { jobId: "fixture-daily", requestId: "fixture-daily-once" },
-		});
+		await writeFile(
+			join(fixture, "config.json"),
+			JSON.stringify({
+				time: "22:59",
+				intervalMs: 100,
+				runRequests: [{ id: "fixture-daily-once", scheduleId: "fixture-daily", at: "now" }],
+			}),
+		);
+		await agent.command({ chatGuid: "control", guid: "one-off-reload", text: "/reload" });
 		agent.harness.resume();
 		const dailyHarness = agent.harness;
 		await vi.waitFor(
@@ -362,12 +375,14 @@ module.exports = ({ config, defineDoc, defineTask, defineExtension, ScheduledOut
 		await agent.close();
 		await writeFile(
 			join(fixture, "config.json"),
-			JSON.stringify({ time: "22:59", intervalMs: 100, pauseUntil: now + 300 }),
+			JSON.stringify({
+				time: "22:59",
+				intervalMs: 100,
+				pauseUntil: now + 300,
+				runRequests: [{ id: "fixture-interval-once", scheduleId: "fixture-interval", at: "now" }],
+			}),
 		);
-		agent = await startService({
-			...scheduledOptions,
-			runScheduled: { jobId: "fixture-interval", requestId: "fixture-interval-once" },
-		});
+		agent = await startService(scheduledOptions);
 		agent.harness.resume();
 		const intervalHarness = agent.harness;
 		await vi.waitFor(async () =>
@@ -410,6 +425,7 @@ module.exports = ({ config, defineDoc, defineTask, defineExtension, ScheduledOut
 			{ timeout: 5000 },
 		);
 		expect((await agent.harness.snapshot(effects, BACKGROUND_CONTEXT))?.values).toEqual([
+			"v1:fixture-daily",
 			"v1:fixture-daily",
 			"v2:fixture-daily",
 			"v2:fixture-interval",

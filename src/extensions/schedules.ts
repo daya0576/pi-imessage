@@ -15,7 +15,13 @@ export type WorkspaceSchedule = {
 	initialize?(tx: Tx, conversationId: ConversationId): Promise<void>;
 };
 
-export type WorkspaceExtension = Extension & { schedules?: readonly WorkspaceSchedule[] };
+export type WorkspaceRunRequest = { id: string; scheduleId: string; at: "now" | number };
+
+export type WorkspaceExtension = Extension & {
+	schedules?: readonly WorkspaceSchedule[];
+	/** One-off triggers share the target schedule's business state and execution path. */
+	runRequests?: readonly WorkspaceRunRequest[];
+};
 
 /** Business state and outgoing items can be committed together by a native extension task. */
 export const ScheduledOutbox = defineDoc<{
@@ -29,6 +35,7 @@ export const ScheduledOutbox = defineDoc<{
 
 export function validateSchedules(extensions: readonly WorkspaceExtension[]) {
 	const ids = new Set(["compact-chats"]);
+	const requestIds = new Set<string>();
 	for (const extension of extensions) {
 		for (const schedule of extension.schedules ?? []) {
 			if (!schedule.id?.trim() || !schedule.name?.trim() || typeof schedule.enabled !== "boolean")
@@ -44,6 +51,23 @@ export function validateSchedules(extensions: readonly WorkspaceExtension[]) {
 					(!Number.isSafeInteger(schedule.intervalMs) || schedule.intervalMs <= 0))
 			)
 				throw new Error("Schedule requires either HH:MM time or a positive intervalMs");
+		}
+		for (const request of extension.runRequests ?? []) {
+			if (
+				typeof request.id !== "string" ||
+				!request.id.trim() ||
+				request.id.length > 200 ||
+				requestIds.has(request.id)
+			)
+				throw new Error("Run request requires a unique nonempty ID");
+			requestIds.add(request.id);
+			if (!extension.schedules?.some((schedule) => schedule.id === request.scheduleId && schedule.enabled))
+				throw new Error("Run request must target an enabled schedule of its own extension");
+			if (
+				request.at !== "now" &&
+				(!Number.isSafeInteger(request.at) || request.at < 0 || request.at > 8640000000000000)
+			)
+				throw new Error("Run request at must be now or an epoch millisecond timestamp");
 		}
 	}
 }

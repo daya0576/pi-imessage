@@ -93,6 +93,39 @@ The destination must be reply-enabled. `sending`/`unknown` effects are never
 replayed automatically; a queued item is not proof of delivery. Keep credentials
 out of `settings.json`; the schedule view does not show extension configuration.
 
+## One-off runs through the same scheduler
+
+For an existing factory that does not declare `runRequests`, the loader takes
+that field directly from `config.json`; business code need not change. A factory
+can instead explicitly supply its own `runRequests` declarations alongside its
+`schedules`. For example, the extension's `config.json` can include:
+
+```json
+{
+  "runRequests": [
+    { "id": "example-trial-1", "scheduleId": "example-tick", "at": "now" }
+  ]
+}
+```
+
+Apply the configuration with `reload_extensions` (or the existing `/reload`).
+The target must be an enabled schedule belonging to that extension. `at` is
+`"now"` or an absolute epoch-millisecond timestamp. There is no configuration
+watcher or separate CLI/HTTP execution entry point.
+
+The owner persists a background `imessage.schedule` task for the request, then
+uses the same occurrence wrapper and business conversation as recurring runs.
+A busy target delays the one-off until its active occurrence settles. The request
+ID and resolved deadline survive reload/restart, including after completion.
+Reuse the same declaration to recover it; use a new ID for a new intended run.
+Conflicting reuse fails rather than changing an existing request.
+
+Removing a request prevents future admission, not an already admitted business
+task. Re-adding a consumed ID never runs it again. Business per-date dedupe and
+delivery receipts still apply; a trial does not force another English card.
+Regular task IDs and deadlines do not move. Historical operator runs remain
+stored, but startup `--run-scheduled` flags are no longer accepted.
+
 Removing an extension disables future schedule admission and removes its tools
 and prompt sections, not current calls or historical records. Removed task code
 is conservatively retained in memory until restart, because an old running call

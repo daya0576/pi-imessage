@@ -43,8 +43,6 @@ export async function startService(
 		workingDir: string;
 		agentDir: string;
 		runtime?: { models: Models; defaults: AgentDefaults };
-		/** Explicit operator startup request; a stable ID prevents replay after restart. */
-		runScheduled?: { jobId: string; requestId: string };
 		/** Optional tool selection for isolated callers; rebuilt at startup and on /reload. */
 		extensions?: () => readonly Extension[] | Promise<readonly Extension[]>;
 		send: SendText;
@@ -155,8 +153,6 @@ export async function startService(
 				throw new Error(`Missing extension for unfinished schedule: ${saved.id}`);
 		}
 		await scheduling.initialize(activeExtensions);
-		if (options.runScheduled)
-			await scheduling.runOnce(options.runScheduled.jobId, options.runScheduled.requestId);
 		await recoverSending(harness);
 		progress = await startProgress(harness, options.workingDir, {
 			sendMessage: options.send,
@@ -235,13 +231,14 @@ export async function startService(
 		// A failed business initializer rolls back all schedule/configuration changes before publication.
 		await reloadHttpTransport?.();
 		await settings.reload();
-		await scheduling.initialize(next);
-		Object.assign(defaults, nextDefaults);
-		modelPolicy = nextPolicy;
-		// Validation is complete; synchronous publication leaves running invocations untouched.
-		for (const extension of activeExtensions) owner.registry.uninstall(extension);
-		for (const extension of [...retained, ...next]) owner.registry.install(extension);
-		activeExtensions = [...retained, ...next];
+		await scheduling.initialize(next, undefined, () => {
+			Object.assign(defaults, nextDefaults);
+			modelPolicy = nextPolicy;
+			// Publish before newly due triggers can admit business work.
+			for (const extension of activeExtensions) owner.registry.uninstall(extension);
+			for (const extension of [...retained, ...next]) owner.registry.install(extension);
+			activeExtensions = [...retained, ...next];
+		});
 		console.log(new Date().toISOString(), "Agent reloaded", { model: defaults.model });
 		return { ...defaults, model: { ...defaults.model } };
 	}

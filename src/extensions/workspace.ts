@@ -10,7 +10,12 @@ import {
 	defineTool,
 	section,
 } from "@earendil-works/pi-durable";
-import { ScheduledOutbox, validateSchedules, type WorkspaceExtension } from "./schedules.ts";
+import {
+	ScheduledOutbox,
+	validateSchedules,
+	type WorkspaceExtension,
+	type WorkspaceRunRequest,
+} from "./schedules.ts";
 
 const loadModule = createRequire(import.meta.url);
 
@@ -107,7 +112,11 @@ export async function loadWorkspaceExtensions(workingDir: string) {
 			if (taskNames.has(task.definition.name)) throw new Error("Duplicate workspace task name");
 			taskNames.add(task.definition.name);
 		}
-		extensions.push(native);
+		const runRequests = (config as Record<string, unknown>).runRequests;
+		if (native.runRequests === undefined && runRequests !== undefined) {
+			if (!Array.isArray(runRequests)) throw new Error("runRequests must be an array");
+			extensions.push({ ...native, runRequests: runRequests as WorkspaceRunRequest[] });
+		} else extensions.push(native);
 	}
 	validateSchedules(extensions);
 	return extensions;

@@ -78,6 +78,10 @@ settings. Startup and `/reload` load them; the assistant can use
 
 See [workspace extensions](docs/workspace-extensions.md) for the factory contract
 and scheduling rules.
+One-off runs use the same scheduler: declare a stable `runRequests` ID, target
+schedule and `at: "now"` (or epoch milliseconds) in the extension configuration,
+then call `reload_extensions`. No restart or separate execution API is needed.
+
 Times use the service machine's local timezone. Saved deadlines survive reload
 and restart; view schedules and latest-ten execution history at `/scheduled`.
 
@@ -115,7 +119,7 @@ All variables are optional.
 
 See the [HTTP API](docs/api.md) for read-only state and model health checks.
 The agent sends files and extra messages with `send_message`. The scheduler
-provides daily/interval cadence for workspace tasks and built-in six-hour compaction.
+provides daily/interval cadence and one-off triggers for workspace tasks, plus built-in six-hour compaction.
 It does not revive legacy cron files or HTTP prompt/send endpoints.
 
 ## How It Works

@@ -24,12 +24,13 @@ Accepted ADR files are never edited; this index records which ones are current.
 | [0036](0036-workspace-policy-and-neutral-service-id.md) | Workspace policy and neutral service ID | Active |
 | [0040](0040-chat-progress-notices.md) | Chat progress notices | Active; consolidates 0020–0028, 0031 |
 | [0041](0041-restart-and-recovery.md) | Restart and recovery | Active; consolidates 0037–0039 |
-| [0042](0042-background-schedules-and-workspace-extensions.md) | Background schedules and workspace extensions | Active; consolidates 0019, 0032–0035 |
+| [0042](0042-background-schedules-and-workspace-extensions.md) | Background schedules and workspace extensions | Active; operator-run clause replaced by 0047 |
 | [0043](0043-remove-legacy-migration.md) | Remove the legacy migration code | Active; archived at tag `archive/legacy-migration` |
 | [0044](0044-message-channels.md) | Organize message sources as channels | Proposed |
 | [0045](0045-chat-scheduling-tools.md) | Native chat scheduling tools | Proposed |
 
 | [0046](0046-selective-command-redaction.md) | Selective command-preview redaction | Proposed; owner-requested implementation in #36 |
+| [0047](0047-one-scheduling-path.md) | One scheduling path for recurring and one-off work | Active |
 
 ## Replaced or rejected
 
