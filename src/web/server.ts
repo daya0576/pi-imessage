@@ -40,7 +40,9 @@ function redact(value: unknown, compact = false, truncateStrings = true): string
 	return JSON.stringify(
 		value,
 		(key, item) =>
-			/^(authorization|password|apiKey|accessToken|refreshToken|secret)$/i.test(key)
+			/^(authorization|password|api[_-]?key|(?:(?:access|refresh)[_-]?)?token|secret|credentials?)$/i.test(
+				key,
+			)
 				? "[redacted]"
 				: truncateStrings && typeof item === "string" && item.length > 50000
 					? `${item.slice(0, 50000)}\n[truncated]`

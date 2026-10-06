@@ -5,8 +5,11 @@ export type Settings = {
 	chatAllowlist: { whitelist: string[]; blacklist: string[] };
 	richText: { enabled: boolean; markdown: boolean };
 	progressMessages: boolean;
-	/** Native daily job; configuration is applied at service startup. */
-	scheduledEnglish?: { enabled: boolean; chatGuid: string; time: string; historyFile: string };
+	/** No fallback or priority tier is selected unless explicitly configured. */
+	modelPolicy: {
+		fallback?: { provider: string; modelId: string };
+		codexServiceTier?: "default" | "priority";
+	};
 };
 
 export async function readSettings(workingDir: string): Promise<Settings> {
@@ -18,27 +21,31 @@ export async function readSettings(workingDir: string): Promise<Settings> {
 	}
 	const allowlist = raw.chatAllowlist as Partial<Settings["chatAllowlist"]> | undefined;
 	const richText = raw.richText as Partial<Settings["richText"]> | undefined;
-	let scheduledEnglish: Settings["scheduledEnglish"];
-	if (raw.scheduledEnglish !== undefined) {
-		const value = raw.scheduledEnglish;
-		if (!value || typeof value !== "object" || Array.isArray(value))
-			throw new Error("Invalid scheduledEnglish setting");
-		const job = value as Record<string, unknown>;
-		const time = job.time ?? "07:45";
+	const value = raw.modelPolicy ?? {};
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid modelPolicy");
+	const policy = value as Record<string, unknown>;
+	const modelPolicy: Settings["modelPolicy"] = {};
+	if (policy.fallback !== undefined) {
+		const fallback = policy.fallback as Record<string, unknown> | null;
 		if (
-			typeof job.enabled !== "boolean" ||
-			typeof job.chatGuid !== "string" ||
-			!job.chatGuid.trim() ||
-			typeof job.historyFile !== "string" ||
-			!job.historyFile.startsWith("/") ||
-			typeof time !== "string" ||
-			!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)
+			!fallback ||
+			typeof fallback.provider !== "string" ||
+			!fallback.provider.trim() ||
+			typeof fallback.modelId !== "string" ||
+			!fallback.modelId.trim()
 		)
-			throw new Error("scheduledEnglish requires enabled, chatGuid, absolute historyFile and HH:MM time");
-		scheduledEnglish = { enabled: job.enabled, chatGuid: job.chatGuid, historyFile: job.historyFile, time };
+			throw new Error("modelPolicy.fallback requires provider and modelId");
+		modelPolicy.fallback = { provider: fallback.provider, modelId: fallback.modelId };
+	}
+	if (policy.codexServiceTier !== undefined) {
+		if (policy.codexServiceTier !== "default" && policy.codexServiceTier !== "priority")
+			throw new Error("Invalid modelPolicy.codexServiceTier");
+		modelPolicy.codexServiceTier = policy.codexServiceTier;
 	}
 	return {
-		...(scheduledEnglish ? { scheduledEnglish } : {}),
+		// Preserve opaque workspace-owned settings in read-only configuration projections.
+		...raw,
+		modelPolicy,
 		progressMessages: raw.progressMessages === true,
 		chatAllowlist: {
 			whitelist: Array.isArray(allowlist?.whitelist)

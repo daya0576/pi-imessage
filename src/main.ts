@@ -17,19 +17,20 @@ import { deliverReplies, recoverSending, type SendText } from "./agent/deliver.t
 import { type DirectSendInput, deliverDirect } from "./agent/direct-send.ts";
 import { openHarness } from "./agent/harness.ts";
 import { submitHealth } from "./agent/health.ts";
-import { openModels, readDefaults, requestSettings, withCodexFast } from "./agent/models.ts";
+import { openModels, readDefaults, requestSettings, withModelPolicy } from "./agent/models.ts";
 import { startProgress } from "./agent/progress.ts";
 import { loadPrompt } from "./agent/prompt.ts";
 import { Runs, runRecord } from "./agent/run.ts";
-import { deliverScheduled, schedulingExtension } from "./agent/scheduling.ts";
+import { deliverScheduled, EXECUTION_KIND, Schedules, schedulingExtension } from "./agent/scheduling.ts";
 import { isReplyEnabled, readSettings } from "./config/settings.ts";
 import { BashProgress } from "./extensions/bash-progress.ts";
 import { memoryExtension } from "./extensions/memory.ts";
 import { messageExtension } from "./extensions/message.ts";
 import { ImageRead } from "./extensions/read-image.ts";
+import { validateSchedules, type WorkspaceExtension } from "./extensions/schedules.ts";
 import { Subagent } from "./extensions/subagent.ts";
 import { webExtension } from "./extensions/web.ts";
-import { loadWorkspaceExtensions } from "./extensions/workspace.ts";
+import { loadWorkspaceExtensions, workspaceExtension } from "./extensions/workspace.ts";
 import { archiveAttachments } from "./transport/attachments.ts";
 import { openHttpTransport } from "./transport/http.ts";
 import type { MessageSender } from "./transport/send.ts";
@@ -53,20 +54,20 @@ export async function startService(
 	reloadHttpTransport?: () => Promise<void>,
 ) {
 	let runtime = options.runtime;
-	await readSettings(options.workingDir);
+	let modelPolicy = (await readSettings(options.workingDir)).modelPolicy;
 	// Installed auth and models; an isolated test runtime has nothing to reload.
 	let installed: Awaited<ReturnType<typeof openModels>> | undefined;
 	if (!runtime) {
 		installed = await openModels(options.agentDir);
 		runtime = {
 			models: installed,
-			defaults: await readDefaults(installed, options.workingDir, options.agentDir),
+			defaults: await readDefaults(installed, options.workingDir, options.agentDir, modelPolicy),
 		};
 	}
 	const defaults = { ...runtime.defaults, model: { ...runtime.defaults.model } };
 	if (!runtime.models.getModel(defaults.model.provider, defaults.model.modelId))
 		throw new Error(`Model is unavailable: ${defaults.model.provider}/${defaults.model.modelId}`);
-	async function loadExtensions() {
+	async function loadExtensions(): Promise<WorkspaceExtension[]> {
 		const extensions = [
 			await loadPrompt(options.workingDir, options.agentDir),
 			...(!options.extensions
@@ -92,10 +93,12 @@ export async function startService(
 						ImageRead,
 						await memoryExtension(options.workingDir),
 						webExtension(),
-						...(await loadWorkspaceExtensions(options.workingDir)),
 						Subagent,
+						workspaceExtension(reload),
 					]),
+			...(await loadWorkspaceExtensions(options.workingDir)),
 		];
+		validateSchedules(extensions);
 		const names = new Set<string>();
 		for (const extension of extensions) {
 			if (names.has(extension.name)) throw new Error(`Duplicate extension name: ${extension.name}`);
@@ -104,10 +107,10 @@ export async function startService(
 		return extensions;
 	}
 	const settings = SettingsManager.create(options.workingDir, options.agentDir);
-	let activeExtensions: readonly Extension[] = await loadExtensions();
+	let activeExtensions: readonly WorkspaceExtension[] = await loadExtensions();
 	const owner = await openHarness(
 		options.workingDir,
-		withCodexFast(runtime.models),
+		withModelPolicy(runtime.models, () => modelPolicy),
 		activeExtensions,
 		requestSettings(settings),
 	);
@@ -119,10 +122,31 @@ export async function startService(
 			throw new Error(`Duplicate extension name: ${scheduling.extension.name}`);
 		owner.registry.install(scheduling.extension);
 		for (const { record } of (await harness.inspect(BACKGROUND_CONTEXT)).tasks) {
-			if (!owner.registry.snapshot().task(record.kind))
-				throw new Error(`Missing definition for unfinished task: ${record.kind}`);
+			const task = owner.registry.snapshot().task(record.kind);
+			if (
+				!task ||
+				task.definition.version < record.version ||
+				(task.definition.version > record.version && !task.definition.migrate)
+			)
+				throw new Error(`Missing definition or migration for unfinished task: ${record.kind}`);
 		}
-		await scheduling.initialize(await readSettings(options.workingDir));
+		// Refuse missing business code needed by an admitted occurrence, not disabled sleeping schedules.
+		const savedSchedules = await harness.snapshot(Schedules, BACKGROUND_CONTEXT);
+		for (const { record } of (await harness.inspect(BACKGROUND_CONTEXT)).tasks) {
+			if (record.kind !== EXECUTION_KIND) continue;
+			const input = record.input;
+			const jobId = input && typeof input === "object" && !Array.isArray(input) ? input.jobId : undefined;
+			const saved = savedSchedules?.items.find((schedule) => schedule.id === jobId);
+			if (
+				saved &&
+				saved.id !== "compact-chats" &&
+				!activeExtensions.some((extension) =>
+					extension.schedules?.some((schedule) => schedule.id === saved.id),
+				)
+			)
+				throw new Error(`Missing extension for unfinished schedule: ${saved.id}`);
+		}
+		await scheduling.initialize(activeExtensions);
 		if (options.runScheduled)
 			await scheduling.runOnce(options.runScheduled.jobId, options.runScheduled.requestId);
 		await recoverSending(harness);
@@ -135,25 +159,38 @@ export async function startService(
 		throw error;
 	}
 
-	/** Running calls keep the code they started with; later requests and new chats use the reloaded state. */
-	async function reload() {
-		await reloadHttpTransport?.();
-		if (installed)
-			Object.assign(defaults, await readDefaults(installed, options.workingDir, options.agentDir));
-		await settings.reload();
-		const next = await loadExtensions();
-		const nextNames = new Set(next.map((extension) => extension.name));
-		const activeNames = new Set(activeExtensions.map((extension) => extension.name));
-		const unfinished = new Set(
-			(await harness.inspect(BACKGROUND_CONTEXT)).tasks.map(({ record }) => record.kind),
+	let reloading = Promise.resolve();
+	function reload() {
+		const operation = reloading.then(reloadResources);
+		reloading = operation.then(
+			() => undefined,
+			() => undefined,
 		);
-		const retained = activeExtensions
-			.filter((extension) => !nextNames.has(extension.name))
-			.map((extension) => ({
-				name: extension.name,
-				tasks: extension.tasks?.filter((task) => unfinished.has(task.definition.name)),
-			}))
-			.filter((extension) => extension.tasks?.length);
+		return operation;
+	}
+
+	/** Running calls keep the code they started with; later requests and new chats use the reloaded state. */
+	async function reloadResources() {
+		const nextPolicy = (await readSettings(options.workingDir)).modelPolicy;
+		const nextDefaults = installed
+			? await readDefaults(installed, options.workingDir, options.agentDir, nextPolicy)
+			: defaults;
+		const next = await loadExtensions();
+		const activeNames = new Set(activeExtensions.map((extension) => extension.name));
+		const unfinishedTasks = (await harness.inspect(BACKGROUND_CONTEXT)).tasks;
+		// Retain removed task code conservatively: an already running call can still admit children.
+		const retained = activeExtensions.flatMap((extension) => {
+			const replacement = next.find((item) => item.name === extension.name);
+			const tasks = extension.tasks?.filter(
+				(task) => !replacement?.tasks?.some((current) => current.definition.name === task.definition.name),
+			);
+			if (!tasks?.length) return [];
+			if (replacement) {
+				next[next.indexOf(replacement)] = { ...replacement, tasks: [...(replacement.tasks ?? []), ...tasks] };
+				return [];
+			}
+			return [{ name: extension.name, tasks }];
+		});
 		const candidate = createRegistry();
 		const names = new Set<string>();
 		for (const extension of [
@@ -168,7 +205,32 @@ export async function startService(
 			names.add(extension.name);
 			candidate.install(extension);
 		}
-		// Validate the complete replacement first; the synchronous publication does not stop running calls.
+		// Old running tools may admit tasks after inspection; changed versions still need migrations.
+		for (const previous of owner.registry.snapshot().tasks()) {
+			const task = candidate.snapshot().task(previous.definition.name);
+			if (
+				task &&
+				(task.definition.version < previous.definition.version ||
+					(task.definition.version > previous.definition.version && !task.definition.migrate))
+			)
+				throw new Error(`Missing migration for unfinished task or late child: ${previous.definition.name}`);
+		}
+		for (const { record } of unfinishedTasks) {
+			const task = candidate.snapshot().task(record.kind);
+			if (
+				!task ||
+				task.definition.version < record.version ||
+				(task.definition.version > record.version && !task.definition.migrate)
+			)
+				throw new Error(`Missing definition or migration for unfinished task: ${record.kind}`);
+		}
+		// A failed business initializer rolls back all schedule/configuration changes before publication.
+		await reloadHttpTransport?.();
+		await settings.reload();
+		await scheduling.initialize(next);
+		Object.assign(defaults, nextDefaults);
+		modelPolicy = nextPolicy;
+		// Validation is complete; synchronous publication leaves running invocations untouched.
 		for (const extension of activeExtensions) owner.registry.uninstall(extension);
 		for (const extension of [...retained, ...next]) owner.registry.install(extension);
 		activeExtensions = [...retained, ...next];

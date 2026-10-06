@@ -95,6 +95,33 @@ The generated launchd job redirects both streams to `WORKING_DIR/service.log`.
 Foreground runs use the terminal or the controller's selected redirection; the
 application does not open a second log file.
 
+## Workspace migration and service identity
+
+Personal business code and system-summary policy use [workspace extensions](../docs/workspace-extensions.md).
+For an existing deployment, prepare source/configuration rollback copies, then
+perform the offline configuration migration only after the owning service is
+idle, stopped and its lock released:
+
+```sh
+node ops/migrate-workspace-extensions.mjs --apply "$WORKING_DIR"
+```
+
+Continue the same routine handover below, using the same workspace and receipts.
+Do not run this as a test against production or open an extra Harness. The script
+backs up configuration and extensions, preserves legacy settings, and never
+rewrites Durable files. The next owning startup attaches business task definitions
+and performs native checkpoint migration. Retain all backups; rollback must keep
+post-migration state and reconcile schema compatibility, not restore old receipts.
+
+New `install` output uses `org.pi-imessage.service` and
+`org.pi-imessage.service.plist`. For an installed
+`me.changchen.pi-imessage-durable` job, privately preserve its plist/environment,
+gracefully stop and unload that exact controller, verify PID/lock/port release,
+then write and load the reviewed neutral job. Do not leave the old KeepAlive
+controller loaded or start a Terminal copy alongside launchd. A foreground
+Terminal service with no old-label job needs no controller change. Never rename
+unrelated legacy jobs as part of this migration.
+
 ## Routine deployment and restart
 
 ### Choose the smallest operation

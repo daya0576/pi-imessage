@@ -32,31 +32,34 @@ cannot import each other; imports within a package are allowed.
 | 1 | `main.ts`, `cli.ts` | Startup, wiring and installation. |
 | 1 | `migrate/` | One-time history import; writes directly to Durable storage. |
 | 2 | `web/` | HTTP API; read-only pages for chat history and live state. |
-| 3 | `agent/` | Harness, models, chat mapping, commands, delivery, prompt, `/run`, native background schedules and English learning. |
-| 4 | `extensions/` | Native tools and explicit loading of trusted workspace tool extensions. |
+| 3 | `agent/` | Harness, models, chat mapping, commands, delivery, prompt, `/run`, native background scheduling and maintenance. |
+| 4 | `extensions/` | Built-in native tools and loading of trusted workspace business extensions. |
 | 5 | `transport/` | Poll chat.db, archive attachments, send text and files through Messages.app. No agent logic. |
 | 6 | `config/` | Settings, environment variables and chat allowlist. |
 
 Enforcement: `test/architecture.test.ts`. Rationale: [ADRs](adr/).
 
-Personal tool code lives under `WORKING_DIR/extensions/<name>/index.ts` with
+Personal tool and task code lives under `WORKING_DIR/extensions/<name>/index.ts` with
 its own `config.json`. Startup and `/reload` scan direct child directories. Native
 CommonJS module factories (`module.exports`) receive the pinned Durable primitives;
 the loader never scans skills or attachments, installs dependencies or adapts SDK
 extensions. Source and configuration reload without interrupting current calls.
-Failed reloads retain old definitions; unfinished native tasks keep required code.
-English and generic business scheduling migration remain separate. See ADR 0035.
+Failed reloads retain old definitions and schedule configuration. Removed task
+code stays in memory for calls that can still admit children; missing required
+code fails explicitly on restart. The assistant's `reload_extensions` tool uses
+the same service owner. See [workspace extensions](workspace-extensions.md),
+ADR 0035 and ADR 0036.
 
 
 ### Native schedules
 
 `agent/scheduling.ts` registers an extension with native task definitions. A
 job's dedicated conversation owns a background scheduler, whose checkpoint saves
-the next deadline. Each occurrence is a child execution task; terminal native
-receipts supply Web history, not a parallel UI log. Six-hour maintenance calls
-native compaction. English selection and quota enforcement are deterministic in
-`agent/english.ts`; its isolated, tool-less model conversation supplies wording.
-Learning progress, the actual card and the outgoing item commit atomically.
+the next deadline. Each occurrence is a child execution task delegating to an
+extension's native business task; terminal receipts supply Web history, not a
+parallel UI log. The framework owns daily/interval cadence, non-overlap, recovery
+and quiet six-hour native compaction. Workspace tasks own business policy and
+documents, and can commit their state and the generic outgoing item atomically.
 The host delivery poll uses existing direct-send receipts and passive chat records.
 `web/schedules.ts` projects these native records, including latest-ten history.
 Daily slots and learning dates use the service machine's local timezone; the Web

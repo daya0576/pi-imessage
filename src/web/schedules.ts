@@ -54,9 +54,19 @@ export function readSchedules(harness: Harness) {
 						delivery: receipt?.textStatus ?? (result?.requestId ? "queued" : undefined),
 					};
 				});
-			const { historyFile: _historyFile, manualRuns: _manualRuns, ...definition } = schedule;
 			jobs.push({
-				...definition,
+				id: schedule.id,
+				name: schedule.name,
+				kind: schedule.kind,
+				enabled: schedule.enabled,
+				time: schedule.time,
+				intervalMs: schedule.intervalMs,
+				timezone: schedule.timezone,
+				chatGuid: schedule.chatGuid,
+				extension: schedule.extension,
+				execution: schedule.execution,
+				conversationId: schedule.conversationId,
+				taskId: schedule.taskId,
 				status: task?.state.outcome?.status ?? task?.state.status ?? "missing",
 				phase: state?.phase,
 				nextAt: state?.phase === "sleep" ? state.at : undefined,

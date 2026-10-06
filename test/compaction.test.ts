@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,13 +8,45 @@ import { promisify } from "node:util";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
+import { defineDoc, defineTask } from "@earendil-works/pi-durable";
 import { expect, it, vi } from "vitest";
+import type {
+	EnglishFunctions,
+	LearningHistory,
+	LearningPolicy,
+} from "../examples/workspace-extensions/workplace-english/learning.ts";
 import { compactionReply } from "../src/agent/commands.ts";
 import { DirectSends } from "../src/agent/direct-send.ts";
-import { applyEnglish, parseEnglishAnswer, planEnglish, readLearningHistory } from "../src/agent/english.ts";
-import { EnglishLearning, ScheduledOutbox, Schedules } from "../src/agent/scheduling.ts";
+import { ScheduledOutbox, Schedules } from "../src/agent/scheduling.ts";
 import { startService } from "../src/main.ts";
 import { readSchedules } from "../src/web/schedules.ts";
+
+const learning = createRequire(import.meta.url)(
+	"../examples/workspace-extensions/workplace-english/learning.ts",
+) as EnglishFunctions;
+const policy: LearningPolicy = {
+	reviewIntervals: [1, 3, 7, 14, 30],
+	effectiveFrom: "2026-10-04",
+	maxReviews: 2,
+	dailyLimit: 3,
+	windowDays: 30,
+	maxNew: 10,
+	minNewGapDays: 3,
+};
+const { applyEnglish, parseEnglishAnswer } = learning;
+const planEnglish = (history: LearningHistory, date: string) => learning.planEnglish(history, date, policy);
+const readLearningHistory = (path: string) => learning.readLearningHistory(path, policy);
+const EnglishLearning = defineDoc<{
+	history?: LearningHistory;
+	cards: Record<string, { text: string; requestId: string }>;
+}>({
+	kind: "imessage.english-learning",
+	version: 1,
+	scope: "conversation",
+	history: "latest",
+	fork: "initial",
+	initial: () => ({ cards: {} }),
+});
 
 // #33: host scheduling stays quiet, native no-ops do not infer, and admission failures preserve context.
 it("schedules quiet native compaction, skips empty/reset chats and preserves context on failure", async () => {
@@ -122,6 +155,23 @@ it("schedules quiet native compaction, skips empty/reset chats and preserves con
 			},
 		};
 		await writeFile(join(scheduledDir, "settings.json"), JSON.stringify(settings));
+		// Offline migration touches configuration only; the legacy file remains compatible and unchanged.
+		await promisify(execFile)(
+			process.execPath,
+			["ops/migrate-workspace-extensions.mjs", "--apply", scheduledDir],
+			{ timeout: 10000 },
+		);
+		const configPath = join(scheduledDir, "extensions/workplace-english/config.json");
+		const config = JSON.parse(await readFile(configPath, "utf8"));
+		expect(config.policy).toEqual(policy);
+		const migratedSettings = await readFile(join(scheduledDir, "settings.json"), "utf8");
+		expect(JSON.parse(migratedSettings).scheduledEnglish).toEqual(settings.scheduledEnglish);
+		await promisify(execFile)(
+			process.execPath,
+			["ops/migrate-workspace-extensions.mjs", "--apply", scheduledDir],
+			{ timeout: 10000 },
+		);
+		expect(await readFile(join(scheduledDir, "settings.json"), "utf8")).toBe(migratedSettings);
 		let now = Date.parse("2026-10-07T07:40:00");
 		vi.spyOn(Date, "now").mockImplementation(() => now);
 		const scheduledOptions = {
@@ -242,6 +292,50 @@ it("schedules quiet native compaction, skips empty/reset chats and preserves con
 				(job) => job.kind === "english",
 			)?.taskId,
 		).toBe(english.taskId);
+		// #33 / ADR 0035: migrate an admitted v1 checkpoint, retaining its ID and saved answer.
+		const child = await agent.harness.commit(async (tx) => {
+			const tasks = await tx.scanTasks(
+				{ conversationId: english.conversationId, kind: "workplace-english.card" },
+				10,
+			);
+			return (await tx.scanConversations({ ownerTaskId: tasks.items[0].id }, 10)).items[0];
+		}, BACKGROUND_CONTEXT);
+		if (!child) throw new Error("Missing saved generation child");
+		const legacy = defineTask({
+			name: "imessage.scheduled-execution",
+			version: 1,
+			initial: () => ({ phase: "english" as const, conversationId: child.id, plan }),
+			phases: {
+				async english() {
+					throw new Error("Legacy business code must not execute");
+				},
+			},
+			async abort(_task, runtime, context) {
+				await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context);
+			},
+		});
+		const legacyId = await agent.harness.commit(
+			(tx) =>
+				tx.createTask(
+					legacy,
+					{ jobId: english.id, date: "2026-10-07", dueAt: now, startedAt: now },
+					{ conversationId: english.conversationId, ownership: { kind: "conversation" }, background: true },
+				),
+			BACKGROUND_CONTEXT,
+		);
+		await agent.close();
+		const businessPath = join(scheduledDir, "extensions/workplace-english");
+		// A hidden directory is not scanned; missing required code must fail explicitly, not disable work.
+		await rename(businessPath, join(scheduledDir, "extensions/.workplace-english"));
+		await expect(startService(scheduledOptions)).rejects.toThrow("Missing extension for unfinished schedule");
+		await rename(join(scheduledDir, "extensions/.workplace-english"), businessPath);
+		agent = await startService(scheduledOptions);
+		expect((await agent.harness.waitForTask(legacyId, BACKGROUND_CONTEXT)).state.outcome.status).toBe(
+			"completed",
+		);
+		expect((await agent.harness.getTask(legacyId, BACKGROUND_CONTEXT))?.version).toBe(2);
+		expect(faux.state.callCount).toBe(calls);
+		expect((await agent.harness.snapshot(ScheduledOutbox, BACKGROUND_CONTEXT))?.items).toHaveLength(1);
 		send.mockClear();
 		await agent.deliver();
 		expect(send).toHaveBeenCalledTimes(1);
@@ -293,8 +387,8 @@ it("schedules quiet native compaction, skips empty/reset chats and preserves con
 			{ timeout: 5000 },
 		);
 		await agent.close();
-		settings.scheduledEnglish.enabled = false;
-		await writeFile(join(scheduledDir, "settings.json"), JSON.stringify(settings));
+		config.enabled = false;
+		await writeFile(configPath, JSON.stringify(config));
 		for (let index = 0; index < 12; index++) {
 			now += 6 * 3600000;
 			agent = await startService(scheduledOptions);
@@ -333,6 +427,129 @@ it("schedules quiet native compaction, skips empty/reset chats and preserves con
 			(await agent.harness.snapshot(EnglishLearning, english.conversationId, BACKGROUND_CONTEXT))?.history
 				?.extra,
 		).toEqual({ retained: true });
+
+		// #33 / ADR 0035: business-neutral multi-task schedules reload and remove safely.
+		const fixture = join(scheduledDir, "extensions/fixture");
+		await mkdir(fixture);
+		const fixtureSource = `
+module.exports = ({ config, defineDoc, defineTask, defineExtension }) => {
+ const version = "v1";
+ const Effects = defineDoc({ kind: "fixture.effects", version: 1, scope: "session", initial: () => ({ values: [] }) });
+ const task = name => defineTask({ name, version: 1, initial: () => ({ phase: "work" }), phases: {
+  async work(record, runtime, context) {
+   if (config.pauseUntil) await runtime.sleep(config.pauseUntil, context);
+   await runtime.commit(async tx => {
+    (await tx.doc(Effects)).values.push(version + ":" + record.input.jobId);
+    return { status: "terminal", outcome: { status: "completed", result: { summary: version, finishedAt: runtime.now() } } };
+   }, context);
+  }
+ }, async abort(record, runtime, context) { await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context); } });
+ const first = task("fixture.first"), second = task("fixture.second");
+ return { ...defineExtension({ name: "fixture", tasks: [first, second] }), schedules: [
+  { id: "fixture-daily", name: "Daily fixture", enabled: true, time: config.time, task: first.definition.name },
+  { id: "fixture-interval", name: "Interval fixture", enabled: true, intervalMs: 100, task: second.definition.name, async initialize() { if (config.invalid) throw new Error("fixture initializer failed"); } }
+ ] };
+};`;
+		await writeFile(join(fixture, "index.ts"), fixtureSource);
+		await writeFile(join(fixture, "config.json"), JSON.stringify({ time: "23:59" }));
+		await agent.command({ chatGuid: "control", guid: "add-fixture", text: "/reload" });
+		const fixtureJobs = (await readSchedules(agent.harness)).jobs.filter((job) =>
+			job.id.startsWith("fixture-"),
+		);
+		expect(fixtureJobs).toHaveLength(2);
+		const savedTasks = await Promise.all(
+			fixtureJobs.map((job) => agent?.harness.getTask(job.taskId, BACKGROUND_CONTEXT)),
+		);
+		await writeFile(join(fixture, "index.ts"), fixtureSource.replace('"v1"', '"v2"'));
+		await writeFile(join(fixture, "config.json"), JSON.stringify({ time: "22:59" }));
+		await agent.command({ chatGuid: "control", guid: "update-fixture", text: "/reload" });
+		expect(
+			await Promise.all(fixtureJobs.map((job) => agent?.harness.getTask(job.taskId, BACKGROUND_CONTEXT))),
+		).toEqual(savedTasks);
+		const definitions = await agent.harness.snapshot(Schedules, BACKGROUND_CONTEXT);
+		await writeFile(join(fixture, "config.json"), JSON.stringify({ time: "21:59", invalid: true }));
+		await expect(
+			agent.command({ chatGuid: "control", guid: "bad-fixture", text: "/reload" }),
+		).rejects.toThrow("initializer failed");
+		expect(await agent.harness.snapshot(Schedules, BACKGROUND_CONTEXT)).toEqual(definitions);
+		await writeFile(join(fixture, "index.ts"), fixtureSource.replace('"fixture.second"', '"fixture.first"'));
+		await expect(
+			agent.command({ chatGuid: "control", guid: "duplicate-tasks", text: "/reload" }),
+		).rejects.toThrow("Duplicate workspace task");
+		await writeFile(join(fixture, "index.ts"), fixtureSource.replace('"v1"', '"v2"'));
+		await writeFile(join(fixture, "config.json"), JSON.stringify({ time: "22:59" }));
+		await agent.close();
+		agent = await startService({
+			...scheduledOptions,
+			runScheduled: { jobId: "fixture-daily", requestId: "fixture-daily-once" },
+		});
+		agent.harness.resume();
+		const dailyHarness = agent.harness;
+		await vi.waitFor(
+			async () =>
+				expect(
+					(await readSchedules(dailyHarness)).jobs.find((job) => job.id === "fixture-daily")?.runs[0],
+				).toMatchObject({ status: "completed", result: { summary: "v2" } }),
+			{ timeout: 5000 },
+		);
+		await agent.close();
+		await writeFile(join(fixture, "config.json"), JSON.stringify({ time: "22:59", pauseUntil: now + 300 }));
+		agent = await startService({
+			...scheduledOptions,
+			runScheduled: { jobId: "fixture-interval", requestId: "fixture-interval-once" },
+		});
+		agent.harness.resume();
+		const intervalHarness = agent.harness;
+		await vi.waitFor(async () =>
+			expect(
+				(await intervalHarness.inspect(BACKGROUND_CONTEXT)).tasks.some(
+					({ record }) => record.kind === "fixture.second",
+				),
+			).toBe(true),
+		);
+		// A deadline waking while the manual occurrence is paused joins it instead of overlapping.
+		now += 100;
+		const intervalJob = fixtureJobs.find((job) => job.id === "fixture-interval");
+		if (!intervalJob) throw new Error("Missing interval fixture");
+		await vi.waitFor(async () =>
+			expect(await intervalHarness.getTask(intervalJob.taskId, BACKGROUND_CONTEXT)).toMatchObject({
+				state: { checkpoint: { phase: "advance" } },
+			}),
+		);
+		expect(
+			(await readSchedules(intervalHarness)).jobs.find((job) => job.id === "fixture-interval")?.runs,
+		).toHaveLength(1);
+		await writeFile(join(fixture, "index.ts"), fixtureSource.replaceAll("version: 1", "version: 2"));
+		await expect(
+			agent.command({ chatGuid: "control", guid: "missing-migration", text: "/reload" }),
+		).rejects.toThrow("migration for unfinished task");
+		await writeFile(join(fixture, "index.ts"), fixtureSource);
+		await rename(fixture, join(scheduledDir, "extensions/.fixture"));
+		await agent.command({ chatGuid: "control", guid: "remove-fixture", text: "/reload" });
+		expect(
+			(await readSchedules(agent.harness)).jobs
+				.filter((job) => job.id.startsWith("fixture-"))
+				.every((job) => !job.enabled),
+		).toBe(true);
+		now += 300;
+		await vi.waitFor(
+			async () =>
+				expect(
+					(await readSchedules(intervalHarness)).jobs.find((job) => job.id === "fixture-interval")?.runs[0],
+				).toMatchObject({ status: "completed", result: { summary: "v2" } }),
+			{ timeout: 5000 },
+		);
+		const effects = defineDoc<{ values: string[] }>({
+			kind: "fixture.effects",
+			version: 1,
+			scope: "session",
+			initial: () => ({ values: [] }),
+		});
+		expect((await agent.harness.snapshot(effects, BACKGROUND_CONTEXT))?.values).toEqual([
+			"v2:fixture-daily",
+			"v2:fixture-interval",
+		]);
+		expect(faux.state.callCount).toBe(calls);
 	} finally {
 		await agent?.close();
 		vi.restoreAllMocks();

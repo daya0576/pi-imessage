@@ -68,7 +68,7 @@ it("loads CLI environment without overriding explicit values and retains proxy c
 		});
 		expect(installed.stdout).toContain("Not loaded.");
 		expect(installed.stdout + installed.stderr).not.toContain("fixture-user");
-		const plist = join(directory, "Library", "LaunchAgents", "me.changchen.pi-imessage-durable.plist");
+		const plist = join(directory, "Library", "LaunchAgents", "org.pi-imessage.service.plist");
 		expect((await stat(plist)).mode & 0o777).toBe(0o600);
 		const parser = join(directory, "parse-plist.py");
 		await writeFile(
@@ -77,10 +77,12 @@ it("loads CLI environment without overriding explicit values and retains proxy c
 		);
 		const parsed = await execute("python3", [parser, plist], { env: environment });
 		const job = JSON.parse(parsed.stdout) as {
+			Label: string;
 			ProgramArguments: string[];
 			EnvironmentVariables: Record<string, string>;
 			WorkingDirectory: string;
 		};
+		expect(job.Label).toBe("org.pi-imessage.service");
 		expect(job.WorkingDirectory).toBe(directory);
 		expect(job.EnvironmentVariables.PI_CODING_AGENT_DIR).toBe(join(directory, "selected<&>", "agent"));
 		const directoryProbe = join(directory, "agent-directory-probe.mjs");

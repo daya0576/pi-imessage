@@ -69,25 +69,37 @@ Add chat GUIDs to `whitelist` to enable replies; `blacklist: ["*"]` blocks repli
 elsewhere. An explicit blacklist entry takes priority. Messages are always logged.
 Rich text is optional; `markdown: true` renders bold spans in direct iMessage chats.
 
-### Scheduler
+### Workspace extensions and scheduler
 
-Context compaction runs every six hours as a Durable background task. To enable
-daily English cards, add this to `settings.json` and restart the service:
+Context compaction runs every six hours as a native Durable background task.
+Personal tools, tasks and optional daily/interval schedules live in
+`WORKING_DIR/extensions/<name>/index.ts` with `config.json`, not framework
+settings. Startup and `/reload` load them; the assistant can use
+`reload_extensions` to apply its own changes.
+
+See [workspace extensions](docs/workspace-extensions.md) for the factory contract,
+English and system-context templates, and the safe existing-deployment migration.
+Times use the service machine's local timezone. Saved deadlines survive reload
+and restart; view schedules and latest-ten execution history at `/scheduled`.
+
+### Model policy
+
+Optional `settings.json` fields, applied at startup and `/reload`:
 
 ```json
 {
-  "scheduledEnglish": {
-    "enabled": true,
-    "chatGuid": "iMessage;-;+11234567890",
-    "time": "07:45",
-    "historyFile": "/absolute/path/to/work-english-expressions/used.json"
+  "modelPolicy": {
+    "fallback": { "provider": "your-provider", "modelId": "your-model" },
+    "codexServiceTier": "default"
   }
 }
 ```
 
-Times use the service machine's local timezone. The destination must be reply-enabled. Learning history
-is imported once; Durable stores subsequent progress and cards. View next deadlines
-and the latest ten executions at `/scheduled`.
+Without a fallback, an unavailable default fails explicitly. Without a tier,
+provider requests are unchanged. `codexServiceTier` accepts `default` or
+`priority`; priority may have a different cost. Existing deployments migrate
+their previous choices into explicit configuration rather than silently changing
+behavior.
 
 ### Environment Variables
 
@@ -104,7 +116,8 @@ All variables are optional.
 
 See the [HTTP API](docs/api.md) for read-only state and model health checks.
 The agent sends files and extra messages with `send_message`. The scheduler
-supports daily English cards and six-hour compaction, not arbitrary reminders or cron jobs.
+provides daily/interval cadence for workspace tasks and built-in six-hour compaction.
+It does not revive legacy cron files or HTTP prompt/send endpoints.
 
 ## How It Works
 

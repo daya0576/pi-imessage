@@ -585,4 +585,5 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 		vi.restoreAllMocks();
 		await rm(directory, { recursive: true, force: true });
 	}
-});
+	// #33: this multi-step HTTP/projection fixture shares fsync I/O with parallel suites.
+}, 30000);

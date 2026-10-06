@@ -569,6 +569,7 @@ it("starts quietly and wires default coding/image tools, model defaults and work
 		"get_search_results",
 		"load_memory",
 		"read",
+		"reload_extensions",
 		"save_memory",
 		"search_memory",
 		"send_message",
@@ -675,6 +676,44 @@ it("uses supplied agent configuration and releases ownership after startup failu
 	expect(create).toHaveBeenCalledTimes(1);
 	expect(installed?.refresh).toHaveBeenCalledTimes(2);
 	expect(installed?.streamSimple).not.toHaveBeenCalled();
+	expect(faux.state.callCount).toBe(0);
+	if (!installed) throw new Error("Missing model runtime");
+	// #33: fallbacks are opt-in and /reload applies the workspace policy without inference.
+	await writeFile(
+		join(options.agentDir, "settings.json"),
+		JSON.stringify({ defaultProvider: "missing", defaultModel: "missing" }),
+	);
+	await expect(modelConfig.readDefaults(installed, directory, options.agentDir)).rejects.toThrow(
+		"no available configured fallback",
+	);
+	await writeFile(
+		join(directory, "settings.json"),
+		JSON.stringify({
+			chatAllowlist: { whitelist: ["*"], blacklist: [] },
+			modelPolicy: { fallback: options.runtime.defaults.model },
+		}),
+	);
+	await agent.command({ chatGuid: "chat", guid: "reload-fallback", text: "/reload" });
+	await expect(
+		modelConfig.readDefaults(installed, directory, options.agentDir, {
+			fallback: { provider: "unavailable", modelId: "unavailable" },
+		}),
+	).rejects.toThrow("configured fallback");
+	// Observe payload construction only; the sentinel prevents all provider execution.
+	const stream = vi.spyOn(options.runtime.models, "streamSimple").mockImplementation(() => {
+		throw new Error("payload captured");
+	});
+	const codex = { ...faux.getModel(), provider: "openai-codex", id: "gpt-fixture" };
+	for (const tier of [undefined, "default", "priority"] as const) {
+		const wrapped = modelConfig.withModelPolicy(options.runtime.models, () => ({ codexServiceTier: tier }));
+		const request = { onPayload: async () => ({ original: true }) };
+		expect(() => wrapped.streamSimple(codex, { messages: [] }, request)).toThrow("payload captured");
+		const captured = stream.mock.calls.at(-1)?.[2];
+		if (!captured?.onPayload) throw new Error("Missing payload callback");
+		expect(await captured.onPayload({}, codex)).toEqual(
+			tier ? { original: true, service_tier: tier } : { original: true },
+		);
+	}
 	expect(faux.state.callCount).toBe(0);
 });
 

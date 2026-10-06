@@ -520,7 +520,7 @@ function renderScheduled() {
 					? [latest.status, latest.delivery].filter(Boolean).join(" / ")
 					: "enabled";
 		const lastRun = latest ? time(latest.input?.startedAt, job.timezone) : "No executions yet";
-		const cadence = job.kind === "english" ? `daily ${job.time}` : `every ${job.intervalMs / 3600000}h`;
+		const cadence = job.time !== undefined ? `daily ${job.time}` : `every ${job.intervalMs / 3600000}h`;
 		const summary = element("summary", undefined, "schedule-summary");
 		summary.append(
 			element("span", job.name, "schedule-name"),

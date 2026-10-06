@@ -118,9 +118,11 @@ module.exports = async ({ workingDir, config, Type, defineExtension, defineTool,
 				await writeFile(join(modules, "config.json"), JSON.stringify({ value: "config-v2" }));
 				const source = await readFile(join(modules, "index.ts"), "utf8");
 				await writeFile(join(modules, "index.ts"), source.replace("args.text", "args.text.toUpperCase()"));
-				await agent.command({ chatGuid: "first", guid: "reload-personal", text: "/reload" });
 			}
 			faux.setResponses([
+				...(version === "v2"
+					? [fauxAssistantMessage(fauxToolCall("reload_extensions", {}), { stopReason: "toolUse" })]
+					: []),
 				fauxAssistantMessage(fauxToolCall("personal_echo", { text: "hello" }), { stopReason: "toolUse" }),
 				(context) => {
 					expect(

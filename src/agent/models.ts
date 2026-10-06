@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { Models, ModelsSimpleStreamOptions } from "@earendil-works/pi-ai";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { HarnessSettings } from "@earendil-works/pi-durable";
+import type { Settings } from "../config/settings.ts";
 import type { AgentDefaults } from "./chats.ts";
 
 export function openModels(agentDir: string) {
@@ -11,11 +12,12 @@ export function openModels(agentDir: string) {
 	});
 }
 
-/** Read defaults on every call; the only permitted fallback is Codex Astra. */
+/** Read defaults and use only an explicitly configured, available fallback. */
 export async function readDefaults(
 	runtime: ModelRuntime,
 	workingDir: string,
 	agentDir: string,
+	policy: Settings["modelPolicy"] = {},
 ): Promise<AgentDefaults> {
 	const settings = SettingsManager.create(workingDir, agentDir);
 	const provider = settings.getDefaultProvider();
@@ -24,12 +26,17 @@ export async function readDefaults(
 	await runtime.refresh();
 	if (provider && modelId && runtime.getModel(provider, modelId) && runtime.hasConfiguredAuth(provider))
 		return { model: { provider, modelId }, thinkingLevel };
-	if (!runtime.getModel("openai-codex", "gpt-6-astra") || !runtime.hasConfiguredAuth("openai-codex"))
-		throw new Error(
-			`Default model ${provider}/${modelId} and fallback openai-codex/gpt-6-astra are unavailable`,
-		);
-	console.warn(`Default model ${provider}/${modelId} unavailable; using openai-codex/gpt-6-astra`);
-	return { model: { provider: "openai-codex", modelId: "gpt-6-astra" }, thinkingLevel };
+	const fallback = policy.fallback;
+	if (
+		!fallback ||
+		!runtime.getModel(fallback.provider, fallback.modelId) ||
+		!runtime.hasConfiguredAuth(fallback.provider)
+	)
+		throw new Error(`Default model ${provider}/${modelId} is unavailable; no available configured fallback`);
+	console.warn(
+		`Default model ${provider}/${modelId} unavailable; using ${fallback.provider}/${fallback.modelId}`,
+	);
+	return { model: { ...fallback }, thinkingLevel };
 }
 
 /** Match Pi's experimental Durable request policy; execution and retries remain native. */
@@ -50,23 +57,24 @@ export function requestSettings(settings: SettingsManager): Pick<HarnessSettings
 	};
 }
 
-/** Codex GPT models run in the priority (fast) service tier. */
-export function withCodexFast(models: Models): Models {
+/** A live configuration getter applies tier changes to subsequent requests only. */
+export function withModelPolicy(models: Models, policy: () => Settings["modelPolicy"]): Models {
 	return new Proxy(models, {
 		get(target, key) {
 			if (key === "streamSimple") {
 				const streamSimple: Models["streamSimple"] = (model, context, options) => {
-					if (model.provider !== "openai-codex" || !/^gpt-/.test(model.id))
+					const tier = policy().codexServiceTier;
+					if (!tier || model.provider !== "openai-codex" || !/^gpt-/.test(model.id))
 						return target.streamSimple(model, context, options);
-					const fast: ModelsSimpleStreamOptions = {
+					const configured: ModelsSimpleStreamOptions = {
 						...options,
 						async onPayload(payload, payloadModel) {
 							const current = (await options?.onPayload?.(payload, payloadModel)) ?? payload;
 							if (typeof current !== "object" || current === null || Array.isArray(current)) return current;
-							return { ...current, service_tier: "priority" };
+							return { ...current, service_tier: tier };
 						},
 					};
-					return target.streamSimple(model, context, fast);
+					return target.streamSimple(model, context, configured);
 				};
 				return streamSimple;
 			}

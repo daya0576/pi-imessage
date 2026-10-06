@@ -34,7 +34,7 @@ export async function main(args = process.argv.slice(2)) {
 		await mkdir(workingDir, { recursive: true, mode: 0o700 });
 		const xml = (value: string) =>
 			value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-		const path = join(directory, "me.changchen.pi-imessage-durable.plist");
+		const path = join(directory, "org.pi-imessage.service.plist");
 		const environment = [
 			"WEB_HOST",
 			"WEB_PORT",
@@ -57,11 +57,11 @@ export async function main(args = process.argv.slice(2)) {
 			.join("");
 		await writeFile(
 			path,
-			`<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>Label</key><string>me.changchen.pi-imessage-durable</string><key>ProgramArguments</key><array><string>${xml(process.execPath)}</string><string>--use-env-proxy</string><string>--experimental-strip-types</string><string>${xml(fileURLToPath(import.meta.url))}</string><string>serve</string></array><key>WorkingDirectory</key><string>${xml(process.cwd())}</string><key>EnvironmentVariables</key><dict><key>PI_CODING_AGENT_DIR</key><string>${xml(agentDir)}</string><key>WORKING_DIR</key><string>${xml(workingDir)}</string><key>PATH</key><string>${xml(process.env.PATH ?? "/usr/bin:/bin")}</string>${environment}</dict><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>StandardOutPath</key><string>${xml(join(workingDir, "service.log"))}</string><key>StandardErrorPath</key><string>${xml(join(workingDir, "service.log"))}</string></dict></plist>`,
+			`<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>Label</key><string>org.pi-imessage.service</string><key>ProgramArguments</key><array><string>${xml(process.execPath)}</string><string>--use-env-proxy</string><string>--experimental-strip-types</string><string>${xml(fileURLToPath(import.meta.url))}</string><string>serve</string></array><key>WorkingDirectory</key><string>${xml(process.cwd())}</string><key>EnvironmentVariables</key><dict><key>PI_CODING_AGENT_DIR</key><string>${xml(agentDir)}</string><key>WORKING_DIR</key><string>${xml(workingDir)}</string><key>PATH</key><string>${xml(process.env.PATH ?? "/usr/bin:/bin")}</string>${environment}</dict><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>StandardOutPath</key><string>${xml(join(workingDir, "service.log"))}</string><key>StandardErrorPath</key><string>${xml(join(workingDir, "service.log"))}</string></dict></plist>`,
 			{ flag: "wx", mode: 0o600 },
 		);
 		console.log(
-			`Wrote ${path}. Not loaded. Follow ops/README.md for authorized one-shot cutover; do not run both services.`,
+			`Wrote ${path}. Not loaded. Follow ops/README.md for controller handover; never run two services.`,
 		);
 		return;
 	}

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -21,6 +21,14 @@ it("loads skills and request settings, then refreshes resources and native polic
 	try {
 		await mkdir(join(skillDir, "references"), { recursive: true });
 		await mkdir(agentDir);
+		const contextDir = join(directory, "extensions/system-context");
+		await mkdir(contextDir, { recursive: true });
+		await cp("examples/workspace-extensions/system-context/index.ts", join(contextDir, "index.ts"));
+		await writeFile(join(contextDir, "package.json"), '{"type":"commonjs"}');
+		await writeFile(
+			join(contextDir, "config.json"),
+			JSON.stringify({ summaryFile: "SYSTEM.md", boundary: "<!-- END SYSTEM SUMMARY -->", maxBytes: 8192 }),
+		);
 		await writeFile(
 			join(directory, "settings.json"),
 			JSON.stringify({ chatAllowlist: { whitelist: ["*"], blacklist: [] } }),
@@ -80,7 +88,9 @@ it("loads skills and request settings, then refreshes resources and native polic
 				// #33 / ADR 0019: the prompt must not advertise retired scheduling entry points.
 				expect(prompt).not.toContain("POST /reminders");
 				expect(prompt).not.toContain("/cron/jobs.json");
-				expect(prompt).toContain("Delayed or recurring tasks");
+				expect(prompt).toContain("create or update a trusted workspace extension");
+				expect(prompt).not.toContain("Configured daily English cards");
+				expect(prompt).not.toContain("For every environment modification");
 				expect(prompt).toContain("Include original URLs only when the user asks for links");
 				expect(prompt).not.toContain("Read references/style.md");
 				return fauxAssistantMessage(fauxToolCall("read", { path: skillPath }), { stopReason: "toolUse" });

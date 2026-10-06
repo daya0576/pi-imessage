@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -27,21 +27,25 @@ it("reads existing settings without rewriting them and preserves allowlist prece
 			expect(isReplyEnabled(settings, "chat")).toBe(expected);
 			expect(settings.richText).toEqual({ enabled: true, markdown: false });
 		}
-		const scheduledEnglish = {
-			enabled: true,
-			chatGuid: "chat",
-			historyFile: join(directory, "used.json"),
-			time: "07:45",
-		};
-		await writeFile(join(directory, "settings.json"), JSON.stringify({ scheduledEnglish }));
-		expect((await readSettings(directory)).scheduledEnglish).toEqual(scheduledEnglish);
-		for (const invalid of [
-			{ ...scheduledEnglish, time: "25:00" },
-			{ ...scheduledEnglish, historyFile: "relative.json" },
-			{ ...scheduledEnglish, chatGuid: "" },
+		const modelPolicy = { fallback: { provider: "faux", modelId: "faux-1" }, codexServiceTier: "priority" };
+		await writeFile(
+			join(directory, "settings.json"),
+			JSON.stringify({ modelPolicy, scheduledEnglish: { untouched: true } }),
+		);
+		expect((await readSettings(directory)).modelPolicy).toEqual(modelPolicy);
+		expect(JSON.parse(JSON.stringify(await readSettings(directory))).scheduledEnglish).toEqual({
+			untouched: true,
+		});
+		expect(JSON.parse(await readFile(join(directory, "settings.json"), "utf8"))).toHaveProperty(
+			"scheduledEnglish",
+		);
+		for (const modelPolicy of [
+			{ fallback: {} },
+			{ fallback: { provider: "", modelId: "x" } },
+			{ codexServiceTier: "expensive" },
 		]) {
-			await writeFile(join(directory, "settings.json"), JSON.stringify({ scheduledEnglish: invalid }));
-			await expect(readSettings(directory)).rejects.toThrow("scheduledEnglish");
+			await writeFile(join(directory, "settings.json"), JSON.stringify({ modelPolicy }));
+			await expect(readSettings(directory)).rejects.toThrow("modelPolicy");
 		}
 		await writeFile(join(directory, "settings.json"), "{broken");
 		expect(isReplyEnabled(await readSettings(directory), "chat")).toBe(false);

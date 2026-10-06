@@ -1,5 +1,8 @@
-import { readFile } from "node:fs/promises";
-import type { JsonObject } from "@earendil-works/pi-durable";
+import type * as FileSystem from "node:fs/promises";
+
+const { readFile } = require("node:fs/promises") as typeof FileSystem;
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+type JsonObject = { [key: string]: JsonValue };
 
 export type LearningEntry = JsonObject & {
 	date: string;
@@ -22,8 +25,15 @@ export type EnglishAnswer = {
 	newExpression: { expression: string; meaning: string; paragraph: string } | null;
 };
 const DAY = 86400000;
-const INTERVALS = [1, 3, 7, 14, 30];
-const EFFECTIVE_FROM = "2026-10-04";
+export type LearningPolicy = {
+	reviewIntervals: number[];
+	effectiveFrom: string;
+	maxReviews: number;
+	dailyLimit: number;
+	windowDays: number;
+	maxNew: number;
+	minNewGapDays: number;
+};
 
 function dayNumber(date: string) {
 	if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(`${date}T00:00:00Z`)))
@@ -36,7 +46,7 @@ function normalized(expression: string) {
 }
 
 /** Import once, retaining unknown fields. Never write back to the legacy source. */
-export async function readLearningHistory(path: string): Promise<LearningHistory> {
+async function readLearningHistory(path: string, policy: LearningPolicy): Promise<LearningHistory> {
 	const raw: unknown = JSON.parse(await readFile(path, "utf8"));
 	if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Invalid learning history");
 	const value = raw as Record<string, unknown>;
@@ -60,7 +70,9 @@ export async function readLearningHistory(path: string): Promise<LearningHistory
 			!review ||
 			typeof review !== "object" ||
 			!Array.isArray(review.completedDays) ||
-			!review.completedDays.every((day: unknown) => typeof day === "number" && INTERVALS.includes(day))
+			!review.completedDays.every(
+				(day: unknown) => typeof day === "number" && policy.reviewIntervals.includes(day),
+			)
 		)
 			throw new Error("Invalid review progress");
 		if (review.lastReviewedOn !== undefined) dayNumber(review.lastReviewedOn);
@@ -69,7 +81,7 @@ export async function readLearningHistory(path: string): Promise<LearningHistory
 }
 
 /** Policy is deterministic; the model cannot choose quotas or mark unseen reviews completed. */
-export function planEnglish(history: LearningHistory, date: string): EnglishPlan {
+function planEnglish(history: LearningHistory, date: string, policy: LearningPolicy): EnglishPlan {
 	const today = dayNumber(date);
 	const unique = new Map<string, { entry: LearningEntry; expression: string; order: number }>();
 	for (const entry of [...history.entries].sort((a, b) => a.date.localeCompare(b.date))) {
@@ -83,7 +95,9 @@ export function planEnglish(history: LearningHistory, date: string): EnglishPlan
 			const key = `${entry.date}|${normalized(expression)}`;
 			const progress = history.reviews[key];
 			const elapsed = today - dayNumber(entry.date);
-			const due = INTERVALS.filter((day) => day <= elapsed && !progress?.completedDays.includes(day));
+			const due = policy.reviewIntervals.filter(
+				(day) => day <= elapsed && !progress?.completedDays.includes(day),
+			);
 			if (!due.length || progress?.lastReviewedOn === date) return [];
 			return [{ key, expression, date: entry.date, paragraph: entry.paragraph ?? "", due, order }];
 		})
@@ -93,28 +107,28 @@ export function planEnglish(history: LearningHistory, date: string): EnglishPlan
 				a.date.localeCompare(b.date) ||
 				a.order - b.order,
 		);
-	const reviews = candidates.slice(0, 2).map(({ order: _order, ...review }) => review);
+	const reviews = candidates.slice(0, policy.maxReviews).map(({ order: _order, ...review }) => review);
 	const recentNew = [...unique.values()].filter(
 		({ entry }) =>
-			entry.date >= EFFECTIVE_FROM &&
+			entry.date >= policy.effectiveFrom &&
 			today - dayNumber(entry.date) >= 0 &&
-			today - dayNumber(entry.date) < 30,
+			today - dayNumber(entry.date) < policy.windowDays,
 	);
 	const latestNew = recentNew.reduce((last, { entry }) => Math.max(last, dayNumber(entry.date)), -Infinity);
 	return {
 		date,
 		reviews,
 		newExpression:
-			date >= EFFECTIVE_FROM &&
-			reviews.length < 3 &&
-			recentNew.length < 10 &&
-			today - latestNew >= 3 &&
+			date >= policy.effectiveFrom &&
+			reviews.length < policy.dailyLimit &&
+			recentNew.length < policy.maxNew &&
+			today - latestNew >= policy.minNewGapDays &&
 			!history.entries.some((entry) => entry.date === date),
 		used: [...unique.keys()],
 	};
 }
 
-export function englishPrompt(plan: EnglishPlan) {
+function englishPrompt(plan: EnglishPlan) {
 	return [
 		'Return only JSON, no Markdown: {"reviews":[{"expression":"...","meaning":"concise Chinese meaning"}],"newExpression":null or {"expression":"...","meaning":"concise Chinese meaning","paragraph":"short natural English workplace dialogue containing the expression"}}.',
 		"Use exactly the requested reviews, in order. Never rewrite their original paragraphs. Do not invent facts about the learner.",
@@ -125,7 +139,7 @@ export function englishPrompt(plan: EnglishPlan) {
 	].join("\n");
 }
 
-export function parseEnglishAnswer(text: string, plan: EnglishPlan): EnglishAnswer {
+function parseEnglishAnswer(text: string, plan: EnglishPlan): EnglishAnswer {
 	const value: unknown = JSON.parse(text);
 	if (!value || typeof value !== "object" || Array.isArray(value))
 		throw new Error("Invalid English card JSON");
@@ -169,7 +183,7 @@ export function parseEnglishAnswer(text: string, plan: EnglishPlan): EnglishAnsw
 }
 
 /** Apply only displayed expressions; the caller commits this and the outbox in one transaction. */
-export function applyEnglish(history: LearningHistory, plan: EnglishPlan, answer: EnglishAnswer) {
+function applyEnglish(history: LearningHistory, plan: EnglishPlan, answer: EnglishAnswer) {
 	const lines = [plan.date];
 	if (answer.newExpression) {
 		const { expression, meaning, paragraph } = answer.newExpression;
@@ -208,3 +222,12 @@ export function applyEnglish(history: LearningHistory, plan: EnglishPlan, answer
 	if (!answer.newExpression && !plan.reviews.length) lines.push("今天休息，没有新学或到期复习。");
 	return lines.join("\n");
 }
+
+export type EnglishFunctions = {
+	readLearningHistory: typeof readLearningHistory;
+	planEnglish: typeof planEnglish;
+	englishPrompt: typeof englishPrompt;
+	parseEnglishAnswer: typeof parseEnglishAnswer;
+	applyEnglish: typeof applyEnglish;
+};
+module.exports = { readLearningHistory, planEnglish, englishPrompt, parseEnglishAnswer, applyEnglish };
