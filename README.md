@@ -1,4 +1,4 @@
-# @kingcrab/pi-imessage
+# pi-imessage
 
 A minimal, self-managing iMessage bot powered by Pi Durable.
 
