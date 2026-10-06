@@ -30,14 +30,14 @@ it("reads existing settings without rewriting them and preserves allowlist prece
 		const modelPolicy = { fallback: { provider: "faux", modelId: "faux-1" }, codexServiceTier: "priority" };
 		await writeFile(
 			join(directory, "settings.json"),
-			JSON.stringify({ modelPolicy, scheduledEnglish: { untouched: true } }),
+			JSON.stringify({ modelPolicy, retiredFeature: { untouched: true } }),
 		);
 		expect((await readSettings(directory)).modelPolicy).toEqual(modelPolicy);
-		expect(JSON.parse(JSON.stringify(await readSettings(directory))).scheduledEnglish).toEqual({
+		expect(JSON.parse(JSON.stringify(await readSettings(directory))).retiredFeature).toEqual({
 			untouched: true,
 		});
 		expect(JSON.parse(await readFile(join(directory, "settings.json"), "utf8"))).toHaveProperty(
-			"scheduledEnglish",
+			"retiredFeature",
 		);
 		for (const modelPolicy of [
 			{ fallback: {} },

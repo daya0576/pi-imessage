@@ -77,8 +77,8 @@ Personal tools, tasks and optional daily/interval schedules live in
 settings. Startup and `/reload` load them; the assistant can use
 `reload_extensions` to apply its own changes.
 
-See [workspace extensions](docs/workspace-extensions.md) for the factory contract,
-English and system-context templates, and the safe existing-deployment migration.
+See [workspace extensions](docs/workspace-extensions.md) for the factory contract
+and scheduling rules.
 Times use the service machine's local timezone. Saved deadlines survive reload
 and restart; view schedules and latest-ten execution history at `/scheduled`.
 

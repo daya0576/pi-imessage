@@ -89,7 +89,6 @@ it("loads skills and request settings, then refreshes resources and native polic
 				expect(prompt).not.toContain("POST /reminders");
 				expect(prompt).not.toContain("/cron/jobs.json");
 				expect(prompt).toContain("create or update a trusted workspace extension");
-				expect(prompt).not.toContain("Configured daily English cards");
 				expect(prompt).not.toContain("For every environment modification");
 				expect(prompt).toContain("Include original URLs only when the user asks for links");
 				expect(prompt).not.toContain("Read references/style.md");

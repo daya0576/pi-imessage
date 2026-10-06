@@ -56,8 +56,6 @@ type ExecutionInput = {
 	dueAt: number;
 	startedAt: number;
 	date: string;
-	/** Native migration forwards an old business checkpoint without interpreting it. */
-	resume?: JsonValue;
 };
 type ExecutionResult = { summary: string; requestId?: string; finishedAt: number };
 type ExecutionState =
@@ -74,16 +72,6 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 		name: EXECUTION_KIND,
 		version: 2,
 		initial: () => ({ phase: "start" }),
-		migrate(input, checkpoint, fromVersion) {
-			if (fromVersion !== 1 || !input || typeof input !== "object" || Array.isArray(input))
-				throw new Error("Unsupported scheduled execution migration");
-			if (!checkpoint || typeof checkpoint !== "object" || Array.isArray(checkpoint))
-				throw new Error("Invalid scheduled execution checkpoint");
-			const previous = input as ExecutionInput;
-			if (checkpoint.phase === "start" || checkpoint.phase === "compact")
-				return { input: previous, checkpoint: checkpoint as ExecutionState };
-			return { input: { ...previous, resume: checkpoint }, checkpoint: { phase: "start" } };
-		},
 		phases: {
 			async start(task, runtime, context) {
 				const schedule = (await runtime.snapshot(Schedules, context))?.items.find(

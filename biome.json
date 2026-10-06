@@ -1,14 +1,7 @@
 {
 	"$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
 	"files": {
-		"includes": [
-			"src/**",
-			"test/**",
-			"examples/workspace-extensions/**",
-			"ops/migrate-workspace-extensions.mjs",
-			"*.json",
-			"!package-lock.json"
-		]
+		"includes": ["src/**", "test/**", "examples/workspace-extensions/**", "*.json", "!package-lock.json"]
 	},
 	"formatter": {
 		"indentStyle": "tab",
