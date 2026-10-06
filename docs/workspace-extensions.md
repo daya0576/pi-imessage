@@ -3,7 +3,10 @@
 Memory, web tools, chat routing and delivery remain built-in capabilities.
 Business code belongs in `WORKING_DIR/extensions/<name>/index.ts` with its own
 `config.json`. Both the operator and chat assistant can create it. This is trusted
-host code, not a sandbox or an SDK `ExtensionAPI` adapter.
+host code, not a sandbox or an SDK `ExtensionAPI` adapter. Back up the extension
+directories with their configuration. The
+[system-context](../examples/workspace-extensions/system-context/) example loads
+an optional workspace summary into the prompt (ADR 0036).
 
 ## Factory and reload
 
@@ -71,8 +74,7 @@ The framework creates a dedicated conversation and background scheduler for each
 schedule. Each occurrence delegates to the business task with:
 
 - `jobId`, `date` (machine-local), `dueAt`, `startedAt`;
-- `chatGuid` or null, and `config` containing the schedule's JSON `input` or null;
-- optional `resume`: a checkpoint forwarded by an older framework migration.
+- `chatGuid` or null, and `config` containing the schedule's JSON `input` or null.
 
 Successful business tasks return `{ summary, finishedAt, requestId? }`.
 The wrapper's native receipt supplies read-only `/scheduled` history.
@@ -85,42 +87,11 @@ silently recreated.
 Commit business changes and `ScheduledOutbox.items` together, using a stable
 `requestId`. The host reuses its direct-send receipts and passive chat records.
 The destination must be reply-enabled. `sending`/`unknown` effects are never
-replayed automatically; generating a card is not proof of delivery.
+replayed automatically; a queued item is not proof of delivery. Keep credentials
+out of `settings.json`; the schedule view does not show extension configuration.
 
 Removing an extension disables future schedule admission and removes its tools
 and prompt sections, not current calls or historical records. Removed task code
 is conservatively retained in memory until restart, because an old running call
 can still admit children. Restart fails explicitly if unfinished work needs
 missing task code or a missing schedule extension.
-
-## Existing deployment migration
-
-After an idle graceful shutdown and lock release, run:
-
-```sh
-node ops/migrate-workspace-extensions.mjs --apply "$WORKING_DIR"
-```
-
-This offline script never opens Durable storage. It backs up existing
-configuration/extensions under `workspace-migration-backups/`, copies the
-[English](../examples/workspace-extensions/workplace-english/) and
-[system-context](../examples/workspace-extensions/system-context/) templates into
-the workspace, and writes their configuration. Existing extension directories
-are not overwritten. Legacy `settings.json.scheduledEnglish` remains preserved
-but inert, including its read-only settings projection; subsequent changes belong
-in the English extension's `config.json`. Keep credentials out of public workspace
-settings; extension-private configuration is not included in schedule projections.
-The existing learning policy, job ID, model fallback and tier become explicit
-workspace configuration. System-record instructions move to workspace `AGENTS.md`;
-summary path, boundary and byte budget belong to `system-context/config.json`.
-
-At startup, the owner attaches extension definitions to existing schedule rows,
-retaining conversation/task IDs, deadlines, learning documents, saved cards and
-send IDs. Old occurrence checkpoints migrate natively under the same wrapper
-task ID; the extension resumes their original generation conversation and stable
-submission ID. No card regeneration or receipt reset is authorized.
-
-Follow [routine operations](../ops/README.md) for the one-owner handover. For
-rollback, retain current Durable state and receipts; restore code/configuration
-only after verifying schema compatibility. Do not restore an old workspace
-snapshot over post-migration activity.
