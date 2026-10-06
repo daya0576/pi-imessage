@@ -1,12 +1,16 @@
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import type * as os from "node:os";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { main } from "../src/cli.ts";
+import { startApplication } from "../src/main.ts";
 import { createMessageSender } from "../src/transport/send.ts";
 
 // Fail closed: these tests must never execute Swift, AppleScript, open, or sqlite3.
-const { execute } = vi.hoisted(() => ({
+const { execute, fixture } = vi.hoisted(() => ({
+	fixture: { home: "" },
 	execute:
 		vi.fn<
 			(
@@ -27,14 +31,25 @@ vi.mock("node:child_process", () => ({
 	),
 }));
 
+vi.mock("node:os", async (importOriginal) => ({
+	...(await importOriginal<typeof os>()),
+	homedir: () => fixture.home,
+}));
+vi.mock("../src/main.ts", () => ({
+	startApplication: vi.fn().mockResolvedValue({ close: async () => {} }),
+}));
+
 let directory: string;
 beforeEach(async () => {
 	directory = await mkdtemp(join(tmpdir(), "imessage-transport-"));
+	fixture.home = directory;
+	vi.mocked(startApplication).mockClear();
 	execute.mockReset().mockRejectedValue(new Error("Unexpected native command"));
 	vi.spyOn(console, "log").mockImplementation(() => {});
 });
 afterEach(async () => {
 	vi.useRealTimers();
+	vi.unstubAllEnvs();
 	vi.restoreAllMocks();
 	await rm(directory, { recursive: true, force: true });
 });
@@ -105,9 +120,9 @@ it("serializes rich sends across senders and releases the queue after an uncerta
 });
 
 // #33 Phase 2: exercise attachment staging and acknowledged/refused outcomes without a real Messages path.
-it("stages files in an explicit temporary root and surfaces verification failure without repeating earlier sends", async () => {
+it("keeps CLI archives separate from Messages staging and verifies transfers without repeating earlier sends", async () => {
 	vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-	const attachmentsRoot = join(directory, "Attachments");
+	const attachmentsRoot = join(directory, "Library", "Messages", "Attachments");
 	const dbPath = join(directory, "messages.db");
 	const staged: string[] = [];
 	let verification = 0;
@@ -141,12 +156,27 @@ it("stages files in an explicit temporary root and surfaces verification failure
 		}
 		throw new Error(`Unexpected command: ${file}`);
 	});
-	const filePath = join(directory, "report.txt");
+	const workingDir = join(directory, "workspace");
+	const archive = join(workingDir, "attachments");
+	await mkdir(archive, { recursive: true, mode: 0o700 });
+	const filePath = join(archive, "report.txt");
 	await writeFile(filePath, "local fixture");
-	const sender = createMessageSender({ attachmentsRoot, dbPath });
-	await sender.sendMessage("iMessage;+;group", "already sent", { enabled: false, markdown: true });
-	await sender.sendAttachment("iMessage;+;group", filePath);
-	await expect(sender.sendAttachment("iMessage;+;group", filePath)).rejects.toThrow("attachment send failed");
+	vi.stubEnv("WORKING_DIR", workingDir);
+	vi.stubEnv("MESSAGES_DB_PATH", dbPath);
+	vi.stubEnv("DOTENV_CONFIG_PATH", join(directory, "missing.env"));
+	// Startup is mocked, but the CLI constructs its real transport under a temporary HOME.
+	const signals = vi.spyOn(process, "once").mockReturnValue(process);
+	await main(["serve"]);
+	signals.mockRestore();
+	const options = vi.mocked(startApplication).mock.calls[0][0];
+	expect(options.workingDir).toBe(workingDir);
+	expect(options.dbPath).toBe(dbPath);
+	await options.send("iMessage;+;group", "already sent", { enabled: false, markdown: true });
+	if (!options.sendAttachment) throw new Error("Missing CLI attachment sender");
+	await options.sendAttachment("iMessage;+;group", filePath);
+	await expect(options.sendAttachment("iMessage;+;group", filePath)).rejects.toThrow(
+		"attachment send failed",
+	);
 	expect(execute.mock.calls.map(([file]) => file)).toEqual([
 		"osascript",
 		"osascript",

@@ -78,7 +78,8 @@ export async function main(args = process.argv.slice(2)) {
 		runScheduled = { jobId: args[2], requestId: args[4] };
 	}
 	const dbPath = process.env.MESSAGES_DB_PATH ?? join(homedir(), "Library", "Messages", "chat.db");
-	const sender = createMessageSender({ attachmentsRoot: join(workingDir, "attachments"), dbPath });
+	// Incoming archives stay in the workspace; outgoing staging uses Messages' readable root.
+	const sender = createMessageSender({ dbPath });
 	const app = await startApplication({
 		workingDir,
 		agentDir,

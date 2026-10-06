@@ -31,7 +31,6 @@ const SCRIPT_TIMEOUT_MS = 30_000;
 const ATTACHMENT_VERIFY_TIMEOUT_MS = 30_000;
 const ATTACHMENT_VERIFY_POLL_MS = 500;
 const MESSAGES_APP_PATH = "/System/Applications/Messages.app";
-const ATTACHMENTS_ROOT = join(homedir(), "Library", "Messages", "Attachments");
 const CHAT_DB_PATH = join(homedir(), "Library", "Messages", "chat.db");
 
 // ── AppleScript helpers ───────────────────────────────────────────────────────
@@ -272,7 +271,7 @@ export interface MessageSender {
 export function createMessageSender(
 	options: { attachmentsRoot?: string; dbPath?: string } = {},
 ): MessageSender {
-	const attachmentsRoot = options.attachmentsRoot ?? ATTACHMENTS_ROOT;
+	const attachmentsRoot = options.attachmentsRoot ?? join(homedir(), "Library", "Messages", "Attachments");
 	const dbPath = options.dbPath ?? CHAT_DB_PATH;
 	return {
 		async sendMessage(chatGuid: string, text: string, richText?: RichTextSettings): Promise<void> {
