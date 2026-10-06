@@ -7,6 +7,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-work
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { expect, it, vi } from "vitest";
 import { Chats } from "../src/agent/chats.ts";
+import { messageExtension } from "../src/extensions/message.ts";
 import { startService } from "../src/main.ts";
 
 // #33: resources and request policy stay cached until /reload; Durable executes tools and retries.
@@ -67,7 +68,10 @@ it("loads skills and request settings, then refreshes resources and native polic
 		models.setProvider(faux.provider);
 		const stream = vi.spyOn(models, "streamSimple");
 		const model = faux.getModel();
-		const extensions = vi.fn(() => [CodingTools]);
+		const extensions = vi.fn(() => [
+			CodingTools,
+			messageExtension({ owner: async () => "chat", send: vi.fn() }),
+		]);
 		const send = vi.fn().mockResolvedValue(undefined);
 		agent = await startService({
 			workingDir: directory,
@@ -89,6 +93,10 @@ it("loads skills and request settings, then refreshes resources and native polic
 				expect(prompt).not.toContain("POST /reminders");
 				expect(prompt).not.toContain("/cron/jobs.json");
 				expect(prompt).toContain("create or update a trusted workspace extension");
+				// #33: messaging guidance must agree with workspace-owned native scheduling.
+				expect(prompt).toContain("Delayed and recurring work must use native Durable tasks");
+				expect(prompt).not.toContain("Delayed and recurring work is not supported");
+				expect(prompt).toContain("never use external timers, operating-system jobs or a second pipeline");
 				expect(prompt).not.toContain("For every environment modification");
 				expect(prompt).toContain("Include original URLs only when the user asks for links");
 				expect(prompt).not.toContain("Read references/style.md");
