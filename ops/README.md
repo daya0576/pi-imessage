@@ -235,6 +235,12 @@ launch the controller twice before the first outcome is known. Require:
 
 On a timeout, lock, occupied port or startup failure, stop and report it. Do not
 force-kill, steal the lock, reinstall dependencies or restore a workspace snapshot.
+
+Routine deployments do not run the live smoke. Only when the owner authorizes a
+paid model request and a real message, run
+`node --experimental-strip-types ops/smoke.ts --live --chat CHAT_GUID`: it checks
+`/health/model`, waits for the operator's message from the device and reports
+the new reply's receipt. Never resend a reply that is not `sent`.
 Record the deployment (time, commit, PID, checks, unverified limits) with
 `pi-memory`, delete the `/tmp` controller directory, and report **deployed and
 verified** or the blocker. Release gates and evidence live in GitHub #33.
