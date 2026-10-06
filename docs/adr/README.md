@@ -29,6 +29,8 @@ Accepted ADR files are never edited; this index records which ones are current.
 | [0044](0044-message-channels.md) | Organize message sources as channels | Proposed |
 | [0045](0045-chat-scheduling-tools.md) | Native chat scheduling tools | Proposed |
 
+| [0046](0046-selective-command-redaction.md) | Selective command-preview redaction | Proposed; owner-requested implementation in #36 |
+
 ## Replaced or rejected
 
 | ADR | Decision | Replaced by |

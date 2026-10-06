@@ -316,8 +316,49 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 	expect(commandPreview(`${"x".repeat(200)} token=secret-command-marker`)).not.toContain(
 		"secret-command-marker",
 	);
-	expect(commandPreview("curl https://user:secret-url-marker@example.test")).toContain("hidden");
-	expect(commandPreview("cat ~/.env")).toContain("hidden");
+	// #36: Keep command structure while masking credential values, not keywords.
+	expect(commandPreview("curl https://user:secret-url-marker@example.test")).toBe(
+		"curl https：／／***@example．test",
+	);
+	expect(commandPreview("cat ~/.env auth.json id_rsa")).toBe("cat ~/.env auth.json id_rsa");
+	expect(commandPreview("rg 'token|password|secret' src")).toBe("rg 'token|password|secret' src");
+	for (const [command, preview] of [
+		["TOKEN=secret-command-marker curl --retry 3", "TOKEN=*** curl --retry 3"],
+		['curl --api-key "secret-command-marker with spaces" --retry 3', "curl --api-key *** --retry 3"],
+		["curl -u user:secret-command-marker --retry 3", "curl -u *** --retry 3"],
+		["curl --user 'user:secret-command-marker'", "curl --user ***"],
+		["curl --user=user:secret-command-marker", "curl --user=***"],
+		["curl --password=secret-command-marker", "curl --password=***"],
+		[
+			'curl -H "Authorization: Bearer secret-command-marker" --retry 3',
+			'curl -H "Authorization: ***" --retry 3',
+		],
+		['curl -H "Authorization: Basic secret-command-marker"', 'curl -H "Authorization: ***"'],
+		['printf \'{"api_key":"secret-command-marker"}\'', 'printf \'{"api_key":"***"}\''],
+		["TOKEN=abc'quoted'\\ space curl", "TOKEN=*** curl"],
+		['TOKEN="abc\\"quoted" curl', "TOKEN=*** curl"],
+		[
+			"curl https://example.com/?token=secret-command-marker&limit=5",
+			"curl https：／／example．com／?token=***&limit=5",
+		],
+		["echo github_pat_fakefixture", "echo ***"],
+		["echo sk-fakefixture", "echo ***"],
+		[
+			"printf '-----BEGIN PRIVATE KEY-----\nsecret-command-marker\n-----END PRIVATE KEY-----'",
+			"printf '***'",
+		],
+		["curl --user \\\n  user:secret-command-marker --retry 3", "curl --user *** --retry 3"],
+		['curl "--password" secret-command-marker', 'curl "--password" ***'],
+		["TOKEN=$(printf %s secret-command-marker) curl", "TOKEN=*** curl"],
+		["TOKEN=`printf %s secret-command-marker` curl", "TOKEN=*** curl"],
+		['curl -H "Authorization: Bearer "secret-command-marker', 'curl -H "Authorization: ***'],
+		['curl "https://user:pa\'ss@example.test"', 'curl "https：／／***@example．test"'],
+		['printf \'{"password":1234,"keep":5}\'', 'printf \'{"password":***,"keep":5}\''],
+		['curl -d "{\\"password\\":\\"secret-command-marker\\"}" --retry 3', "curl -d *** --retry 3"],
+		[`TOKEN=${"s".repeat(200)} curl`, "TOKEN=*** curl"],
+	]) {
+		expect(commandPreview(command)).toBe(preview);
+	}
 	expect(commandPreview("curl https://example.com/path")).toBe("curl https：／／example．com／path");
 	expect(commandPreview("curl example.com/path")).toBe("curl example．com/path");
 	expect(progressText).not.toContain("timeout=");
