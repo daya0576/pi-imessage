@@ -77,68 +77,63 @@ The web UI reads through Harness APIs, not directly from JSONL files.
 
 ### Inside the Harness
 
-Harness = storage + execution. Agent = model + configuration.
-A tool is a model-callable capability; a task is a durable unit of work;
-a phase is a step within a task.
+These concepts and files are native to Pi Durable's JSONL storage.
+Paths are relative to `WORKING_DIR/durable/`.
+
+| Member | Role | File |
+|---|---|---|
+| Conversation | Conversation scope linking history and tasks. | `main.jsonl` |
+| Generation | Requests the model, waits for tools and advances one model turn. | Active: `task-<id>.jsonl`; terminal: `main.jsonl` |
+| Entry | Immutable history record: user input, model response or tool result. | `main.jsonl` |
+| `pi.live` | Current run state, partial model response and running tool output. | `doc-<id>.jsonl` |
+| `pi.inbox` | Queued submissions received while the conversation is busy. | `doc-<id>.jsonl` |
+
+Example: "Show the current directory.", then a `steer` while the tool runs.
+Based on a verified Durable 1.0.2 run; test timing details are omitted.
+The second Generation is not shown. File mappings are in the table above.
 
 ```text
-submit(input)
-     |
-     v
-Inbox
-  |
-  v
-  +--> pi.generation task: prepare phase <---------------+
-  |      Build system prompt, select tools               |
-  |      Compact context if needed                      |
-  |               |                                     |
-  |               v                                     |
-  |    request phase: ONE model request                 |
-  |               |                                     |
-  |               +-- final answer -> finish this turn   |
-  |               |                                     |
-  |               +-- tool calls -> tools phase          |
-  |                                    |                |
-  |                                    v                |
-  |                               pi.tool task          |
-  |                                 Validate args       |
-  |                                 Run hooks           |
-  |                                 Execute tool        |
-  |                                    |                |
-  |                                    v                |
-  |                               Save tool result      |
-  |                                    |                |
-  |                                    +----------------+
-  |                                      Next generation
-  |                                      sees tool results
-
-Available tools: CodingTools / native extensions
-  Skills and CLI (e.g. pi-browser) run via read/bash.
-  A tool may explicitly create a custom task:
-    phase -> commit checkpoint -> next phase / finish
-
-Task checkpoints, entries and documents -> JSONL storage
-Restart: open storage + harness.resume() -> resume pending work
+Conversation / Tasks                                                      Model                 Tool
+|                                                                           |                     |
+| Conversation 1 (main.jsonl) - create                                      |                     |
+|                                                                           |                     |
+|   Generation task (task-9.jsonl)                                          |                     |
+|     ▶ phase=prepare; state=pending                                        |                     |
+|       pi.live - run.taskId=9, inputs=[8]                                  |                     |
+|       Prepare request; Entry 10 (main.jsonl) - pi.system                  |                     |
+|     ▶ phase=request; state=running                                        |                     |
+|       pi.live - generation.attempt=1                                      |                     |
+|       ------------------ request with committed context ------------------>                     |
+|       <------------------ complete response: bash call -------------------|                     |
+|       Entry 11 (main.jsonl) - pi.assistant, byTaskId=9                    |                     |
+|       pi.usage - update model usage                                       |                     |
+|     ▶ phase=tools; state=waiting, on=[12]                                 |                     |
+|       pi.live - clear partial; tool 12 pending                            |                     |
+|                                                                           |                     |
+|     Tool Task T12 (task-12.jsonl), owner=9                                |                     |
+|       ▶ phase=call; state=pending                                         |                     |
+|         Resolve tool; validate arguments                                  |                     |
+|       ▶ phase=execute; state=running                                      |                     |
+|         Save arguments + replay=unsafe; pi.live tool running              |                     |
+|         -------------------------------- execute command="pwd" --------------------------------->
+|         <----------------------------- result: current directory -------------------------------|
+|         Entry 14 (main.jsonl) - pi.tool-result, byTaskId=12               |                     |
+|                                                                           |                     |
+|       ▶ T12 (main.jsonl): state=terminal, outcome=completed               |                     |
+|         pi.live - tool done, entry=14; clear output                       |                     |
+|                                                                           |                     |
+|     ▶ phase=tools (reused); state=running                                 |                     |
+|       Place steer: Entry 15 (main.jsonl) - pi.user, byTaskId=9            |                     |
+|       Submission 13 (main.jsonl) - status=placed                          |                     |
+|       pi.inbox - remove item 13                                           |                     |
+|                                                                           |                     |
+|     ▶ G9 (main.jsonl): state=terminal, outcome=completed                  |                     |
+|       pi.live - remove tools; run.taskId=16                               |                     |
+|                                                                           |                     |
+| Next generation continues the run; final settlement is not shown.         |                     |
+|                                                                           |                     |
 ```
 
-**Prepare:** call each prompt section's function to get its current text
-(e.g. rules, AGENTS.md, skill descriptions or saved task state). These pieces
-form the system prompt; "render" means generating text, not drawing a UI.
-Durable records prompt/tool changes in the conversation, checks whether
-compaction is needed, and saves a checkpoint for the request phase.
-
-**Request:** read the prepared context, run `beforeRequest` hooks, then call
-the model. Its response determines whether to execute tools, finish, or retry.
-
-Source: [`prepare`](https://github.com/earendil-works/pi/blob/70eceaade630d348aa42ca3e4ff3b785dad80754/packages/durable/src/harness/generation.ts#L126-L184)
-and [`request`](https://github.com/earendil-works/pi/blob/70eceaade630d348aa42ca3e4ff3b785dad80754/packages/durable/src/harness/generation.ts#L185-L209).
-
-- **Automatic:** Durable creates generation/tool tasks and advances their phases;
-  the model chooses which tools to call. We implement tool logic, not another agent loop.
-- **Explicit:** custom tasks must be created by host/tool code; registering them
-  does not run them. The host schedules cron and 6-hour compaction.
-- **Recovery:** interrupted tools rerun only when their replay policy permits it.
-  Custom task phases must make repeated external effects safe; checkpoints alone do not.
-
-Reference: [Reading Pi Durable](https://changchen.me/blog/20261003/pi-durable/),
-checked against Durable's task examples and generation/tool implementation.
+Upstream reference: [Watching a Conversation](https://github.com/earendil-works/pi/blob/main/packages/durable/README.md#watching-a-conversation)
+and [Busy Conversations](https://github.com/earendil-works/pi/blob/main/packages/durable/README.md#busy-conversations).
+Upstream `main` is experimental; the examples here describe the pinned version.
