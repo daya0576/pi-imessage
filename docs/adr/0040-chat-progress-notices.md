@@ -1,6 +1,6 @@
 # 0040. Chat progress notices
 
-Status: proposed (consolidates ADRs 0020–0028 and 0031 without changing behavior)
+Status: accepted (owner accepted on 2026-10-06; consolidates ADRs 0020–0028 and 0031 without changing behavior)
 
 **Problem.** The current progress format is spread over ten ADRs that each
 replace a detail of the previous one.

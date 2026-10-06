@@ -1,6 +1,6 @@
 # 0042. Background schedules and workspace extensions
 
-Status: proposed (consolidates ADRs 0019 and 0032–0035 without changing behavior)
+Status: accepted (owner accepted on 2026-10-06; consolidates ADRs 0019 and 0032–0035 without changing behavior)
 
 **Problem.** Scheduling was removed (0019), rebuilt natively (0032–0034) and
 then separated from personal business code (0035). The current rules are

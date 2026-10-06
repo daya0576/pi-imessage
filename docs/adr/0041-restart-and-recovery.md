@@ -1,6 +1,6 @@
 # 0041. Restart and recovery
 
-Status: proposed (consolidates ADRs 0037–0039 without changing behavior)
+Status: accepted (owner accepted on 2026-10-06; consolidates ADRs 0037–0039 without changing behavior)
 
 **Problem.** Restart rules are spread over three ADRs, each replacing part of
 the previous one.

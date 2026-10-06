@@ -24,12 +24,12 @@ Accepted ADR files are never edited; this index records which ones are current.
 | [0017](0017-browser-cli-owned-scope.md) | Conversation-scoped browser CLI tool | Accepted, not implemented |
 | [0018](0018-tasks-without-prompt-api.md) | Ordinary `/stop`; no HTTP `/prompt` or `/send` | Active |
 | [0030](0030-shared-web-read-cache.md) | Shared web read cache | Proposed (implemented) |
-| [0036](0036-workspace-policy-and-neutral-service-id.md) | Workspace policy and neutral service ID | Proposed (implemented) |
-| [0040](0040-chat-progress-notices.md) | Chat progress notices | Proposed; consolidates 0020–0028, 0031 |
-| [0041](0041-restart-and-recovery.md) | Restart and recovery | Proposed; consolidates 0037–0039 |
-| [0042](0042-background-schedules-and-workspace-extensions.md) | Background schedules and workspace extensions | Proposed; consolidates 0019, 0032–0035 |
+| [0036](0036-workspace-policy-and-neutral-service-id.md) | Workspace policy and neutral service ID | Active |
+| [0040](0040-chat-progress-notices.md) | Chat progress notices | Active; consolidates 0020–0028, 0031 |
+| [0041](0041-restart-and-recovery.md) | Restart and recovery | Active; consolidates 0037–0039 |
+| [0042](0042-background-schedules-and-workspace-extensions.md) | Background schedules and workspace extensions | Active; consolidates 0019, 0032–0035 |
 
-## Replaced or pending replacement
+## Replaced
 
 | ADR | Decision | Replaced by |
 |---|---|---|

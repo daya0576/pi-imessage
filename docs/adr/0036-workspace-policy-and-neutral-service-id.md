@@ -1,6 +1,6 @@
 # 0036. Workspace policy and a neutral service identity
 
-Status: proposed (owner requested this implementation)
+Status: accepted (owner accepted on 2026-10-06)
 
 **Problem.** A reusable message service should not hard-code an operator's system
 record layout, fallback model, billing tier or personal launchd identifier.
