@@ -63,14 +63,19 @@ with the dependency version pinned in this project before adopting their APIs.
 
 ## Git
 
-- One conversation, one worktree and branch; create or reuse it before editing. Never edit the main checkout.
-- Reuse it after restart; never automatically delete a dirty worktree.
-- Merge and deploy serially; never start a second real message pipeline.
-- After each completed project change, run the required checks, deploy and verify as needed, then commit and push the intended changes to the tracking remote. The owner has given standing authorization; do not wait for another commit/push request.
-- Leave unrelated drafts, temporary files and credentials out of commits. Stop and report a rejected push; never force push.
-- Stage explicit paths; never `git add -A` or `git add .`.
-- Never `git reset --hard`, `git checkout .`, `git clean -fd`, `git stash`, `--no-verify`, or force push.
-- Message: `type(scope): summary`, with type one of `feat`, `fix`, `refactor`, `test`, `docs`, `chore`.
+- One conversation, one worktree and branch. Create or reuse it before editing,
+  including after restart. Never edit the main checkout or automatically delete
+  a dirty worktree.
+- Merge and deploy serially; never run two real message pipelines concurrently.
+- After each completed project change, run required checks, deploy and verify
+  as needed, then commit and push to the tracking remote. These actions are
+  pre-authorized; do not ask again.
+- Commit only intended changes; exclude unrelated drafts, temporary files and
+  credentials. Stage explicit paths, never `git add -A` or `git add .`.
+- Never use `git reset --hard`, `git checkout .`, `git clean -fd`, `git stash`,
+  `--no-verify`, or force push. Stop and report any rejected push.
+- Commit messages: `type(scope): summary`.
+  Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`.
 
 ## Issues
 
