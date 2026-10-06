@@ -25,10 +25,6 @@ const DAY = 86400000;
 const INTERVALS = [1, 3, 7, 14, 30];
 const EFFECTIVE_FROM = "2026-10-04";
 
-export function shanghaiDate(timestamp: number) {
-	return new Date(timestamp + 8 * 3600000).toISOString().slice(0, 10);
-}
-
 function dayNumber(date: string) {
 	if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(`${date}T00:00:00Z`)))
 		throw new Error("Invalid learning date");

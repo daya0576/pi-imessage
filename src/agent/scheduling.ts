@@ -21,11 +21,10 @@ import {
 	parseEnglishAnswer,
 	planEnglish,
 	readLearningHistory,
-	shanghaiDate,
 } from "./english.ts";
+import { dailyTime, localDate, nextDaily } from "./time.ts";
 
 const SIX_HOURS = 6 * 3600000;
-const DAY = 86400000;
 export const EXECUTION_KIND = "imessage.scheduled-execution";
 
 type Schedule = {
@@ -68,10 +67,6 @@ export const ScheduledOutbox = defineDoc<{
 	initial: () => ({ items: [] }),
 });
 
-function nextDaily(time: string, after: number) {
-	const today = Date.parse(`${shanghaiDate(after)}T${time}:00+08:00`);
-	return today > after ? today : today + DAY;
-}
 function nextAt(schedule: Schedule, previous: number, now: number) {
 	if (schedule.kind === "english") return nextDaily(schedule.time ?? "07:45", now);
 	const interval = schedule.intervalMs ?? SIX_HOURS;
@@ -247,9 +242,7 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 					if (!schedule) throw new Error("Scheduled job is missing");
 					const now = runtime.now();
 					// No backfill before today's daily slot. After that slot, process only today.
-					const beforeToday =
-						schedule.kind === "english" &&
-						now < Date.parse(`${shanghaiDate(now)}T${schedule.time ?? "07:45"}:00+08:00`);
+					const beforeToday = schedule.kind === "english" && now < dailyTime(schedule.time ?? "07:45", now);
 					if (!schedule.enabled || beforeToday)
 						return {
 							status: "running",
@@ -261,7 +254,7 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 							jobId: schedule.id,
 							dueAt: at,
 							startedAt: now,
-							date: shanghaiDate(now),
+							date: localDate(now),
 						},
 						{ ownership: { kind: "task", taskId: task.id } },
 					);
@@ -322,7 +315,7 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 				const now = Date.now();
 				const execution = await tx.createTask(
 					Execution,
-					{ jobId, dueAt: now, startedAt: now, date: shanghaiDate(now) },
+					{ jobId, dueAt: now, startedAt: now, date: localDate(now) },
 					{
 						conversationId: schedule.conversationId,
 						ownership: { kind: "conversation" },
@@ -336,6 +329,7 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 		},
 		async initialize(settings: Settings) {
 			const english = settings.scheduledEnglish;
+			const timezone = new Intl.DateTimeFormat().resolvedOptions().timeZone;
 			const existing = (await harness.snapshot(Schedules, BACKGROUND_CONTEXT))?.items;
 			const previousEnglish = existing?.find((item) => item.kind === "english");
 			const learning =
@@ -352,6 +346,7 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 						kind: "compaction",
 						enabled: true,
 						intervalMs: SIX_HOURS,
+						timezone,
 					},
 				];
 				if (english)
@@ -360,7 +355,7 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 						name: "Workplace English",
 						kind: "english",
 						...english,
-						timezone: "Asia/Shanghai",
+						timezone,
 					});
 				for (const definition of definitions) {
 					const found = state.items.find((item) => item.id === definition.id);

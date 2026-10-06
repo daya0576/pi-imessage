@@ -474,12 +474,12 @@ function renderLogs() {
 function renderScheduled() {
 	document.querySelector(".native-state")?.remove();
 	view.replaceChildren();
-	function time(timestamp) {
+	function time(timestamp, timezone) {
 		return typeof timestamp === "number"
-			? new Date(timestamp).toLocaleString("sv-SE", { timeZone: "Asia/Shanghai" })
+			? new Date(timestamp).toLocaleString("sv-SE", { timeZone: timezone })
 			: "-";
 	}
-	function history(runs, conversationId) {
+	function history(runs, conversationId, timezone) {
 		const body = element("div", undefined, "card-content");
 		const table = element("table", undefined, "task-table");
 		const heading = table.insertRow();
@@ -496,9 +496,9 @@ function renderScheduled() {
 					),
 				);
 			for (const value of [
-				time(run.input?.dueAt),
-				time(run.input?.startedAt),
-				time(run.result?.finishedAt),
+				time(run.input?.dueAt, timezone),
+				time(run.input?.startedAt, timezone),
+				time(run.result?.finishedAt, timezone),
 				[run.status, run.delivery].filter(Boolean).join(" / "),
 				run.error || run.result?.summary || "In progress",
 			])
@@ -519,16 +519,20 @@ function renderScheduled() {
 				: latest
 					? [latest.status, latest.delivery].filter(Boolean).join(" / ")
 					: "enabled";
-		const lastRun = latest ? time(latest.input?.startedAt) : "No executions yet";
+		const lastRun = latest ? time(latest.input?.startedAt, job.timezone) : "No executions yet";
 		const cadence = job.kind === "english" ? `daily ${job.time}` : `every ${job.intervalMs / 3600000}h`;
 		const summary = element("summary", undefined, "schedule-summary");
 		summary.append(
 			element("span", job.name, "schedule-name"),
-			element("span", `${cadence} / Next: ${time(job.nextAt)} (Asia/Shanghai)`, "schedule-next"),
+			element(
+				"span",
+				`${cadence} / Next: ${time(job.nextAt, job.timezone)} (${job.timezone})`,
+				"schedule-next",
+			),
 			element("span", `Last: ${lastRun}`, "schedule-last"),
 			element("span", status, "schedule-status"),
 		);
-		details.append(summary, history(job.runs || [], job.conversationId));
+		details.append(summary, history(job.runs || [], job.conversationId, job.timezone));
 		view.append(details);
 	}
 	if (!data.jobs?.length) view.append(element("p", "No scheduled tasks.", "empty"));

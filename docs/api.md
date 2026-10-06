@@ -73,6 +73,10 @@ ten executions across all jobs. Results separate native task outcome from the
 message transport receipt (`sent` is not recipient confirmation). These views
 never resume the Harness or invoke a model. POST/DELETE return 404; there are no
 run, pause or resend buttons. Scheduling configuration takes effect at startup.
+Daily slots and learning dates use the service machine's local timezone (or an
+explicit process `TZ`). Each job includes `timezone`; Web deadlines and history
+use it even when the browser is in another timezone. Saved absolute deadlines
+remain unchanged on restart (ADR 0034).
 
 | Endpoint | Description | Example |
 |---|---|---|

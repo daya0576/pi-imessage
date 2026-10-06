@@ -97,6 +97,7 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 		expect(scheduled.jobs[0]).toMatchObject({
 			id: "compact-chats",
 			intervalMs: 21600000,
+			timezone: new Intl.DateTimeFormat().resolvedOptions().timeZone,
 			phase: "sleep",
 			runs: [],
 		});
@@ -461,6 +462,9 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 			if (path.endsWith("app.js")) {
 				expect(assetText).not.toMatch(/EventSource|setInterval|visibilitychange|scheduleRefresh/);
 				expect(assetText).toContain('addEventListener("click", refresh)');
+				expect(assetText).not.toContain("Asia/Shanghai");
+				expect(assetText).toContain("timeZone: timezone");
+				expect(assetText).toContain("job.timezone");
 			}
 		}
 		expect((await fetch(`${base}/assets/unknown.js`)).status).toBe(404);

@@ -58,6 +58,7 @@ it("loads CLI environment without overriding explicit values and retains proxy c
 			https_proxy: `http://fixture-user:fake&password@127.0.0.1:${proxyAddress.port}`,
 			no_proxy: "127.0.0.1,localhost",
 			NODE_OPTIONS: "--no-warnings",
+			TZ: "America/New_York",
 		};
 		const cli = resolve("src/cli.ts");
 		const installed = await execute(process.execPath, ["--experimental-strip-types", cli, "install"], {
@@ -113,6 +114,7 @@ it("loads CLI environment without overriding explicit values and retains proxy c
 			"https_proxy",
 			"no_proxy",
 			"NODE_OPTIONS",
+			"TZ",
 		] as const)
 			expect(job.EnvironmentVariables[key]).toBe(environment[key]);
 		const client = join(directory, "proxy-client.mjs");

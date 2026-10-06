@@ -51,7 +51,10 @@ native compaction. English selection and quota enforcement are deterministic in
 Learning progress, the actual card and the outgoing item commit atomically.
 The host delivery poll uses existing direct-send receipts and passive chat records.
 `web/schedules.ts` projects these native records, including latest-ten history.
-See [ADR 0032](adr/0032-native-background-schedules.md).
+Daily slots and learning dates use the service machine's local timezone; the Web
+view uses the same timezone. Saved absolute deadlines survive restart. See
+[ADR 0032](adr/0032-native-background-schedules.md) and
+[ADR 0034](adr/0034-machine-local-schedule-time.md).
 
 ## 2. Workflow
 

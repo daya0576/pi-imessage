@@ -49,6 +49,7 @@ export async function main(args = process.argv.slice(2)) {
 			"https_proxy",
 			"no_proxy",
 			"NODE_OPTIONS",
+			"TZ",
 			"DOTENV_CONFIG_PATH",
 		]
 			.filter((key) => process.env[key] !== undefined)

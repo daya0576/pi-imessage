@@ -168,7 +168,7 @@ Create a private directory with `mktemp -d /tmp/pi-imessage-restart.XXXXXX` and
   `ps eww`, credentials, complete plists or the full environment to tool output.
   Preserve `WORKING_DIR`, `PI_CODING_AGENT_DIR`, `DOTENV_CONFIG_PATH`, Web/DB
   overrides, proxy/bypass variables (both cases), `NODE_OPTIONS`, search keys,
-  HOME/locale and PATH. Read cwd `.env` only to resolve values not overridden by
+  HOME/locale, `TZ` and PATH. Read cwd `.env` only to resolve values not overridden by
   the running process. Retain `~/.pi/agent/bin` and the selected Node directory in
   PATH; do not silently substitute the tool runner's environment.
 - `control.sh`: shell-quoted values for `OLD_PID`, `OLD_STARTED` (exact `ps`

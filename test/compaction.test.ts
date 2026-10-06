@@ -1,6 +1,9 @@
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
@@ -17,6 +20,13 @@ it("schedules quiet native compaction, skips empty/reset chats and preserves con
 	const directory = await mkdtemp(join(tmpdir(), "imessage-compact-"));
 	let agent: Awaited<ReturnType<typeof startService>> | undefined;
 	try {
+		// #33 / ADR 0034: timezone and DST checks run outside the test worker.
+		for (const timezone of ["UTC", "America/New_York"])
+			await promisify(execFile)(
+				process.execPath,
+				["--experimental-strip-types", fileURLToPath(new URL("fixtures/local-time.ts", import.meta.url))],
+				{ env: { ...process.env, TZ: timezone }, timeout: 10000 },
+			);
 		await writeFile(
 			join(directory, "settings.json"),
 			JSON.stringify({ chatAllowlist: { whitelist: ["*"], blacklist: [] } }),
@@ -112,7 +122,7 @@ it("schedules quiet native compaction, skips empty/reset chats and preserves con
 			},
 		};
 		await writeFile(join(scheduledDir, "settings.json"), JSON.stringify(settings));
-		let now = Date.parse("2026-10-07T07:40:00+08:00");
+		let now = Date.parse("2026-10-07T07:40:00");
 		vi.spyOn(Date, "now").mockImplementation(() => now);
 		const scheduledOptions = {
 			workingDir: scheduledDir,
@@ -127,10 +137,13 @@ it("schedules quiet native compaction, skips empty/reset chats and preserves con
 		const english = jobs?.find((job) => job.kind === "english");
 		const compact = jobs?.find((job) => job.kind === "compaction");
 		if (!english || !compact) throw new Error("Missing native jobs");
+		const timezone = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+		expect(english.timezone).toBe(timezone);
+		expect(compact.timezone).toBe(timezone);
 		const deadline = await agent.harness.getTask(english.taskId, BACKGROUND_CONTEXT);
 		expect(deadline).toMatchObject({
 			background: true,
-			state: { checkpoint: { phase: "sleep", at: Date.parse("2026-10-07T07:45:00+08:00") } },
+			state: { checkpoint: { phase: "sleep", at: Date.parse("2026-10-07T07:45:00") } },
 		});
 		const imported = (
 			await agent.harness.snapshot(EnglishLearning, english.conversationId, BACKGROUND_CONTEXT)
@@ -175,9 +188,18 @@ it("schedules quiet native compaction, skips empty/reset chats and preserves con
 		};
 		expect(planEnglish(quota, "2026-10-08").newExpression).toBe(false);
 
+		// Old timezone metadata is refreshed without replacing the saved absolute deadline.
+		await agent.harness.commit(async (tx) => {
+			const job = (await tx.doc(Schedules)).items.find((item) => item.id === english.id);
+			if (job) job.timezone = "Pacific/Honolulu";
+		}, BACKGROUND_CONTEXT);
 		await agent.close();
 		const manualRun = { jobId: "compact-chats", requestId: "fixture-manual-once" };
 		agent = await startService({ ...scheduledOptions, runScheduled: manualRun });
+		expect(await agent.harness.getTask(english.taskId, BACKGROUND_CONTEXT)).toEqual(deadline);
+		expect((await readSchedules(agent.harness)).jobs.find((job) => job.kind === "english")?.timezone).toBe(
+			timezone,
+		);
 		agent.harness.resume();
 		await vi.waitFor(
 			async () => {
@@ -186,7 +208,7 @@ it("schedules quiet native compaction, skips empty/reset chats and preserves con
 					(job) => job.kind === "compaction",
 				);
 				expect(maintenance?.runs[0].status).toBe("completed");
-				expect(maintenance?.nextAt).toBe(Date.parse("2026-10-07T13:40:00+08:00"));
+				expect(maintenance?.nextAt).toBe(Date.parse("2026-10-07T13:40:00"));
 			},
 			{ timeout: 5000 },
 		);
@@ -196,7 +218,7 @@ it("schedules quiet native compaction, skips empty/reset chats and preserves con
 			(await readSchedules(agent.harness)).jobs.find((job) => job.kind === "compaction")?.runs,
 		).toHaveLength(1);
 		await agent.close();
-		now = Date.parse("2026-10-07T07:46:00+08:00");
+		now = Date.parse("2026-10-07T07:46:00");
 		faux.setResponses([fauxAssistantMessage(JSON.stringify(reviewAnswer))]);
 		agent = await startService(scheduledOptions);
 		agent.harness.resume();
@@ -248,13 +270,13 @@ it("schedules quiet native compaction, skips empty/reset chats and preserves con
 		await agent.close();
 
 		// Missing multiple days before today's slot waits; no historical English card is generated.
-		now = Date.parse("2026-10-10T07:40:00+08:00");
+		now = Date.parse("2026-10-10T07:40:00");
 		agent = await startService(scheduledOptions);
 		agent.harness.resume();
 		await vi.waitFor(
 			async () =>
 				expect(await agent?.harness.getTask(english.taskId, BACKGROUND_CONTEXT)).toMatchObject({
-					state: { checkpoint: { phase: "sleep", at: Date.parse("2026-10-10T07:45:00+08:00") } },
+					state: { checkpoint: { phase: "sleep", at: Date.parse("2026-10-10T07:45:00") } },
 				}),
 			{ timeout: 5000 },
 		);
