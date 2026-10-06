@@ -1,51 +1,56 @@
-# 0035. Keep business tasks in workspace-owned Durable extensions
+# 0035. Workspace-owned business extensions
 
-Status: proposed (owner requested migrating English out of the framework)
+Status: accepted
 
-**Problem.** English learning rules, prompts, quotas and a personal job ID are
-embedded in the agent, scheduler, settings and Web view. A reusable messaging
-application should not know a user's learning policy.
+**Problem.** Personal business logic, such as English learning, does not belong
+in the reusable messaging framework.
 
-**Example.** Replacing daily English with another personal task should change a
-workspace extension, not the framework's source or scheduler branches.
+**Example.** Changing a personal task should change a workspace extension, not
+framework scheduling, settings, prompts or Web code.
 
 **Decision.**
 
-- Move the English task implementation to
-  `WORKING_DIR/extensions/work-english/`. It is a Pi Durable task extension,
-  not a Pi coding-agent ExtensionAPI module. A skill may document manual use;
-  it must not become a second scheduler or execution pipeline.
-- Add one explicit, owner-configured loading and task-registration boundary for
-  trusted workspace extensions. Do not execute arbitrary skills or automatically
-  discover code from chat attachments. Use public APIs and keep extension loading
-  out of message admission. Missing configured task code must block safe startup
-  rather than silently discard pending work.
-- Keep generic cadence calculation, task ownership, recovery, delivery receipts
-  and read-only execution history in the framework. Built-in six-hour compaction
-  remains a framework maintenance task. Business prompts, learning documents,
-  quotas, legacy learning import and personal configuration belong to the English
-  extension. Framework settings, prompts and Web rendering must have no English
-  branches or personal job IDs.
-- Preserve existing settings data. The workspace extension handles its old English
-  configuration; the framework does not retain a special English adapter.
-- Retain saved task IDs, checkpoints, deadlines, learning documents, card records
-  and request/send IDs during the migration. Keep compatible definitions available
-  for existing native records. Do not recreate the job, regenerate an existing card,
-  resend uncertain effects or open a second writer.
-- Rehearse loading, recovery and migration with a domain-neutral fixture, faux
-  models and temporary storage. Production migration is an authorized operation,
-  never a test. Install and verify the workspace extension before the single-owner
-  restart, preserving rollback copies of its source and configuration.
+- Put personal code and configuration in
+  `WORKING_DIR/extensions/<name>/index.ts` and `config.json`. Each native Durable
+  extension may provide tools, define multiple tasks and optionally schedule them.
+  Both the owner and chat assistant may create extensions; add no permission list
+  or extra confirmation gate.
+- Scan direct child directories at startup and on `/reload`. Reject duplicate
+  extension/task names. Validate before replacing definitions; failed reloads keep
+  the old definitions. Do not execute skills or attachments as extensions.
+- Keep generic daily/interval scheduling, non-overlapping execution, recovery,
+  outgoing queues, send receipts and read-only Web history in the framework.
+  Six-hour compaction remains built-in maintenance using the same components.
+  Durable owns persisted tasks and business state; there is no second pipeline.
+- Reload does not interrupt current calls. The next tool/task invocation uses
+  new code and configuration; do not proactively reset saved deadlines. Extensions
+  provide native migrations when saved task structures change.
+- Removing an extension stops future scheduling, not current calls, and retains
+  history, business data and receipts. Keep definitions needed by unfinished work
+  in memory; missing required task code on restart must fail explicitly.
+- Move English code and configuration into its workspace extension. Remove all
+  English-specific framework branches and personal job IDs. Preserve existing
+  settings, task IDs, checkpoints, deadlines, learning records and send IDs during
+  migration; never regenerate saved cards or replay uncertain sends. Verify with
+  faux models and temporary storage, then migrate under the single service owner
+  with source/configuration rollback copies.
 
-This proposal supersedes ADR 0032's embedding of English business logic in the
-application, not its Durable ownership or at-most-once delivery requirements.
-ADR 0034's machine-local calendar rules remain in effect.
+```mermaid
+sequenceDiagram
+    participant W as Workspace Extensions
+    participant S as Service
+    participant D as Durable
 
-**Consequences.** Workspace task code is trusted executable operator configuration
-and needs backup alongside its settings. This introduces an explicit extension
-contract; it does not promise compatibility with Pi coding-agent extensions or
-add LLM scheduling tools, legacy cron adapters or independent workers.
+    S->>W: Scan code and configuration
+    W-->>S: Tools, tasks and schedules
+    S->>D: Register or replace definitions
+    D->>D: Wait for the deadline
+    D->>W: Invoke task
+    W->>D: Persist state and results
+    D->>D: Save next deadline
+```
 
-**Rejected.** Only moving `english.ts` while leaving framework dependencies,
-putting recovery-sensitive work in a Markdown skill, maintaining two schedulers,
-and deleting production learning or receipt data to simplify migration.
+**Consequences.** Workspace extensions are trusted code and need backup with their
+configuration. This is the target design, not an implementation claim. It replaces
+ADR 0032's embedded English logic; Durable ownership, at-most-once delivery and
+ADR 0034's machine-local time rules remain unchanged.
