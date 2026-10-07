@@ -1,6 +1,17 @@
-import { access, copyFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+	access,
+	copyFile,
+	mkdir,
+	mkdtemp,
+	readdir,
+	readFile,
+	rm,
+	symlink,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
+import { pathToFileURL } from "node:url";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { TranscriptContext } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
@@ -183,6 +194,11 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 	const archive = join(directory, "attachments", encodeURIComponent("iMessage;-;dm"));
 	expect(await readdir(archive)).toEqual([]);
 	await copyFile(new URL("./fixtures/sample.heic", import.meta.url), source);
+	await writeFile(join(directory, "reference.txt"), "ordinary reference");
+	await mkdir(join(directory, "attachments-backup"));
+	await writeFile(join(directory, "attachments-backup", "visible.txt"), "ordinary sibling");
+	const workspaceAlias = join(directory, "workspace-alias");
+	await symlink(directory, workspaceAlias);
 	let archivedPath = "";
 	let imageData = "";
 	faux.setResponses([
@@ -207,6 +223,22 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 				width: 16,
 				height: 12,
 			});
+			return fauxAssistantMessage(fauxToolCall("read", { path: relative(directory, archivedPath) }), {
+				stopReason: "toolUse",
+			});
+		},
+		(context) => {
+			const result = context.messages.findLast((message) => message.role === "toolResult");
+			expect(result?.isError).toBe(false);
+			expect(result?.content.some((part) => part.type === "image")).toBe(true);
+			return fauxAssistantMessage(fauxToolCall("read", { path: pathToFileURL(archivedPath).href }), {
+				stopReason: "toolUse",
+			});
+		},
+		(context) => {
+			const result = context.messages.findLast((message) => message.role === "toolResult");
+			expect(result?.isError).toBe(false);
+			expect(result?.content.some((part) => part.type === "image")).toBe(true);
 			return fauxAssistantMessage(fauxToolCall("read", { path: trap }), { stopReason: "toolUse" });
 		},
 		(context) => {
@@ -218,6 +250,36 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 			return fauxAssistantMessage(fauxToolCall("subagent", { task: "Read the reference file privately" }), {
 				stopReason: "toolUse",
 			});
+		},
+		() =>
+			fauxAssistantMessage(
+				fauxToolCall("read", { path: join(workspaceAlias, relative(directory, archivedPath)) }),
+				{ stopReason: "toolUse" },
+			),
+		(context) => {
+			const result = context.messages.findLast((message) => message.role === "toolResult");
+			expect(result?.isError).toBe(false);
+			return fauxAssistantMessage(
+				fauxToolCall("read", {
+					path: `@${join(workspaceAlias, relative(directory, archive), "missing.txt")}`,
+				}),
+				{ stopReason: "toolUse" },
+			);
+		},
+		(context) => {
+			const result = context.messages.findLast((message) => message.role === "toolResult");
+			expect(result?.isError).toBe(true);
+			return fauxAssistantMessage(fauxToolCall("read", { path: "attachments/../reference.txt" }), {
+				stopReason: "toolUse",
+			});
+		},
+		(context) => {
+			const result = context.messages.findLast((message) => message.role === "toolResult");
+			expect(result?.isError).toBe(false);
+			return fauxAssistantMessage(
+				fauxToolCall("read", { path: join(directory, "attachments-backup", "visible.txt") }),
+				{ stopReason: "toolUse" },
+			);
 		},
 		() =>
 			fauxAssistantMessage(
@@ -266,10 +328,16 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 	);
 	const notices = textCalls();
 	expect(notices.every(([chat]) => chat === "iMessage;-;dm")).toBe(true);
-	expect(notices.filter(([, text]) => text.startsWith("→ [tool] "))).toHaveLength(5);
-	expect(notices.filter(([, text]) => text.startsWith("→ [subagent/tool] "))).toHaveLength(1);
+	expect(notices.filter(([, text]) => text.startsWith("→ [tool] "))).toHaveLength(4);
+	expect(notices.filter(([, text]) => text.startsWith("→ [subagent/tool] "))).toHaveLength(3);
 	expect(notices.map(([, text]) => text).join("\n")).toContain(`path=${trap}`);
 	const progressText = notices.map(([, text]) => text).join("\n");
+	// #38: direct/relative/aliased/child attachment reads and their failures have no notices.
+	expect(progressText).not.toContain(archivedPath);
+	expect(progressText).not.toContain(workspaceAlias);
+	expect(progressText).not.toContain("missing.txt");
+	expect(progressText).toContain("path=attachments/../reference.txt");
+	expect(progressText).toContain("attachments-backup");
 	expect(progressText).not.toContain("Read the reference file privately");
 	expect(progressText).not.toContain("pi.generation");
 	expect(progressText).not.toMatch(/\[(?:task|tool) #\d+/);
@@ -278,7 +346,7 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 	expect(progressText).toContain("apiKey=[redacted]");
 	expect(progressText).toContain("url=example．test");
 	expect(progressText).toContain("→ [tool] bash: printf 'progress fixture'");
-	expect(notices.filter(([, text]) => text.startsWith("✓ "))).toHaveLength(5);
+	expect(notices.filter(([, text]) => text.startsWith("✓ "))).toHaveLength(6);
 	expect(notices.filter(([, text]) => text.startsWith("× "))).toEqual([
 		["iMessage;-;dm", expect.stringMatching(/^× \[tool\] bash \(\d+\.\ds\)$/)],
 	]);
@@ -366,7 +434,7 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 	expect(argumentSummary({ query: "来源 https://example.test/private" })).not.toContain("https://");
 	expect(notices.at(-1)).toEqual(["iMessage;-;dm", "image read"]);
 	const receipts = (await service.harness.snapshot(DirectSends, BACKGROUND_CONTEXT))?.requests ?? [];
-	expect(receipts.filter((receipt) => receipt.requestId.startsWith("progress:"))).toHaveLength(12);
+	expect(receipts.filter((receipt) => receipt.requestId.startsWith("progress:"))).toHaveLength(14);
 	expect(receipts.filter((receipt) => receipt.textStatus === "unknown")).toHaveLength(1);
 	expect(await sharp(archivedPath).metadata()).toMatchObject({ format: "jpeg", width: 16, height: 12 });
 	expect(await readdir(archive)).toHaveLength(1);
@@ -384,17 +452,17 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 	await service.close();
 	service = await startMessaging(options);
 	await service.poll();
-	expect(send).toHaveBeenCalledTimes(13); // No historical or uncertain notice replay.
+	expect(send).toHaveBeenCalledTimes(15); // No historical or uncertain notice replay.
 	faux.setResponses([fauxAssistantMessage("healthy"), fauxAssistantMessage("quiet answer")]);
 	await service.health();
 	await service.poll();
-	expect(send).toHaveBeenCalledTimes(13); // Tool-less health remains private.
+	expect(send).toHaveBeenCalledTimes(15); // Tool-less health remains private.
 	await writeFile(settingsPath, JSON.stringify({ ...settings, progressMessages: false }));
 	insert("quiet", "Another question");
 	await service.poll();
 	await vi.waitFor(async () => {
 		await service?.poll();
-		expect(send).toHaveBeenCalledTimes(14);
+		expect(send).toHaveBeenCalledTimes(16);
 	});
 	expect(textCalls().at(-1)).toEqual(["iMessage;-;dm", "quiet answer"]);
 });

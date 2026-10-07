@@ -1,3 +1,7 @@
+import { realpath } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, dirname, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { JsonValue } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Harness, TaskRecord, ToolTaskInput, ToolTaskResult } from "@earendil-works/pi-durable";
@@ -18,6 +22,35 @@ async function calledTool(harness: Harness, task: TaskRecord<JsonValue, JsonValu
 	if (message?.role !== "assistant") return;
 	const call = message.content.find((part) => part.type === "toolCall" && part.id === input.callId);
 	return call?.type === "toolCall" ? call : undefined;
+}
+
+async function canonicalPath(path: string) {
+	return realpath(path).catch(async () =>
+		resolve(await realpath(dirname(path)).catch(() => dirname(path)), basename(path)),
+	);
+}
+
+/** Classify metadata only; attachment reads still execute and keep their normal results/history. */
+async function attachmentPath(workingDir: string, path: unknown) {
+	if (typeof path !== "string") return false;
+	// Match the native read tool's @, Unicode-space and home-path normalization.
+	let normalized = path.replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, " ");
+	if (normalized.startsWith("@")) normalized = normalized.slice(1);
+	if (normalized === "~" || normalized.startsWith("~/")) normalized = resolve(homedir(), normalized.slice(2));
+	if (normalized.startsWith("file://")) {
+		try {
+			normalized = fileURLToPath(normalized);
+		} catch {
+			/* Keep malformed URLs as ordinary paths, like native read. */
+		}
+	}
+	const root = resolve(workingDir, "attachments");
+	const candidate = resolve(workingDir, normalized);
+	const roots = [root, await canonicalPath(root)];
+	const candidates = [candidate, await canonicalPath(candidate)];
+	return roots.some((directory) =>
+		candidates.some((file) => file === directory || file.startsWith(`${directory}${sep}`)),
+	);
 }
 
 /** Observe native admission and settlement; Durable owns execution and recovery. */
@@ -48,6 +81,7 @@ export async function startProgress(harness: Harness, workingDir: string, sender
 		}
 		if (!isReplyEnabled(settings, chatGuid)) return;
 		const tool = await calledTool(harness, task);
+		if (tool?.name === "read" && (await attachmentPath(workingDir, tool.arguments.path))) return;
 		const request: ProgressEvent = tool
 			? {
 					phase: "request",
