@@ -1,4 +1,5 @@
 #!/usr/bin/env -S node --use-env-proxy --experimental-strip-types
+import { realpathSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -101,7 +102,7 @@ export async function main(args = process.argv.slice(2)) {
 	process.once("SIGTERM", () => stop("SIGTERM"));
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)
 	void main().catch((error) => {
 		console.error(new Date().toISOString(), "Command failed", error instanceof Error ? error.message : error);
 		process.exitCode = 1;

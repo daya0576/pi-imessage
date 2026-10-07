@@ -1,15 +1,34 @@
 {
 	"name": "@kingcrab/pi-imessage",
 	"version": "1.0.0",
-	"private": true,
+	"description": "A minimal, self-managing iMessage bot powered by Pi Durable",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/daya0576/pi-imessage.git"
+	},
+	"files": [
+		"dist",
+		"docs",
+		"examples",
+		"ops/README.md",
+		"ops/preflight.mjs"
+	],
+	"publishConfig": {
+		"access": "public",
+		"provenance": true
+	},
 	"type": "module",
 	"bin": {
-		"pi-imessage": "src/cli.ts"
+		"pi-imessage": "dist/cli.js"
 	},
 	"engines": {
 		"node": ">=22.22.2"
 	},
 	"scripts": {
+		"build": "tsc -p tsconfig.build.json && cp src/web/app.js src/web/style.css dist/web/",
+		"prepack": "npm run build",
+		"test:package": "npm run build && node ops/package-smoke.mjs",
 		"start": "node --use-env-proxy --experimental-strip-types src/cli.ts serve",
 		"check": "tsc --noEmit && biome check .",
 		"test": "vitest run"

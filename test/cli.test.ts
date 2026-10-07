@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -61,6 +61,16 @@ it("loads CLI environment without overriding explicit values and retains proxy c
 			TZ: "America/New_York",
 		};
 		const cli = resolve("src/cli.ts");
+		// #37: npm invokes the executable through a symlink.
+		const linkedCli = join(directory, "pi-imessage");
+		await symlink(cli, linkedCli);
+		const help = await execute(process.execPath, ["--experimental-strip-types", linkedCli, "--help"], {
+			cwd: directory,
+			env: environment,
+			timeout: 10_000,
+		});
+		expect(help.stdout).toContain("pi-imessage [serve]");
+		await expect(access(join(directory, "Library"))).rejects.toMatchObject({ code: "ENOENT" });
 		const installed = await execute(process.execPath, ["--experimental-strip-types", cli, "install"], {
 			cwd: directory,
 			env: environment,

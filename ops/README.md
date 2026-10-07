@@ -100,6 +100,27 @@ The generated launchd job redirects both streams to `WORKING_DIR/service.log`.
 Foreground runs use the terminal or the controller's selected redirection; the
 application does not open a second log file.
 
+## npm publishing
+
+The public package contains compiled JavaScript and Web assets, not a TypeScript
+executable under `node_modules`. `npm pack` builds through `prepack`;
+`npm run test:package` verifies the packed executable and inert installer in a
+temporary HOME/workspace without models or Messages.
+
+`.github/workflows/publish.yml` uses the existing npm trusted publisher with
+GitHub OIDC, Node 24 and `id-token: write`; no local npm login or token is needed.
+It runs the full checks, tests and package smoke before publishing with provenance.
+Future releases push a matching `v<package-version>` tag. To publish an existing
+version after fixing packaging, dispatch the workflow on main with that exact
+version; never move an already published GitHub tag.
+
+```sh
+gh workflow run publish.yml --ref main -f version=1.0.0
+```
+
+An installed npm service runs `dist/cli.js`; source deployments continue to use
+`src/cli.ts`. Package installation does not start or reload a service.
+
 ## Service identity
 
 New `install` output uses `org.pi-imessage.service` and
