@@ -140,17 +140,23 @@ unrelated legacy jobs as part of this migration.
 |---|---|
 | Server, agent, transport or imported TypeScript | Restart from a new release directory; verify the change. |
 | Web `app.js` / `style.css` only | Verify the served assets; no restart (the file cache checks metadata). |
-| Documentation only | Commit and push; no reload or restart. |
+| Documentation only | Commit, push the branch and open the PR; no reload or restart. |
 | Configuration supported by `/reload` | Reload; restart only for startup-only configuration. Never send an iMessage to trigger it. |
 
-Deploying means the change is live and verified, then committed and pushed.
+Deploying means the change is committed, pushed on its branch with a PR open,
+live and verified. The owner merges the PR afterwards; the running service does
+not wait for that.
 
 ### Release directories
 
-The service runs a fixed commit, never the main checkout:
+The service runs a fixed pushed commit, never the main checkout or a
+conversation worktree. While a PR is open that is its branch head; after the
+merge it is `origin/main`. The commit must exist on the remote, so a reviewer
+can read exactly what runs:
 
 ```sh
-SHA=$(git -C /Users/clawbot/pi-imessage-next rev-parse origin/main)
+SHA=$(git -C /Users/clawbot/pi-imessage-next rev-parse origin/<branch>)   # or origin/main
+git -C /Users/clawbot/pi-imessage-next branch -r --contains "$SHA" | grep -q . || exit 1
 RELEASE=/Users/clawbot/pi-imessage-releases/$SHA
 git -C /Users/clawbot/pi-imessage-next worktree add --detach "$RELEASE" "$SHA"
 (cd "$RELEASE" && npm ci --ignore-scripts && node --experimental-strip-types ops/preflight.mjs)

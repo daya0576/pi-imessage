@@ -66,12 +66,16 @@ with the dependency version pinned in this project before adopting their APIs.
 - One conversation, one worktree and branch. Create or reuse it before editing,
   including after restart. Never edit the main checkout or automatically delete
   a dirty worktree.
-- After the branch is merged and pushed, remove its clean worktree with
+- `main` changes only through a pull request that the owner reviews and
+  merges. Never merge into `main`, push to `main` or merge a PR yourself.
+- After each completed project change, run required checks, commit, push the
+  branch, then open its PR with `gh pr create --body-file` or update the open
+  one. Deploy and verify from the pushed branch commit (see Deploy); the
+  deployment does not wait for the merge. These actions are pre-authorized;
+  do not ask again.
+- Deploy serially; never run two real message pipelines concurrently.
+- After the owner merges the PR, remove the clean worktree with
   `git worktree remove` (no `--force`) and the branch with `git branch -d`.
-- Merge and deploy serially; never run two real message pipelines concurrently.
-- After each completed project change, run required checks, deploy and verify
-  as needed, then commit and push to the tracking remote. These actions are
-  pre-authorized; do not ask again.
 - Commit only intended changes; exclude unrelated drafts, temporary files and
   credentials. Stage explicit paths, never `git add -A` or `git add .`.
 - Never use `git reset --hard`, `git checkout .`, `git clean -fd`, `git stash`,
@@ -87,7 +91,8 @@ with the dependency version pinned in this project before adopting their APIs.
 ## Deploy
 
 - Deploy and verify each completed change without asking again for routine deployment approval. Follow the routine deployment/restart section in `ops/README.md`; documentation-only edits need no runtime restart.
-- Run the service from a fixed release directory, never the main checkout: [Release directories](ops/README.md#release-directories).
+- Run the service from a fixed release directory built from a pushed commit: the PR branch head while the PR is open, or `main` after the merge. Never the main checkout, a conversation worktree or an unpushed commit: [Release directories](ops/README.md#release-directories).
+- When the owner merges a PR whose branch is running, no redeploy is needed unless `main` now differs from the running commit.
 - Never run old and new message pipelines concurrently.
 - Routine commits and pushes are separately authorized under Git above. Deployment authorization does not include paid model probes, real test messages, unrelated service changes or data cleanup. Do not require the user to execute authorized commands personally. Stop for new material safety or data-integrity risks.
 
