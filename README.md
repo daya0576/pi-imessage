@@ -136,6 +136,36 @@ Context is compacted silently every 6 hours and near the model's limit. Failed
 compaction keeps the old context. `/new` starts fresh without deleting searchable
 history.
 
+## Layout
+
+This repository is the framework; `WORKING_DIR` is one deployment's data and
+code. Personal tasks and model policy live in `WORKING_DIR`; message flow lives
+in the framework, run from a fixed [release checkout](ops/README.md#release-directories).
+See [workspace extensions](docs/workspace-extensions.md), ADR 0036 and ADR 0042.
+
+```text
+pi-imessage/                      framework, shared by every deployment
+├── src/
+│   ├── main.ts, cli.ts           startup, wiring, launchd install
+│   ├── web/                      read-only HTTP API and pages
+│   ├── agent/                    Durable harness, models, prompt, delivery, scheduler
+│   ├── extensions/               built-in tools, workspace extension loader
+│   ├── transport/                chat.db polling, Messages.app sending
+│   └── config/                   settings, environment, chat allowlist
+├── docs/                         architecture and ADRs (the design ground truth)
+├── examples/workspace-extensions/ reference extensions to copy into a workspace
+├── ops/                          deployment, preflight and smoke scripts
+└── test/
+
+WORKING_DIR/  (default ~/.pi/imessage)   one deployment, back it up yourself
+├── settings.json                 chat allowlist, model policy
+├── extensions/<name>/            personal tools, tasks and schedules
+├── skills/file-memory/           structured memory store and core summary
+├── durable/                      conversation state; never edit by hand
+├── attachments/                  archived incoming files
+└── service.log
+```
+
 ## Development
 
 See [AGENTS.md](AGENTS.md) for development rules,
