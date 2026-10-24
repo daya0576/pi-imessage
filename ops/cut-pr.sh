@@ -1,5 +1,5 @@
 #!/bin/bash
-# Cut a pull request from next commits (ADR 0053). Owner tool.
+# Cut a pull request from next commits (AGENTS.md, Git). Owner tool.
 #
 #   ops/cut-pr.sh <branch-name> <sha>...
 #
@@ -29,7 +29,7 @@ git -C "$DIR" push -u origin "$BRANCH"
 
 BODY="$(mktemp)"
 {
-  echo "Cut from \`next\` (ADR 0053). Commits:"
+  echo "Cut from \`next\`. Commits:"
   echo
   for SHA in "$@"; do git -C "$REPO" log -1 --format='- %h %s' "$SHA"; done
 } > "$BODY"

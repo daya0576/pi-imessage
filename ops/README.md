@@ -147,7 +147,7 @@ Deploying means the change is live and verified, then committed and pushed.
 
 ### Release directories
 
-The service runs a fixed, pushed `next` commit (ADR 0053), never the main
+The service runs a fixed, pushed `next` commit, never the main
 checkout or a conversation worktree:
 
 ```sh

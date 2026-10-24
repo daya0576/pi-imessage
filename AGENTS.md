@@ -63,8 +63,8 @@ with the dependency version pinned in this project before adopting their APIs.
 
 ## Git
 
-The flow is ADR 0053: `next` is the one running branch, the commit is the unit
-of change, and the owner cuts pull requests from `next` commits later.
+`next` is the one running branch, the commit is the unit of change, and the
+owner cuts pull requests from `next` commits later.
 
 - One conversation, one worktree on a throwaway branch created from
   `origin/next` (`git worktree add -b conv/<topic> <dir> origin/next`). Create
