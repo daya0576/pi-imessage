@@ -569,3 +569,9 @@ body.page-logs .native-state {
 .chat-empty {
 	padding: 12px 16px;
 }
+
+/* The Chats tables grow with their rows; the page itself scrolls. */
+body.page-chats .card {
+	max-height: none;
+	overflow: visible;
+}
