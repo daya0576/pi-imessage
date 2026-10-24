@@ -4,6 +4,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
 import {
 	createRegistry,
+	defineDoc,
 	type Extension,
 	Harness,
 	type HarnessSettings,
@@ -72,7 +73,7 @@ export async function openHarness(
 				registry,
 				close(beforeUnlock?: () => Promise<void>) {
 					closing ??= (async () => {
-						await abortRunningTools(harness);
+						await abortRepeatedlyInterruptedTools(harness);
 						await harness.close(BACKGROUND_CONTEXT);
 						// External browser resources must be closed before another owner can resume this workspace.
 						await beforeUnlock?.();
@@ -93,21 +94,39 @@ export async function openHarness(
 	}
 }
 
+/** Tool tasks that were running at the last ordinary stop; each is rerun once (ADR 0051). */
+const StopInterruptions = defineDoc<{ tasks: number[] }>({
+	kind: "imessage.stop-interruptions",
+	version: 1,
+	scope: "session",
+	initial: () => ({ tasks: [] }),
+	checkpointWhen: () => false,
+});
+
 /** How long an ordinary stop waits for aborted tools to settle before closing anyway. */
 const ABORT_SETTLE_MS = 5_000;
 
 /**
- * ADR 0050: a tool running at an ordinary stop is marked for abort instead of being rerun at the next start. The mark
- * is durable, so a task the close still interrupts is aborted on recovery; the model gets its partial output.
+ * ADR 0051: a tool running at an ordinary stop is rerun at the next start, as ADR 0041 says. A tool task still running
+ * at the following stop was already rerun once, so it is marked for abort instead; the mark is durable, and the model
+ * gets the partial output. This ends a tool call that stops the service itself after one extra restart.
  */
-async function abortRunningTools(harness: Harness) {
+async function abortRepeatedlyInterruptedTools(harness: Harness) {
 	const running = (await harness.inspect(BACKGROUND_CONTEXT)).tasks.filter(
 		({ record, state }) => record.kind === ToolTask.definition.name && state.kind === "running",
 	);
-	if (running.length === 0) return;
-	for (const { record } of running) {
+	const previous = (await harness.snapshot(StopInterruptions, BACKGROUND_CONTEXT))?.tasks ?? [];
+	const repeated = running.filter(({ record }) => previous.includes(Number(record.id)));
+	await harness.commit(async (tx) => {
+		const interruptions = await tx.doc(StopInterruptions);
+		interruptions.tasks = running
+			.filter((task) => !repeated.includes(task))
+			.map(({ record }) => Number(record.id));
+	}, BACKGROUND_CONTEXT);
+	if (repeated.length === 0) return;
+	for (const { record } of repeated) {
 		await harness.abortTask(record.id, BACKGROUND_CONTEXT);
-		console.log(new Date().toISOString(), "Tool aborted by stop", {
+		console.log(new Date().toISOString(), "Tool aborted by stop: interrupted twice in a row", {
 			task: record.id,
 			conversation: record.conversationId,
 		});
@@ -118,7 +137,7 @@ async function abortRunningTools(harness: Harness) {
 	});
 	try {
 		await Promise.race([
-			Promise.allSettled(running.map(({ record }) => harness.waitForTask(record.id, BACKGROUND_CONTEXT))),
+			Promise.allSettled(repeated.map(({ record }) => harness.waitForTask(record.id, BACKGROUND_CONTEXT))),
 			deadline,
 		]);
 	} finally {

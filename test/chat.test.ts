@@ -742,11 +742,11 @@ it("uses supplied agent configuration and releases ownership after startup failu
 	expect(faux.state.callCount).toBe(0);
 });
 
-// #39: a tool running at the stop is aborted, not rerun at the next start (ADR 0050).
+// #39: a tool running at the stop reruns once; at the second stop in a row it is aborted (ADR 0051).
 // #33 Phase 1: shutting down must cancel active model work before releasing ownership.
-it("closes during tool and model execution without rerunning the tool or sending an answer", async () => {
+it("closes during tool and model execution, rerunning the tool once and never sending an answer", async () => {
 	let runs = 0;
-	const toolStarted = Promise.withResolvers<void>();
+	let toolStarted = Promise.withResolvers<void>();
 	const blocking = defineExtension({
 		name: "blocking",
 		tools: [
@@ -781,13 +781,19 @@ it("closes during tool and model execution without rerunning the tool or sending
 	await agent.submit({ chatGuid: "chat", guid: "tool", text: "block" });
 	await toolStarted.promise;
 	await agent.close();
+	toolStarted = Promise.withResolvers<void>();
 	agent = await startService(options);
 	// The service resumes recovery itself; a bare agent resumes on its first wait.
+	void agent.harness.waitForIdle(BACKGROUND_CONTEXT).catch(() => {});
+	await toolStarted.promise;
+	expect(runs).toBe(2);
+	await agent.close();
+	agent = await startService(options);
 	await agent.harness.waitForIdle(BACKGROUND_CONTEXT);
 	expect(faux.state.callCount).toBe(2);
 	await agent.deliver();
 	expect(textCalls()).toEqual([["chat", "after the stop"]]);
-	expect(runs).toBe(1);
+	expect(runs).toBe(2);
 	expect(toolResult).toMatchObject({ role: "toolResult", isError: true });
 	expect(JSON.stringify(toolResult)).toContain("was aborted");
 
