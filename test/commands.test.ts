@@ -83,8 +83,8 @@ it("runs each command once by source GUID and replies without the model", async 
 		"Verbose: on (this chat only)",
 		"Verbose: off (default)",
 		"Usage: /verbose [on|off|default]",
-		"0 msgs · ? / 128k\nfaux/faux-1 · high",
-		"0 msgs · ? / 128k\nfaux/faux-1 · high", // /reload replies like /status.
+		"0 msgs · ~0.0% / 128k\nfaux/faux-1 · high", // Estimated: nothing was sent to the model yet.
+		"0 msgs · ~0.0% / 128k\nfaux/faux-1 · high", // /reload replies like /status.
 	]);
 	expect(replies()[2]).toContain("/verbose [on|off|default]");
 	expect(replies()[2]).not.toContain("/run-stop");
@@ -154,7 +154,10 @@ it("runs in a fork of the chat, routes ordinary messages to it and records it in
 	const before = replies().at(-1);
 	expect(before).toMatch(/^\d+ msgs · \d+\.\d+% \/ 128k\n/);
 	await agent.command({ chatGuid: "chat", guid: "reset", text: "/new" });
-	expect(replies().at(-1)).toBe(`0 msgs · ? / 128k\n${before?.split("\n")[1]}`);
+	// Before the first reply the usage is estimated from the retained system prompt and tools, hence not zero.
+	expect(replies().at(-1)).toMatch(/^0 msgs · ~\d+\.\d+% \/ 128k\n/);
+	expect(replies().at(-1)).not.toContain("~0.0%");
+	expect(replies().at(-1)?.split("\n")[1]).toBe(before?.split("\n")[1]);
 	await agent.command({ chatGuid: "chat", guid: "after-reset", text: "/status" });
 	expect(replies().at(-1)).toBe(replies().at(-2)); // Same report; the run line exists only during a run.
 	expect(faux.state.callCount).toBe(5);

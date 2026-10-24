@@ -1,5 +1,7 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import { getCurrentSystemMessage } from "@earendil-works/pi-ai/utils/transcript";
+import { calculateContextTokens, estimateTokens } from "@earendil-works/pi-coding-agent";
 import {
 	type AgentChange,
 	type CompactionResult,
@@ -89,18 +91,36 @@ export async function runCommand(options: {
 	const status = async (withRun: boolean) => {
 		const agent = await conversation.agent(BACKGROUND_CONTEXT);
 		const context = await conversation.context(BACKGROUND_CONTEXT);
+		const window =
+			agent.model && options.models.getModel(agent.model.provider, agent.model.modelId)?.contextWindow;
+		// Context size: the last reported usage, or before the first reply a local estimate of about four characters
+		// per token. After /new the next request restates the system prompt and tools, so the estimate replays them
+		// from the context just before the reset marker.
 		const last = context.messages.findLast(
 			(message) => message.role === "assistant" && message.usage.totalTokens > 0,
 		);
-		const window =
-			agent.model && options.models.getModel(agent.model.provider, agent.model.modelId)?.contextWindow;
-		const used = last?.role === "assistant" ? last.usage.totalTokens : undefined;
+		const estimate = async () => {
+			let system = getCurrentSystemMessage(context.messages);
+			if (!system && context.head) {
+				const head = context.head.id;
+				const before = (
+					await conversation.entries({ maxEntryId: head }, 2, undefined, BACKGROUND_CONTEXT)
+				).items.find((entry) => entry.id !== head);
+				if (before)
+					system = getCurrentSystemMessage(
+						(await conversation.context(BACKGROUND_CONTEXT, { at: before.id })).messages,
+					);
+			}
+			return context.messages
+				.filter((message) => message.role !== "system")
+				.reduce((sum, message) => sum + estimateTokens(message), system ? estimateTokens(system) : 0);
+		};
+		const used = last?.role === "assistant" ? calculateContextTokens(last.usage) : await estimate();
+		const usage = `${last ? "" : "~"}${((used / (window || 1)) * 100).toFixed(1)}%`;
 		return [
 			[
 				`${context.messages.filter((message) => message.role === "user").length} msgs`,
-				window
-					? `${used === undefined ? "?" : `${((used / window) * 100).toFixed(1)}%`} / ${tokens(window)}`
-					: "",
+				window ? `${usage} / ${tokens(window)}` : "",
 			]
 				.filter(Boolean)
 				.join(" · "),
