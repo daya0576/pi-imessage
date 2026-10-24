@@ -186,6 +186,13 @@ text). Never reset cursors, delete state or replay uncertain sends. Do not use
 
 ### 3. Run one private controller
 
+From a chat, the assistant calls `restart_service` with the full commit hash of
+the prepared release directory (ADR 0052). The host writes the controller
+directory below itself and opens the controller only after that tool call has
+settled; the call returns the directory and the next call verifies (step 4).
+The manual procedure below is for operators and for a cold start when no
+service is running.
+
 In a `mktemp -d /tmp/pi-imessage-restart.XXXXXX` directory with `umask 077`:
 
 - `environment.sh`: shell-quoted exports of the running process's `WORKING_DIR`,
@@ -196,44 +203,11 @@ In a `mktemp -d /tmp/pi-imessage-restart.XXXXXX` directory with `umask 077`:
 - `control.sh`: shell-quoted `OLD_PID`, `OLD_STARTED` (exact `ps -o lstart=`),
   `EXPECTED_COMMAND`, `REPO` (the release directory), `NODE`, `WORKING_DIR`,
   `WEB_PORT` and `LOG_FILE`.
-- `restart.command`:
-
-```sh
-#!/bin/bash
-set -euo pipefail
-umask 077
-DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "$DEPLOY_DIR/environment.sh"
-source "$DEPLOY_DIR/control.sh"
-: "${OLD_PID:?}" "${OLD_STARTED:?}" "${EXPECTED_COMMAND:?}"
-: "${REPO:?}" "${NODE:?}" "${WORKING_DIR:?}" "${WEB_PORT:?}" "${LOG_FILE:?}"
-cd "$REPO"
-exec 3>>"$DEPLOY_DIR/controller.log"
-[ "$(ps -p "$OLD_PID" -o lstart=)" = "$OLD_STARTED" ]
-[ "$(ps -p "$OLD_PID" -o command=)" = "$EXPECTED_COMMAND" ]
-printf '%s stopping pid=%s\n' "$(date -u +%FT%TZ)" "$OLD_PID" >&3
-kill -TERM "$OLD_PID"
-deadline=$((SECONDS + 30))
-while kill -0 "$OLD_PID" 2>/dev/null; do
-  if (( SECONDS >= deadline )); then
-    echo 'Shutdown timeout; no force-kill and no second process started' >&3
-    exit 1
-  fi
-  sleep 0.1
-done
-[ ! -e "$WORKING_DIR/durable/owner.lock" ]
-port_status=0
-lsof -nP -iTCP:"$WEB_PORT" -sTCP:LISTEN -t > /dev/null || port_status=$?
-case "$port_status" in
-  0) echo 'Port still occupied; refusing startup' >&3; exit 1 ;;
-  1) ;; # No listener.
-  *) echo 'Cannot verify port ownership; refusing startup' >&3; exit 1 ;;
-esac
-printf '%s old process exited; ownership released\n' "$(date -u +%FT%TZ)" >&3
-printf '%s\n' "$$" > "$DEPLOY_DIR/new.pid"
-exec 3>&-
-exec "$NODE" --use-env-proxy --experimental-strip-types src/cli.ts serve >> "$LOG_FILE" 2>&1
-```
+- `restart.command`: a copy of [`ops/restart.command`](restart.command) from the
+  release directory. It checks the old PID's start time and command, sends
+  SIGTERM, waits up to 30 s, refuses to start while the lock or port is held,
+  writes `controller.log` and `new.pid`, deletes `environment.sh` and then
+  `exec`s the new service process.
 
 Launch it once with `chmod 700` and `open -a Terminal "$DEPLOY_DIR/restart.command"`
 (`osascript` `do script` times out on claw). The separate Terminal keeps the
@@ -241,11 +215,11 @@ controller alive when the initiating agent's own turn is interrupted. For a
 launchd controller, use that job's lifecycle instead; never `launchctl kickstart -k`
 from inside the service.
 
-When the service restarts itself from a chat tool call, that call must end right
-after `open`: no `sleep`, polling or verification in the same call. Tools are
-replay-safe by default (ADR 0039), so a call still running when the controller
-stops the service reruns on every start, launches another controller and loops
-(#39). Verify in a later call.
+A chat that writes its own controller through `bash` instead of
+`restart_service` must end that call right after `open`: no `sleep`, polling or
+verification in the same call. Tools are replay-safe by default (ADR 0041), so a
+call still running when the controller stops the service reruns on every start,
+launches another controller and loops (#39). Verify in a later call.
 
 ### 4. Verify
 
@@ -259,10 +233,9 @@ known. Require:
    `Messaging ready` and `Application started`; no startup error.
 3. Root and changed endpoints return 200; check UI changes in a browser.
 4. Interrupted work continues; scheduler deadlines are unchanged; receipt
-   counts change only by new sends and sends interrupted by the stop. A tool
-   running at the stop reruns once; one still running at the next stop ends
-   aborted and the model decides whether to call it again (ADR 0051). The old
-   log then shows `Tool aborted by stop: interrupted twice in a row`.
+   counts change only by new sends and sends interrupted by the stop. After
+   `restart_service`, the old log shows `Restart requested` with the
+   controller directory.
 
 On a timeout, lock, occupied port or startup failure, stop and report it. Do not
 force-kill, steal the lock, reinstall dependencies or restore a workspace snapshot.
