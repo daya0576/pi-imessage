@@ -34,6 +34,7 @@ Accepted ADR files are never edited; this index records which ones are current.
 | [0048](0048-quiet-attachment-reads.md) | Quiet attachment reads | Proposed; owner-requested implementation in #38 |
 | [0049](0049-per-chat-progress-notices.md) | Per-chat progress notices via `/verbose` | Proposed; owner-requested implementation |
 | [0052](0052-host-owned-self-restart.md) | The host owns its own restart (`restart_service`) | Active; owner accepted on 2026-10-24 (#39) |
+| [0053](0053-running-branch-and-cut-prs.md) | One running branch `next`; pull requests cut from commits | Active; owner accepted on 2026-10-24 |
 
 ## Replaced or rejected
 

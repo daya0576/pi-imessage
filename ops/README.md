@@ -140,26 +140,42 @@ unrelated legacy jobs as part of this migration.
 |---|---|
 | Server, agent, transport or imported TypeScript | Restart from a new release directory; verify the change. |
 | Web `app.js` / `style.css` only | Verify the served assets; no restart (the file cache checks metadata). |
-| Documentation only | Commit and push; no reload or restart. |
+| Documentation only | Commit and push `next`; no reload or restart. |
 | Configuration supported by `/reload` | Reload; restart only for startup-only configuration. Never send an iMessage to trigger it. |
 
 Deploying means the change is live and verified, then committed and pushed.
 
 ### Release directories
 
-The service runs a fixed commit, never the main checkout:
+The service runs a fixed, pushed `next` commit (ADR 0053), never the main
+checkout or a conversation worktree:
 
 ```sh
-SHA=$(git -C /Users/clawbot/pi-imessage-next rev-parse origin/main)
+git -C /Users/clawbot/pi-imessage-next fetch -q origin next
+SHA=$(git -C /Users/clawbot/pi-imessage-next rev-parse origin/next)
 RELEASE=/Users/clawbot/pi-imessage-releases/$SHA
 git -C /Users/clawbot/pi-imessage-next worktree add --detach "$RELEASE" "$SHA"
 (cd "$RELEASE" && npm ci --ignore-scripts && node --experimental-strip-types ops/preflight.mjs)
 ```
 
 Never edit a release directory; rollback is a routine restart from the previous
-one. Keep the latest three; remove older ones with `git worktree remove` (no
+one or from a release of `origin/main`. Keep the latest three; remove older ones with `git worktree remove` (no
 `--force`) when no process or plist uses them. A release directory has no `.env`:
 set `DOTENV_CONFIG_PATH` to the main checkout's `.env`.
+
+### Cutting pull requests (owner)
+
+`main` changes only through pull requests cut from `next` commits:
+
+```sh
+ops/cut-pr.sh <branch-name> <sha>...
+```
+
+This branches from `origin/main` in a new worktree, cherry-picks the commits
+in the given order, pushes and opens the pull request. A conflict stops before
+the push; resolve it in the worktree or pick the commit the change depends on.
+After a merge, a conversation replays `next` onto `origin/main` (AGENTS.md,
+Git) so that `next` is always `main` plus the unmerged commits.
 
 ### 1. Identify the running service
 

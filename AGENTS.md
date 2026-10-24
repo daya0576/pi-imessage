@@ -63,19 +63,36 @@ with the dependency version pinned in this project before adopting their APIs.
 
 ## Git
 
-- One conversation, one worktree and branch. Create or reuse it before editing,
-  including after restart. Never edit the main checkout or automatically delete
-  a dirty worktree.
-- After the branch is merged and pushed, remove its clean worktree with
-  `git worktree remove` (no `--force`) and the branch with `git branch -d`.
-- Merge and deploy serially; never run two real message pipelines concurrently.
-- After each completed project change, run required checks, deploy and verify
-  as needed, then commit and push to the tracking remote. These actions are
-  pre-authorized; do not ask again.
+The flow is ADR 0053: `next` is the one running branch, the commit is the unit
+of change, and the owner cuts pull requests from `next` commits later.
+
+- One conversation, one worktree on a throwaway branch created from
+  `origin/next` (`git worktree add -b conv/<topic> <dir> origin/next`). Create
+  or reuse it before editing, including after restart. Never edit the main
+  checkout or automatically delete a dirty worktree.
+- Each commit is one atomic change that passes the required checks, with a
+  message that says what it is for. No work-in-progress or mixed commits; the
+  owner picks commits into pull requests in any grouping.
+- After each completed project change: run required checks, commit, fetch,
+  `git rebase origin/next`, fast-forward `next` (`git push . HEAD:next`), push
+  `next` to origin, then deploy and verify the `next` head (see Deploy). These
+  actions are pre-authorized; do not ask again.
+- `main` changes only when the owner merges a pull request cut with
+  `ops/cut-pr.sh`. Conversations do not open pull requests and never push
+  `main`.
+- When `origin/main` has moved (the owner merged), replay `next` on it before
+  adding to it: `git rebase --onto origin/main <old merge-base> next`, then
+  `git push --force-with-lease origin next`. This is the only allowed force
+  push, of `next` only. Revert a rejected commit on `next` only when the owner
+  says so.
+- Deploy serially; never run two real message pipelines concurrently.
+- Remove a clean conversation worktree once its commits are on `origin/next`
+  (`git worktree remove`, no `--force`; `git branch -d`).
 - Commit only intended changes; exclude unrelated drafts, temporary files and
   credentials. Stage explicit paths, never `git add -A` or `git add .`.
 - Never use `git reset --hard`, `git checkout .`, `git clean -fd`, `git stash`,
-  `--no-verify`, or force push. Stop and report any rejected push.
+  `--no-verify`, or force push (except `next` as above). Stop and report any
+  rejected push.
 - Commit messages: `type(scope): summary`.
   Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`.
 
@@ -87,7 +104,7 @@ with the dependency version pinned in this project before adopting their APIs.
 ## Deploy
 
 - Deploy and verify each completed change without asking again for routine deployment approval. Follow the routine deployment/restart section in `ops/README.md`; documentation-only edits need no runtime restart.
-- Run the service from a fixed release directory, never the main checkout: [Release directories](ops/README.md#release-directories).
+- Run the service from a fixed release directory built from the pushed `next` head, never the main checkout, a conversation worktree or an unpushed commit: [Release directories](ops/README.md#release-directories). Rollback is a release from `origin/main`. The owner merging a pull request changes nothing at runtime.
 - Never run old and new message pipelines concurrently.
 - Routine commits and pushes are separately authorized under Git above. Deployment authorization does not include paid model probes, real test messages, unrelated service changes or data cleanup. Do not require the user to execute authorized commands personally. Stop for new material safety or data-integrity risks.
 
