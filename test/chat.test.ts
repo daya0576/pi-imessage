@@ -742,8 +742,55 @@ it("uses supplied agent configuration and releases ownership after startup failu
 	expect(faux.state.callCount).toBe(0);
 });
 
+// #39: a tool running at the stop is aborted, not rerun at the next start (ADR 0050).
 // #33 Phase 1: shutting down must cancel active model work before releasing ownership.
-it("closes during model execution without waiting for a final answer or sending one", async () => {
+it("closes during tool and model execution without rerunning the tool or sending an answer", async () => {
+	let runs = 0;
+	const toolStarted = Promise.withResolvers<void>();
+	const blocking = defineExtension({
+		name: "blocking",
+		tools: [
+			defineTool({
+				name: "block",
+				description: "Run until aborted",
+				parameters: Type.Object({}),
+				execute: async (_args, _api, context) => {
+					runs++;
+					toolStarted.resolve();
+					await new Promise<never>((_resolve, reject) => {
+						context.abortSignal?.addEventListener("abort", () => reject(new Error("aborted")), {
+							once: true,
+						});
+					});
+					return { output: [] };
+				},
+			}),
+		],
+	});
+	await agent.close();
+	options.extensions = () => [blocking];
+	agent = await startService(options);
+	let toolResult: TranscriptContext["messages"][number] | undefined;
+	faux.setResponses([
+		fauxAssistantMessage(fauxToolCall("block", {}), { stopReason: "toolUse" }),
+		(context) => {
+			toolResult = context.messages.findLast((message) => message.role === "toolResult");
+			return fauxAssistantMessage("after the stop");
+		},
+	]);
+	await agent.submit({ chatGuid: "chat", guid: "tool", text: "block" });
+	await toolStarted.promise;
+	await agent.close();
+	agent = await startService(options);
+	// The service resumes recovery itself; a bare agent resumes on its first wait.
+	await agent.harness.waitForIdle(BACKGROUND_CONTEXT);
+	expect(faux.state.callCount).toBe(2);
+	await agent.deliver();
+	expect(textCalls()).toEqual([["chat", "after the stop"]]);
+	expect(runs).toBe(1);
+	expect(toolResult).toMatchObject({ role: "toolResult", isError: true });
+	expect(JSON.stringify(toolResult)).toContain("was aborted");
+
 	const started = Promise.withResolvers<void>();
 	const gate = Promise.withResolvers<void>();
 	let signal: AbortSignal | undefined;
@@ -762,7 +809,7 @@ it("closes during model execution without waiting for a final answer or sending 
 		await agent.close();
 		expect(signal?.aborted).toBe(true);
 		await expect(access(join(directory, "durable", "owner.lock"))).rejects.toMatchObject({ code: "ENOENT" });
-		expect(send).not.toHaveBeenCalled();
+		expect(send).toHaveBeenCalledTimes(1);
 	} finally {
 		gate.resolve();
 	}

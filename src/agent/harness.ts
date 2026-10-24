@@ -2,7 +2,13 @@ import { mkdir, open, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
-import { createRegistry, type Extension, Harness, type HarnessSettings } from "@earendil-works/pi-durable";
+import {
+	createRegistry,
+	type Extension,
+	Harness,
+	type HarnessSettings,
+	ToolTask,
+} from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeJsonlStorage } from "@earendil-works/pi-durable/storage/jsonl/node";
 import { chatBehavior } from "./behavior.ts";
@@ -66,6 +72,7 @@ export async function openHarness(
 				registry,
 				close(beforeUnlock?: () => Promise<void>) {
 					closing ??= (async () => {
+						await abortRunningTools(harness);
 						await harness.close(BACKGROUND_CONTEXT);
 						// External browser resources must be closed before another owner can resume this workspace.
 						await beforeUnlock?.();
@@ -83,5 +90,38 @@ export async function openHarness(
 		await lock.close();
 		await unlink(lockPath);
 		throw error;
+	}
+}
+
+/** How long an ordinary stop waits for aborted tools to settle before closing anyway. */
+const ABORT_SETTLE_MS = 5_000;
+
+/**
+ * ADR 0050: a tool running at an ordinary stop is marked for abort instead of being rerun at the next start. The mark
+ * is durable, so a task the close still interrupts is aborted on recovery; the model gets its partial output.
+ */
+async function abortRunningTools(harness: Harness) {
+	const running = (await harness.inspect(BACKGROUND_CONTEXT)).tasks.filter(
+		({ record, state }) => record.kind === ToolTask.definition.name && state.kind === "running",
+	);
+	if (running.length === 0) return;
+	for (const { record } of running) {
+		await harness.abortTask(record.id, BACKGROUND_CONTEXT);
+		console.log(new Date().toISOString(), "Tool aborted by stop", {
+			task: record.id,
+			conversation: record.conversationId,
+		});
+	}
+	let timer: NodeJS.Timeout | undefined;
+	const deadline = new Promise<void>((resolve) => {
+		timer = setTimeout(resolve, ABORT_SETTLE_MS);
+	});
+	try {
+		await Promise.race([
+			Promise.allSettled(running.map(({ record }) => harness.waitForTask(record.id, BACKGROUND_CONTEXT))),
+			deadline,
+		]);
+	} finally {
+		clearTimeout(timer);
 	}
 }

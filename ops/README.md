@@ -259,7 +259,9 @@ known. Require:
    `Messaging ready` and `Application started`; no startup error.
 3. Root and changed endpoints return 200; check UI changes in a browser.
 4. Interrupted work continues; scheduler deadlines are unchanged; receipt
-   counts change only by new sends and sends interrupted by the stop.
+   counts change only by new sends and sends interrupted by the stop. A tool
+   running at the stop ends aborted and the model decides whether to call it
+   again (ADR 0050); the old log shows `Tool aborted by stop` for each.
 
 On a timeout, lock, occupied port or startup failure, stop and report it. Do not
 force-kill, steal the lock, reinstall dependencies or restore a workspace snapshot.
