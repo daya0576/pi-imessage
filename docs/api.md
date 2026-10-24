@@ -15,7 +15,10 @@ The Tasks tab shows real chat and native schedule ownership trees, including
 subagent child conversations and terminal tasks. Internal-only conversations such as model-health
 are hidden, including when selected by URL; their stored data is not deleted.
 `/tasks/data` retains all conversation records for native diagnostics
-and lightweight task summaries, reading every native scan page. Input and payloads
+and lightweight task summaries, reading every native scan page. It lists every
+active task, every task that owns a conversation, their parent chains and the
+20 most recent finished tasks per conversation; older finished tasks are only
+counted in `hidden` per conversation and shown as one line. Input and payloads
 are fetched only when a task is expanded, through `/tasks/task/data?taskId=ID`.
 `/tasks?conversationId=ID` focuses one conversation and its descendants. The tree
 and expanded tasks update only on manual refresh. Conversation lists and sidebars
