@@ -12,12 +12,12 @@ import {
 	LiveDoc,
 	type TaskId,
 } from "@earendil-works/pi-durable";
-import { Chats } from "../agent/chats.ts";
+import { Chats, progressEnabled } from "../agent/chats.ts";
 import { DirectSends } from "../agent/direct-send.ts";
 import { Sessions } from "../agent/health.ts";
 import { Deliveries } from "../agent/replies.ts";
 import { Schedules } from "../agent/scheduling.ts";
-import { readSettings } from "../config/settings.ts";
+import { isReplyEnabled, readSettings } from "../config/settings.ts";
 import { displayHistory, historyActivity } from "./history.ts";
 import { memoryPage, parseMemoryFile } from "./memory.ts";
 import { renderPage } from "./page.ts";
@@ -140,6 +140,44 @@ export async function startWeb(options: {
 			conversations,
 			revision: viewRevision(),
 			settings: { chatAllowlist: configuration.chatAllowlist },
+		};
+	}
+	/** One row per chat: reply eligibility, the /verbose choice and the conversation's agent settings. */
+	async function chatSettings() {
+		const [chats, configuration] = await Promise.all([
+			options.agent.harness.snapshot(Chats, BACKGROUND_CONTEXT),
+			settings(),
+		]);
+		const records = chats?.items ?? [];
+		const rows = await Promise.all(
+			records.map(async (chat) => {
+				const conversation = await options.agent.harness.conversation(
+					chat.conversationId,
+					BACKGROUND_CONTEXT,
+				);
+				const [agent, entries] = conversation
+					? await Promise.all([conversation.agent(BACKGROUND_CONTEXT), history(chat.conversationId)])
+					: [undefined, undefined];
+				return {
+					chatGuid: chat.chatGuid,
+					conversationId: chat.conversationId,
+					groupName: entries ? displayHistory(entries, 15).groupName : undefined,
+					updatedAt: entries ? historyActivity(entries) : undefined,
+					replies: isReplyEnabled(configuration, chat.chatGuid),
+					verbose: { chat: chat.progress, effective: progressEnabled(configuration, records, chat.chatGuid) },
+					model: agent?.model ? `${agent.model.provider}/${agent.model.modelId}` : undefined,
+					thinking: agent?.thinkingLevel,
+				};
+			}),
+		);
+		rows.sort(
+			(a, b) =>
+				(b.updatedAt ?? 0) - (a.updatedAt ?? 0) || Number(b.conversationId) - Number(a.conversationId),
+		);
+		return {
+			chats: rows,
+			defaults: { progressMessages: configuration.progressMessages },
+			revision: viewRevision(),
 		};
 	}
 	const server = createServer((request, response) => {
@@ -272,6 +310,9 @@ export async function startWeb(options: {
 				};
 		} else if (page === "/scheduled") {
 			value = await readSchedules(options.agent.harness);
+			compact = true;
+		} else if (page === "/chats") {
+			value = await chatSettings();
 			compact = true;
 		} else if (page === "/tasks") {
 			value = {
