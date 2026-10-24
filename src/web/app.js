@@ -16,8 +16,8 @@ document.body.classList.add(`page-${page.slice(1)}`);
 if (conversationId) document.body.classList.add("conversation-detail");
 document.getElementById("title").textContent =
 	{
-		"/chat": "Recent Chats",
-		"/chats": "Chat settings",
+		"/chat": "Messages",
+		"/chats": "Chats",
 		"/tasks": "Tasks",
 		"/scheduled": "Scheduled tasks",
 		"/logs": "Logs",
@@ -426,39 +426,74 @@ function renderSettings() {
 }
 
 function renderChatSettings() {
+	const chats = data.chats || [];
+	const overrides = chats.filter((chat) => chat.verbose.chat !== undefined).length;
 	view.replaceChildren(
 		element(
 			"p",
-			"Read-only per-chat choices. /verbose and /thinking change them in the chat; settings.json supplies the default.",
+			[
+				`${chats.length} chats`,
+				`default verbose ${data.defaults?.progressMessages ? "on" : "off"}`,
+				`${overrides} ${overrides === 1 ? "override" : "overrides"}`,
+				"read-only: /verbose and /thinking change a chat, settings.json the default",
+			].join(" · "),
 			"muted",
 		),
 	);
-	const table = element("table", undefined, "task-table");
-	const heading = table.insertRow();
-	for (const label of ["Chat", "Replies", "Verbose", "Model", "Thinking", "Last activity"])
-		heading.append(element("th", label));
-	for (const chat of data.chats || []) {
-		const row = table.insertRow();
-		const name = row.insertCell();
-		name.append(link(chat.groupName || chat.chatGuid, `/chat?conversationId=${chat.conversationId}`));
-		if (chat.groupName) name.append(element("div", chat.chatGuid, "muted"));
-		const verbose = `${chat.verbose.effective ? "on" : "off"} (${chat.verbose.chat === undefined ? "default" : "this chat"})`;
-		for (const value of [
-			chat.replies ? "on" : "off",
-			verbose,
-			chat.model || "-",
-			chat.thinking || "-",
-			typeof chat.updatedAt === "number" ? new Date(chat.updatedAt).toLocaleString("sv-SE") : "-",
-		])
-			row.append(element("td", value));
+	// A main value with its source or provider underneath keeps each column scannable.
+	function stacked(main, detail) {
+		const cell = element("td", undefined, "c-fix");
+		cell.append(element("div", main));
+		if (detail) cell.append(element("div", detail, "meta"));
+		return cell;
 	}
-	view.append(table);
-	if (!data.chats?.length) view.append(element("p", "No chats yet.", "empty"));
+	function section(id, title, rows) {
+		const card = element("section", undefined, "card");
+		card.id = `chats-${id}`;
+		const header = element("header", undefined, "card-header");
+		header.append(element("span", title), element("span", String(rows.length), "meta"));
+		card.append(header);
+		const table = element("table", undefined, "chat-table");
+		const heading = table.createTHead().insertRow();
+		for (const label of ["Chat", "Replies", "Verbose", "Model", "Thinking", "Last activity"])
+			heading.append(element("th", label));
+		const body = table.createTBody();
+		for (const chat of rows) {
+			const row = body.insertRow();
+			if (!chat.replies) row.className = "chat-silent";
+			const name = row.insertCell();
+			name.append(link(chat.groupName || chat.chatGuid, `/chat?conversationId=${chat.conversationId}`));
+			if (chat.groupName) name.append(element("div", chat.chatGuid, "meta"));
+			const [provider, ...modelId] = (chat.model || "").split("/");
+			const activity =
+				typeof chat.updatedAt === "number"
+					? new Date(chat.updatedAt).toLocaleString("sv-SE").slice(0, 16)
+					: "";
+			row.append(
+				stacked(chat.replies ? "on" : "off"),
+				stacked(
+					chat.verbose.effective ? "on" : "off",
+					chat.verbose.chat === undefined ? "default" : "this chat",
+				),
+				stacked(modelId.join("/") || "-", chat.model ? provider : undefined),
+				stacked(chat.thinking || "-"),
+				stacked(activity || "-"),
+			);
+		}
+		card.append(table);
+		if (!rows.length) card.append(element("p", "None.", "empty chat-empty"));
+		return card;
+	}
 	view.append(
-		element(
-			"p",
-			`Default verbose: ${data.defaults?.progressMessages ? "on" : "off"} (settings.json progressMessages)`,
-			"muted",
+		section(
+			"groups",
+			"Groups",
+			chats.filter((chat) => chat.chatGuid.includes(";+;")),
+		),
+		section(
+			"direct",
+			"Direct",
+			chats.filter((chat) => !chat.chatGuid.includes(";+;")),
 		),
 	);
 }
@@ -682,7 +717,7 @@ function setupToolbar() {
 	if (page === "/chat" || page === "/tasks") {
 		if (conversationId) {
 			toolbar.className = "toolbar";
-			toolbar.append(page === "/chat" ? link("< Recent Chats", "/") : link("< All conversations", "/tasks"));
+			toolbar.append(page === "/chat" ? link("< Messages", "/") : link("< All conversations", "/tasks"));
 		}
 	} else if (page === "/memory") {
 		const records = Array.isArray(data) ? memoryRows() : data.records;

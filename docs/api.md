@@ -6,9 +6,11 @@ Default address: `http://localhost:7750` (configured by `WEB_HOST` and `WEB_PORT
 The server has no authentication; do not expose it to untrusted networks.
 
 The pages `/`, `/chat`, `/chats`, `/tasks`, `/scheduled`, `/settings`, `/memory` and `/logs` are read-only.
-The Chat settings tab (`/chats`, `/chats/data`) lists one row per chat: reply
-eligibility, the `/verbose` choice with its effective value, the conversation's
-model and thinking level, and last activity. It never shows message text.
+The Chats tab (`/chats`, `/chats/data`) lists groups and direct chats, one row
+each: reply eligibility, the `/verbose` choice with its effective value, the
+conversation's model and thinking level, and last activity. Chats that do not
+reply are dimmed. It never shows message text. The message history page in the
+navigation is labelled Messages.
 The Tasks tab shows real chat and native schedule ownership trees, including
 subagent child conversations and terminal tasks. Internal-only conversations such as model-health
 are hidden, including when selected by URL; their stored data is not deleted.
@@ -18,7 +20,7 @@ are fetched only when a task is expanded, through `/tasks/task/data?taskId=ID`.
 `/tasks?conversationId=ID` focuses one conversation and its descendants. The tree
 and expanded tasks update only on manual refresh. Conversation lists and sidebars
 use newest message activity first, with conversation ID as a descending tie-break;
-Tasks uses the same activity clock as Recent Chats, not conversation creation order.
+Tasks uses the same activity clock as Messages, not conversation creation order.
 Conversation windows have a maximum height of `min(560px, 70dvh)` and scroll inside. These are latest task states,
 not checkpoint history: terminal tasks retain input and outcome, but no checkpoint.
 Existing redaction and large-string truncation apply to task details too.

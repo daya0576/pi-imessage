@@ -9,8 +9,8 @@ function escapeHtml(text: string) {
 export function renderPage(page: string, state: string) {
 	const active = page === "/" || page === "/chat" ? "/" : page;
 	const navigation = [
-		["/", "Recent Chats"],
-		["/chats", "Chat settings"],
+		["/", "Messages"],
+		["/chats", "Chats"],
 		["/tasks", "Tasks"],
 		["/scheduled", "Scheduled"],
 		["/logs", "Logs"],
@@ -27,7 +27,7 @@ export function renderPage(page: string, state: string) {
 <title>blue — pi-imessage</title><link rel="stylesheet" href="/assets/style.css">
 <script src="/assets/app.js" defer></script></head>
 <body><nav class="app-nav" aria-label="Main navigation">${navigation}</nav>
-<main class="content" id="main"><header class="page-header"><h1 id="title">Recent Chats</h1>
+<main class="content" id="main"><header class="page-header"><h1 id="title">Messages</h1>
 <div class="connection"><button id="refresh" type="button">Refresh</button></div></header>
 <div id="toolbar"></div><p id="notice" role="status" hidden></p><div id="view" aria-busy="true"></div>
 <details class="native-state"><summary>Native state</summary><pre id="state">${escapeHtml(state)}</pre></details></main>

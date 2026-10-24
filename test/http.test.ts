@@ -408,7 +408,7 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 		expect(history).toContain('href="/scheduled"');
 		expect(history).not.toContain('href="/automation"');
 		expect(history).toContain('class="app-nav"');
-		expect(history).toContain("Recent Chats");
+		expect(history).toContain("Messages");
 		expect(history).toContain('href="/assets/style.css"');
 		expect(history).toContain('src="/assets/app.js"');
 		expect(history).not.toContain('id="connection"');

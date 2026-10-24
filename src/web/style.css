@@ -541,3 +541,31 @@ body.page-logs .native-state {
 		width: 100px;
 	}
 }
+
+.chat-table th,
+.chat-table td {
+	padding: 8px 16px;
+	border-bottom: 1px solid var(--border);
+}
+
+.chat-table th {
+	opacity: 0.55;
+	white-space: nowrap;
+}
+
+.chat-table td:first-child {
+	width: 100%;
+	word-break: break-all;
+}
+
+.chat-table tbody tr:last-child td {
+	border-bottom: 0;
+}
+
+.chat-silent {
+	opacity: 0.55;
+}
+
+.chat-empty {
+	padding: 12px 16px;
+}
