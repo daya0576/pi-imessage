@@ -71,8 +71,9 @@ with the dependency version pinned in this project before adopting their APIs.
   Create or reuse it before editing, including after restart. Never edit the
   main checkout or automatically delete a dirty worktree.
 - After each completed project change, run required checks, commit, merge
-  `origin/next` into the branch if it moved, merge the branch into `next`,
-  push `next`, then deploy and verify from the pushed `next` head (see Deploy).
+  `origin/next` into the branch if it moved, then fast-forward `next` to the
+  branch with `git push origin <branch>:next` (no shared `next` worktree is
+  needed), then deploy and verify from the pushed `next` head (see Deploy).
   If no `next -> main` PR is open, open one with `gh pr create --body-file`;
   otherwise add a comment naming the new commits. These actions are
   pre-authorized; do not ask again.
