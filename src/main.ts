@@ -510,19 +510,25 @@ export async function startMessaging(
 	let closing: Promise<void> | undefined;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let started = false;
+	/** Rows committed before the call are read even when a poll is already in flight. */
 	function poll() {
 		if (closed) return Promise.reject(new Error("Messaging is closed"));
-		pending ??= (async () => {
-			try {
-				await watcher.poll();
-			} finally {
-				// An unreadable attachment must not strand another chat's completed reply.
-				if (!closed) await service.deliver();
-			}
-		})().finally(() => {
-			pending = undefined;
-		});
-		return pending;
+		const previous = pending?.catch(() => undefined) ?? Promise.resolve();
+		const current: Promise<void> = previous
+			.then(async () => {
+				if (closed) return;
+				try {
+					await watcher.poll();
+				} finally {
+					// An unreadable attachment must not strand another chat's completed reply.
+					if (!closed) await service.deliver();
+				}
+			})
+			.finally(() => {
+				if (pending === current) pending = undefined;
+			});
+		pending = current;
+		return current;
 	}
 	function tick() {
 		void poll()
