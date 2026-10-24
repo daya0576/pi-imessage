@@ -637,6 +637,9 @@ it("starts quietly and wires default coding/image tools, model defaults and work
 	expect(resolved?.model).toEqual(options.runtime.defaults.model);
 	expect(resolved?.tools.map((tool) => tool.name).sort()).toEqual([
 		"bash",
+		"bitwarden_fill",
+		"bitwarden_find",
+		"bitwarden_status",
 		"browser",
 		"edit",
 		"fetch_content",
@@ -652,8 +655,9 @@ it("starts quietly and wires default coding/image tools, model defaults and work
 		"web_search",
 		"write",
 	]);
-	// ADR 0039: built-ins default to safe; browser mutations (ADR 0017) and self-restart (ADR 0052) opt out.
-	const unsafe = new Set(["browser", "restart_service"]);
+	// ADR 0039: built-ins default to safe; browser mutations (ADR 0017), self-restart (ADR 0052) and private
+	// credential fills opt out.
+	const unsafe = new Set(["browser", "restart_service", "bitwarden_fill"]);
 	expect(resolved?.tools.every((tool) => tool.replay === (unsafe.has(tool.name) ? "unsafe" : "safe"))).toBe(
 		true,
 	);

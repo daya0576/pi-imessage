@@ -1,7 +1,8 @@
+import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
-import { type Cursor, createRegistry, type Extension } from "@earendil-works/pi-durable";
+import { type ConversationId, type Cursor, createRegistry, type Extension } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import {
 	type AgentDefaults,
@@ -23,6 +24,7 @@ import { loadPrompt } from "./agent/prompt.ts";
 import { Runs, runRecord } from "./agent/run.ts";
 import { deliverScheduled, EXECUTION_KIND, Schedules, schedulingExtension } from "./agent/scheduling.ts";
 import { isReplyEnabled, readSettings } from "./config/settings.ts";
+import { createBitwarden } from "./extensions/bitwarden.ts";
 import { createBrowser } from "./extensions/browser.ts";
 import { memoryExtension } from "./extensions/memory.ts";
 import { messageExtension } from "./extensions/message.ts";
@@ -65,6 +67,21 @@ export async function startService(
 	}
 	const defaults = { ...runtime.defaults, model: { ...runtime.defaults.model } };
 	const browser = await createBrowser(options.workingDir, options.agentDir);
+	async function ownerChat(id: ConversationId) {
+		const chats = (await harness.snapshot(Chats, BACKGROUND_CONTEXT))?.items ?? [];
+		const runs = (await harness.snapshot(Runs, BACKGROUND_CONTEXT))?.items ?? [];
+		const chatGuid = [...chats, ...runs].find((item) => item.conversationId === id)?.chatGuid;
+		if (!chatGuid) throw new Error("No destination chat for send_message");
+		return chatGuid;
+	}
+	const bitwarden = createBitwarden(join(options.workingDir, "bitwarden.json"), {
+		owner: ownerChat,
+		fill: browser.fillLogin,
+	});
+	async function closeNativeTools() {
+		await bitwarden.close();
+		await browser.close();
+	}
 	if (!runtime.models.getModel(defaults.model.provider, defaults.model.modelId))
 		throw new Error(`Model is unavailable: ${defaults.model.provider}/${defaults.model.modelId}`);
 	async function loadExtensions(): Promise<WorkspaceExtension[]> {
@@ -73,13 +90,7 @@ export async function startService(
 			...(!options.extensions
 				? [
 						messageExtension({
-							async owner(id) {
-								const chats = (await harness.snapshot(Chats, BACKGROUND_CONTEXT))?.items ?? [];
-								const runs = (await harness.snapshot(Runs, BACKGROUND_CONTEXT))?.items ?? [];
-								const chatGuid = [...chats, ...runs].find((item) => item.conversationId === id)?.chatGuid;
-								if (!chatGuid) throw new Error("No destination chat for send_message");
-								return chatGuid;
-							},
+							owner: ownerChat,
 							send: (input) => service.sendDirect(input),
 						}),
 					]
@@ -93,6 +104,7 @@ export async function startService(
 						await memoryExtension(options.workingDir),
 						webExtension(),
 						browser.extension,
+						bitwarden.extension,
 						Subagent,
 						workspaceExtension(reload),
 						// ADR 0052: the service runs from a release directory; the controller starts after the call settles.
@@ -168,7 +180,7 @@ export async function startService(
 			sendAttachment: options.sendAttachment,
 		});
 	} catch (error) {
-		await owner.close(browser.close);
+		await owner.close(closeNativeTools);
 		throw error;
 	}
 
@@ -447,7 +459,7 @@ export async function startService(
 			closing ??= (async () => {
 				await Promise.allSettled([...operations]);
 				await progress.close();
-				await owner.close(browser.close);
+				await owner.close(closeNativeTools);
 			})();
 			return closing;
 		},
