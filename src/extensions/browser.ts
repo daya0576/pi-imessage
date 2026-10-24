@@ -1,9 +1,9 @@
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { type ConversationId, defineExtension, defineTool, section } from "@earendil-works/pi-durable";
+import { privateProcess } from "./private-process.ts";
 
 const actions = [
 	"open",
@@ -164,39 +164,12 @@ export async function createBrowser(workingDir: string, agentDir: string) {
 		const artifact = args.action === "snapshot" ? join(scope, "state", "output", "snapshot.yaml") : undefined;
 		if (artifact) flags.push(`--filename=${artifact}`);
 		async function invoke(action: string, options: string[] = [], values: string[] = []) {
-			signal?.throwIfAborted();
-			return new Promise<string>((resolve, reject) => {
-				let failure: NodeJS.ErrnoException | undefined;
-				let escalation: NodeJS.Timeout | undefined;
-				// '--' makes even text such as '--profile=/other' literal, never a CLI option.
-				const child = execFile(
-					cli,
-					["-s=owned", action, ...options, "--", ...values],
-					{
-						cwd: join(scope, "cwd"),
-						env,
-						maxBuffer: 2 * 1024 * 1024,
-					},
-					(error, stdout) => {
-						clearTimeout(deadline);
-						clearTimeout(escalation);
-						signal?.removeEventListener("abort", abort);
-						// execFile's callback follows child exit/pipe close; never release the queue on abort alone.
-						if (failure || error) reject(failure ?? error);
-						else resolve(stdout);
-					},
-				);
-				function terminate(code: string) {
-					if (failure) return;
-					failure = Object.assign(new Error(code), { code });
-					child.kill("SIGTERM");
-					// This is a request-bound deadline for this exact CLI child, not an external scheduler/job.
-					escalation = setTimeout(() => child.kill("SIGKILL"), 1500);
-				}
-				const abort = () => terminate("ABORT_ERR");
-				const deadline = setTimeout(() => terminate("ETIMEDOUT"), args.action === "close" ? 10000 : 45000);
-				signal?.addEventListener("abort", abort, { once: true });
-				if (signal?.aborted) abort();
+			// '--' makes flag-like form text literal, never a CLI option; no raw argv/errors are logged.
+			return privateProcess(cli, ["-s=owned", action, ...options, "--", ...values], {
+				cwd: join(scope, "cwd"),
+				env,
+				signal,
+				timeoutMs: args.action === "close" ? 10000 : 45000,
 			});
 		}
 		const auth = join(scope, "state", "auth.json");
