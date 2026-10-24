@@ -32,18 +32,8 @@ For installation and service operations, see [ops/README.md](ops/README.md).
 
 ## Commands
 
-Send these commands as iMessages:
-
-| Command | Description |
-|---|---|
-| `/help` | List commands |
-| `/new` | Cancel current work and start a fresh conversation |
-| `/status` | Show tokens, context usage, and model |
-| `/thinking <level\|default>` | Set thinking for this chat or follow the default |
-| `/compact` | Compress context without replaying prior work |
-| `/run <duration> [task]` | Keep working for up to the given time, e.g. `/run 1h`; `/stop` ends it early |
-| `/stop` | Abort current work and stop `/run`; later messages are still answered |
-| `/reload` | Refresh models/auth, AGENTS, skills and extensions without cancelling work |
+Send `/help` in a chat to list commands: `/new`, `/status`, `/thinking`,
+`/compact`, `/run`, `/stop` and `/reload`.
 
 ## Configuration
 
@@ -64,26 +54,12 @@ Edit `WORKING_DIR/settings.json`. All fields are optional.
 }
 ```
 
-Add chat GUIDs to `whitelist` to enable replies; `blacklist: ["*"]` blocks replies
-elsewhere. An explicit blacklist entry takes priority. Messages are always logged.
-Rich text is optional; `markdown: true` renders bold spans in direct iMessage chats.
+### Workspace extensions
 
-### Workspace extensions and scheduler
-
-Context compaction runs every six hours as a native Durable background task.
-Personal tools, tasks and optional daily/interval schedules live in
-`WORKING_DIR/extensions/<name>/index.ts` with `config.json`, not framework
-settings. Startup and `/reload` load them; the assistant can use
-`reload_extensions` to apply its own changes.
-
-See [workspace extensions](docs/workspace-extensions.md) for the factory contract
+Personal tools, tasks and schedules live in `WORKING_DIR/extensions/<name>/`.
+Startup, `/reload` and the assistant's `reload_extensions` load them. See
+[workspace extensions](docs/workspace-extensions.md) for the factory contract
 and scheduling rules.
-One-off runs use the same scheduler: declare a stable `runRequests` ID, target
-schedule and `at: "now"` (or epoch milliseconds) in the extension configuration,
-then call `reload_extensions`. No restart or separate execution API is needed.
-
-Times use the service machine's local timezone. Saved deadlines survive reload
-and restart; view schedules and latest-ten execution history at `/scheduled`.
 
 ### Model policy
 
@@ -98,11 +74,8 @@ Optional `settings.json` fields, applied at startup and `/reload`:
 }
 ```
 
-Without a fallback, an unavailable default fails explicitly. Without a tier,
-provider requests are unchanged. `codexServiceTier` accepts `default` or
-`priority`; priority may have a different cost. Existing deployments migrate
-their previous choices into explicit configuration rather than silently changing
-behavior.
+Without a fallback, an unavailable default fails explicitly. `codexServiceTier`
+accepts `default` or `priority`; priority may have a different cost.
 
 ### Environment Variables
 
@@ -118,9 +91,7 @@ All variables are optional.
 ### Web and API
 
 See the [HTTP API](docs/api.md) for read-only state and model health checks.
-The agent sends files and extra messages with `send_message`. The scheduler
-provides daily/interval cadence and one-off triggers for workspace tasks, plus built-in six-hour compaction.
-It does not revive legacy cron files or HTTP prompt/send endpoints.
+The agent sends files and extra messages with `send_message`.
 
 ## How It Works
 
@@ -129,18 +100,13 @@ Messages chat.db → Watcher → Pi Durable → Messages.app
 ```
 
 Each chat has its own conversation, persisted under `WORKING_DIR/durable/`.
-Durable resumes pending work after a crash. Agent replies are sent at most once;
-uncertain send results are flagged, never automatically resent.
-
-Context is compacted silently every 6 hours and near the model's limit. Failed
-compaction keeps the old context. `/new` starts fresh without deleting searchable
-history.
+Durable resumes pending work after a crash. Replies are sent at most once;
+uncertain sends are flagged, never resent. Context is compacted silently every
+six hours and near the model's limit.
 
 ## Layout
 
-This repository is the framework; `WORKING_DIR` is one deployment's data and
-code. Personal tasks and model policy live in `WORKING_DIR`; message flow lives
-in the framework, run from a fixed [release checkout](ops/README.md#release-directories).
+This repository is the framework; `WORKING_DIR` is one deployment's data and code.
 See [workspace extensions](docs/workspace-extensions.md), ADR 0036 and ADR 0042.
 
 ```text
