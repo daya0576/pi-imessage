@@ -63,18 +63,22 @@ with the dependency version pinned in this project before adopting their APIs.
 
 ## Git
 
-- One conversation, one worktree and branch. Create or reuse it before editing,
-  including after restart. Never edit the main checkout or automatically delete
-  a dirty worktree.
-- `main` changes only through a pull request that the owner reviews and
-  merges. Never merge into `main`, push to `main` or merge a PR yourself.
-- After each completed project change, run required checks, commit, push the
-  branch, then open its PR with `gh pr create --body-file` or update the open
-  one. Deploy and verify from the pushed branch commit (see Deploy); the
-  deployment does not wait for the merge. These actions are pre-authorized;
-  do not ask again.
-- Deploy serially; never run two real message pipelines concurrently.
-- After the owner merges the PR, remove the clean worktree with
+- Two long-lived branches. `next` is the integration branch: every finished
+  change lands there at once and the service runs its head. `main` is the
+  reviewed snapshot: it changes only when the owner merges the standing
+  `next -> main` pull request. Never merge into `main` or push `main` yourself.
+- One conversation, one worktree and branch, created from `origin/next`.
+  Create or reuse it before editing, including after restart. Never edit the
+  main checkout or automatically delete a dirty worktree.
+- After each completed project change, run required checks, commit, merge
+  `origin/next` into the branch if it moved, merge the branch into `next`,
+  push `next`, then deploy and verify from the pushed `next` head (see Deploy).
+  If no `next -> main` PR is open, open one with `gh pr create --body-file`;
+  otherwise add a comment naming the new commits. These actions are
+  pre-authorized; do not ask again.
+- Merge into `next` and deploy serially; never run two real message pipelines
+  concurrently.
+- After the branch is in `next`, remove the clean worktree with
   `git worktree remove` (no `--force`) and the branch with `git branch -d`.
 - Commit only intended changes; exclude unrelated drafts, temporary files and
   credentials. Stage explicit paths, never `git add -A` or `git add .`.
@@ -91,8 +95,8 @@ with the dependency version pinned in this project before adopting their APIs.
 ## Deploy
 
 - Deploy and verify each completed change without asking again for routine deployment approval. Follow the routine deployment/restart section in `ops/README.md`; documentation-only edits need no runtime restart.
-- Run the service from a fixed release directory built from a pushed commit: the PR branch head while the PR is open, or `main` after the merge. Never the main checkout, a conversation worktree or an unpushed commit: [Release directories](ops/README.md#release-directories).
-- When the owner merges a PR whose branch is running, no redeploy is needed unless `main` now differs from the running commit.
+- Run the service from a fixed release directory built from the pushed `origin/next` head, never the main checkout, a conversation worktree or an unpushed commit: [Release directories](ops/README.md#release-directories). Rollback is a release from `origin/main`, the last reviewed snapshot.
+- The owner merging `next -> main` changes nothing at runtime; the service already runs that code.
 - Never run old and new message pipelines concurrently.
 - Routine commits and pushes are separately authorized under Git above. Deployment authorization does not include paid model probes, real test messages, unrelated service changes or data cleanup. Do not require the user to execute authorized commands personally. Stop for new material safety or data-integrity risks.
 

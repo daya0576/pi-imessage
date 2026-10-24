@@ -140,23 +140,21 @@ unrelated legacy jobs as part of this migration.
 |---|---|
 | Server, agent, transport or imported TypeScript | Restart from a new release directory; verify the change. |
 | Web `app.js` / `style.css` only | Verify the served assets; no restart (the file cache checks metadata). |
-| Documentation only | Commit, push the branch and open the PR; no reload or restart. |
+| Documentation only | Commit and merge into `next`; no reload or restart. |
 | Configuration supported by `/reload` | Reload; restart only for startup-only configuration. Never send an iMessage to trigger it. |
 
-Deploying means the change is committed, pushed on its branch with a PR open,
-live and verified. The owner merges the PR afterwards; the running service does
-not wait for that.
+Deploying means the change is merged into `next`, pushed, live and verified.
+The owner reviews `next -> main` periodically; the running service does not
+wait for that.
 
 ### Release directories
 
-The service runs a fixed pushed commit, never the main checkout or a
-conversation worktree. While a PR is open that is its branch head; after the
-merge it is `origin/main`. The commit must exist on the remote, so a reviewer
-can read exactly what runs:
+The service runs the fixed `origin/next` head, never the main checkout or a
+conversation worktree. A rollback is the same recipe with `origin/main`:
 
 ```sh
-SHA=$(git -C /Users/clawbot/pi-imessage-next rev-parse origin/<branch>)   # or origin/main
-git -C /Users/clawbot/pi-imessage-next branch -r --contains "$SHA" | grep -q . || exit 1
+git -C /Users/clawbot/pi-imessage-next fetch -q origin
+SHA=$(git -C /Users/clawbot/pi-imessage-next rev-parse origin/next)   # origin/main to roll back
 RELEASE=/Users/clawbot/pi-imessage-releases/$SHA
 git -C /Users/clawbot/pi-imessage-next worktree add --detach "$RELEASE" "$SHA"
 (cd "$RELEASE" && npm ci --ignore-scripts && node --experimental-strip-types ops/preflight.mjs)
