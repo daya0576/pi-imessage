@@ -34,6 +34,7 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
+		"@bitwarden/cli": "2026.6.0",
 		"@earendil-works/chord": "1.4.0",
 		"@earendil-works/pi-ai": "1.4.0",
 		"@earendil-works/pi-coding-agent": "1.4.0",
