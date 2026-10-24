@@ -311,6 +311,7 @@ export async function startService(
 					models: runtime.models,
 					defaults,
 					reload,
+					workingDir: options.workingDir,
 					chatGuid: snapshot.chatGuid,
 					guid: snapshot.guid,
 					text: snapshot.text,

@@ -32,6 +32,7 @@ Accepted ADR files are never edited; this index records which ones are current.
 | [0046](0046-selective-command-redaction.md) | Selective command-preview redaction | Proposed; owner-requested implementation in #36 |
 | [0047](0047-one-scheduling-path.md) | One scheduling path for recurring and one-off work | Active |
 | [0048](0048-quiet-attachment-reads.md) | Quiet attachment reads | Proposed; owner-requested implementation in #38 |
+| [0049](0049-per-chat-progress-notices.md) | Per-chat progress notices via `/verbose` | Proposed; owner-requested implementation |
 
 ## Replaced or rejected
 

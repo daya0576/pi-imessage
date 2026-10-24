@@ -66,6 +66,9 @@ it("runs each command once by source GUID and replies without the model", async 
 	await agent.command({ chatGuid: "chat", guid: "help", text: "/help" });
 	await agent.command({ chatGuid: "chat", guid: "stop", text: "/stop" });
 	await agent.command({ chatGuid: "chat", guid: "busy-run", text: "/run soon" });
+	// /verbose reads the chat override before the global setting and validates its argument.
+	for (const text of ["/verbose", "/verbose on", "/verbose default", "/verbose loud"])
+		await agent.command({ chatGuid: "chat", guid: text, text });
 	const reset = { chatGuid: "chat", guid: "reset", text: "/new" };
 	await agent.command(reset);
 	await agent.command(reset);
@@ -76,13 +79,18 @@ it("runs each command once by source GUID and replies without the model", async 
 		expect.stringContaining("/stop - stop the current work or /run"),
 		"Nothing is running.",
 		expect.stringContaining("Usage: /run"),
+		"Verbose: off (default)",
+		"Verbose: on (this chat only)",
+		"Verbose: off (default)",
+		"Usage: /verbose [on|off|default]",
 		"0 msgs - context ?/128.0k\nModel: faux/faux-1, thinking: high",
 		"0 msgs - context ?/128.0k\nModel: faux/faux-1, thinking: high\nRun: none", // /reload replies like /status.
 	]);
+	expect(replies()[2]).toContain("/verbose [on|off|default]");
 	expect(replies()[2]).not.toContain("/run-stop");
 	await writeFile(join(directory, "settings.json"), "{}");
 	await agent.command({ chatGuid: "disabled", guid: "logged", text: "/new" });
-	expect(send).toHaveBeenCalledTimes(7);
+	expect(send).toHaveBeenCalledTimes(11);
 	expect(await chatEntries("disabled")).toContain("/new");
 	expect(faux.state.callCount).toBe(0);
 });

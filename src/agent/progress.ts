@@ -7,7 +7,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Harness, TaskRecord, ToolTaskInput, ToolTaskResult } from "@earendil-works/pi-durable";
 import { isReplyEnabled, readSettings } from "../config/settings.ts";
 import type { MessageSender } from "../transport/send.ts";
-import { Chats } from "./chats.ts";
+import { Chats, progressEnabled } from "./chats.ts";
 import { takeScheduledCompaction } from "./compaction.ts";
 import { deliverDirect } from "./direct-send.ts";
 import { argumentSummary, commandPreview, formatProgress, type ProgressEvent } from "./progress-format.ts";
@@ -65,8 +65,9 @@ export async function startProgress(harness: Harness, workingDir: string, sender
 	async function notify(task: TaskRecord<JsonValue, JsonValue, JsonValue>, notice: Notice) {
 		if (task.kind === "pi.compaction" && (await takeScheduledCompaction(harness, task.id))) return;
 		const settings = await readSettings(workingDir);
-		if (!settings.progressMessages) return;
 		const chats = (await harness.snapshot(Chats, BACKGROUND_CONTEXT))?.items ?? [];
+		// Nothing can be enabled when the global setting is off and no chat chose /verbose on.
+		if (!settings.progressMessages && !chats.some((chat) => chat.progress)) return;
 		const runs = (await harness.snapshot(Runs, BACKGROUND_CONTEXT))?.items ?? [];
 		let conversationId = task.conversationId;
 		let chatGuid: string | undefined;
@@ -81,7 +82,7 @@ export async function startProgress(harness: Harness, workingDir: string, sender
 			parents.unshift(call?.name ?? owner?.kind ?? "child");
 			conversationId = conversation.owner.conversationId;
 		}
-		if (!isReplyEnabled(settings, chatGuid)) return;
+		if (!isReplyEnabled(settings, chatGuid) || !progressEnabled(settings, chats, chatGuid)) return;
 		const tool = await calledTool(harness, task);
 		if (tool?.name === "read" && (await attachmentPath(workingDir, tool.arguments.path))) return;
 		const request: ProgressEvent = tool
@@ -108,7 +109,9 @@ export async function startProgress(harness: Harness, workingDir: string, sender
 	async function settled(task: TaskRecord<JsonValue, JsonValue, JsonValue>, notice: Notice, elapsed: number) {
 		if (!notice.chatGuid || !notice.request || task.state.status !== "terminal") return;
 		const settings = await readSettings(workingDir);
-		if (!settings.progressMessages || !isReplyEnabled(settings, notice.chatGuid)) return;
+		const chats = (await harness.snapshot(Chats, BACKGROUND_CONTEXT))?.items ?? [];
+		if (!isReplyEnabled(settings, notice.chatGuid) || !progressEnabled(settings, chats, notice.chatGuid))
+			return;
 		const outcome = task.state.outcome;
 		let success = outcome.status === "completed";
 		if (success && task.kind === "pi.tool" && outcome.status === "completed") {

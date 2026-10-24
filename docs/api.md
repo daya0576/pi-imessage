@@ -89,4 +89,6 @@ previews. Raw outputs, commands, prompts and document contents stay local.
 Known credential indicators are redacted; arbitrary user-authored secrets cannot
 be guaranteed detectable. Missing or false keeps final-only delivery. The setting
 is reread for each notice; old tasks and unknown sends are not replayed
-([ADR 0020](adr/0020-chat-task-progress.md)).
+([ADR 0040](adr/0040-chat-progress-notices.md)). `/verbose on|off` in a chat
+overrides this default for that chat only and `/verbose default` removes the
+override ([ADR 0049](adr/0049-per-chat-progress-notices.md)).

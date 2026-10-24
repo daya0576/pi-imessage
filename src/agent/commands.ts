@@ -11,7 +11,8 @@ import {
 	type TaskOutcome,
 	UserEntry,
 } from "@earendil-works/pi-durable";
-import { type AgentDefaults, chatConversation } from "./chats.ts";
+import { readSettings } from "../config/settings.ts";
+import { type AgentDefaults, Chats, chatConversation, progressEnabled, setChatProgress } from "./chats.ts";
 import { activeRun, Runs, startRun } from "./run.ts";
 
 const help = [
@@ -20,6 +21,7 @@ const help = [
 	"/status - show messages, context usage, model and run",
 	"/compact [instructions] - compress context",
 	"/thinking <level|default> - set thinking for this chat",
+	"/verbose [on|off|default] - show or set tool progress notices for this chat",
 	"/reload - reload models, instructions and skills; apply the default model to this chat and show /status",
 	"/run <duration> [task] - keep working until done, blocked or the deadline, e.g. /run 1h",
 	"/stop - stop the current work or /run",
@@ -63,6 +65,7 @@ export async function runCommand(options: {
 	defaults: AgentDefaults;
 	reload: () => Promise<AgentDefaults>;
 	closeBrowsers?: (chat: ConversationId) => Promise<void>;
+	workingDir: string;
 	chatGuid: string;
 	guid: string;
 	text: string;
@@ -166,6 +169,18 @@ export async function runCommand(options: {
 				return { reply: `Usage: /thinking <${thinkingLevels.join("|")}|default>` };
 			await configure({ thinkingLevel: argument as ModelThinkingLevel });
 			return { reply: `Thinking: ${argument} (this chat only)` };
+		case "/verbose": {
+			if (argument && argument !== "on" && argument !== "off" && argument !== "default")
+				return { reply: "Usage: /verbose [on|off|default]" };
+			if (argument)
+				await setChatProgress(harness, chatGuid, argument === "default" ? undefined : argument === "on");
+			const chats = (await harness.snapshot(Chats, BACKGROUND_CONTEXT))?.items ?? [];
+			const chat = chats.find((item) => item.chatGuid === chatGuid);
+			const settings = await readSettings(options.workingDir);
+			const state = progressEnabled(settings, chats, chatGuid) ? "on" : "off";
+			if (chat?.progress === undefined) return { reply: `Verbose: ${state} (default)` };
+			return { reply: `Verbose: ${state} (this chat only)` };
+		}
 		case "/reload": {
 			const current = await options.reload();
 			await configure({ model: current.model });

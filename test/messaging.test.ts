@@ -465,6 +465,38 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 		expect(send).toHaveBeenCalledTimes(16);
 	});
 	expect(textCalls().at(-1)).toEqual(["iMessage;-;dm", "quiet answer"]);
+	// /verbose overrides the global setting for one chat in both directions.
+	const verboseCall = () =>
+		fauxAssistantMessage(fauxToolCall("bash", { command: "printf 'verbose fixture'" }), {
+			stopReason: "toolUse",
+		});
+	faux.setResponses([verboseCall, () => fauxAssistantMessage("verbose answer")]);
+	insert("verbose-on", "/verbose on");
+	insert("verbose-question", "Verbose question");
+	await service.poll();
+	await vi.waitFor(async () => {
+		await service?.poll();
+		expect(textCalls().at(-1)).toEqual(["iMessage;-;dm", "verbose answer"]);
+	});
+	expect(textCalls().slice(16)).toEqual([
+		["iMessage;-;dm", "Verbose: on (this chat only)"],
+		["iMessage;-;dm", "→ [tool] bash: printf 'verbose fixture'"],
+		["iMessage;-;dm", expect.stringMatching(/^✓ \[tool\] bash \(\d+\.\ds\)$/)],
+		["iMessage;-;dm", "verbose answer"],
+	]);
+	await writeFile(settingsPath, JSON.stringify({ ...settings, progressMessages: true }));
+	faux.setResponses([verboseCall, () => fauxAssistantMessage("silent answer")]);
+	insert("verbose-off", "/verbose off");
+	insert("silent-question", "Silent question");
+	await service.poll();
+	await vi.waitFor(async () => {
+		await service?.poll();
+		expect(textCalls().at(-1)).toEqual(["iMessage;-;dm", "silent answer"]);
+	});
+	expect(textCalls().slice(20)).toEqual([
+		["iMessage;-;dm", "Verbose: off (this chat only)"],
+		["iMessage;-;dm", "silent answer"],
+	]);
 });
 
 // #33 Phase 3: command rows must settle without becoming model input or blocking following source rows.

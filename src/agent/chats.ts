@@ -8,9 +8,13 @@ import {
 	type ModelRef,
 	UserEntry,
 } from "@earendil-works/pi-durable";
+import type { Settings } from "../config/settings.ts";
 import { activeRun, Runs } from "./run.ts";
 
-export const Chats = defineDoc<{ items: { chatGuid: string; conversationId: ConversationId }[] }>({
+/** `progress` is the chat's /verbose choice; absent means follow `settings.json`. */
+export type ChatRecord = { chatGuid: string; conversationId: ConversationId; progress?: boolean };
+
+export const Chats = defineDoc<{ items: ChatRecord[] }>({
 	kind: "imessage.chats",
 	version: 1,
 	scope: "session",
@@ -27,6 +31,26 @@ export const WatchCursor = defineDoc<{ rowid?: number }>({
 });
 
 export type AgentDefaults = { model: ModelRef; thinkingLevel?: ModelThinkingLevel };
+
+export function progressEnabled(settings: Settings, chats: ChatRecord[], chatGuid: string) {
+	return chats.find((chat) => chat.chatGuid === chatGuid)?.progress ?? settings.progressMessages;
+}
+
+/** Stores the chat's /verbose choice; `undefined` returns the chat to the global setting. */
+export async function setChatProgress(harness: Harness, chatGuid: string, progress: boolean | undefined) {
+	await harness.commit(async (tx) => {
+		const chats = await tx.doc(Chats);
+		const index = chats.items.findIndex((item) => item.chatGuid === chatGuid);
+		if (index < 0) throw new Error("Chat conversation is missing");
+		const { conversationId } = chats.items[index];
+		// Replace the record so the stored delta never carries an undefined value.
+		chats.items.splice(index, 1, {
+			chatGuid,
+			conversationId,
+			...(progress === undefined ? {} : { progress }),
+		});
+	}, BACKGROUND_CONTEXT);
+}
 
 export type MessageInput = {
 	chatGuid: string;
