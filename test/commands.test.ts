@@ -75,7 +75,7 @@ it("runs each command once by source GUID and replies without the model", async 
 	await agent.command({ chatGuid: "chat", guid: "reload", text: "/reload" });
 	expect(replies()).toEqual([
 		"Thinking: high (this chat only)",
-		expect.stringMatching(/thinking: high\nRun: none$/),
+		expect.stringMatching(/ · high$/), // No run line while nothing runs.
 		expect.stringContaining("/stop - stop the current work or /run"),
 		"Nothing is running.",
 		expect.stringContaining("Usage: /run"),
@@ -83,8 +83,8 @@ it("runs each command once by source GUID and replies without the model", async 
 		"Verbose: on (this chat only)",
 		"Verbose: off (default)",
 		"Usage: /verbose [on|off|default]",
-		"0 msgs - context ?/128.0k\nModel: faux/faux-1, thinking: high",
-		"0 msgs - context ?/128.0k\nModel: faux/faux-1, thinking: high\nRun: none", // /reload replies like /status.
+		"0 msgs · ? / 128k\nfaux/faux-1 · high",
+		"0 msgs · ? / 128k\nfaux/faux-1 · high", // /reload replies like /status.
 	]);
 	expect(replies()[2]).toContain("/verbose [on|off|default]");
 	expect(replies()[2]).not.toContain("/run-stop");
@@ -132,6 +132,8 @@ it("runs in a fork of the chat, routes ordinary messages to it and records it in
 	// Answers between continuations are delivered while the run goes on.
 	await agent.deliver();
 	expect(replies()).toEqual(["noted", "day one"]);
+	await agent.command({ chatGuid: "chat", guid: "status-running", text: "/status" });
+	expect(replies().at(-1)).toMatch(/\nrun · until \d{4}-\d{2}-\d{2}T[\d:.]+Z$/);
 	const steer = await agent.submit({ chatGuid: "chat", guid: "museum", text: "Add a museum." });
 	expect((await steer.status(BACKGROUND_CONTEXT)).status).toBe("queued");
 	release.resolve();
@@ -139,7 +141,7 @@ it("runs in a fork of the chat, routes ordinary messages to it and records it in
 	if (!run) throw new Error("Missing run");
 	await agent.harness.waitForTask(run.taskId, BACKGROUND_CONTEXT);
 	await agent.deliver();
-	expect(replies()).toEqual(["noted", "day one", "day two with a museum"]);
+	expect(replies().slice(-1)).toEqual(["day two with a museum"]);
 	expect(await chatEntries()).toContain("Add a museum.");
 	await (await agent.submit({ chatGuid: "chat", guid: "after", text: "Anything else?" })).wait(
 		BACKGROUND_CONTEXT,
@@ -150,11 +152,11 @@ it("runs in a fork of the chat, routes ordinary messages to it and records it in
 
 	await agent.command({ chatGuid: "chat", guid: "before-reset", text: "/status" });
 	const before = replies().at(-1);
-	expect(before).toMatch(/^\d+ msgs - context \d+\.\d+%\/128\.0k\n/);
+	expect(before).toMatch(/^\d+ msgs · \d+\.\d+% \/ 128k\n/);
 	await agent.command({ chatGuid: "chat", guid: "reset", text: "/new" });
-	expect(replies().at(-1)).toBe(`0 msgs - context ?/128.0k\n${before?.split("\n")[1]}`);
+	expect(replies().at(-1)).toBe(`0 msgs · ? / 128k\n${before?.split("\n")[1]}`);
 	await agent.command({ chatGuid: "chat", guid: "after-reset", text: "/status" });
-	expect(replies().at(-1)).toBe(`${replies().at(-2)}\nRun: none`);
+	expect(replies().at(-1)).toBe(replies().at(-2)); // Same report; the run line exists only during a run.
 	expect(faux.state.callCount).toBe(5);
 });
 

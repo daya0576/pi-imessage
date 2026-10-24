@@ -18,7 +18,7 @@ import { activeRun, Runs, startRun } from "./run.ts";
 const help = [
 	"/help - list commands",
 	"/new - stop current work and start an empty context",
-	"/status - show messages, context usage, model and run",
+	"/status - show messages, context usage, model and the active run",
 	"/compact [instructions] - compress context",
 	"/thinking <level|default> - set thinking for this chat",
 	"/verbose [on|off|default] - show or set tool progress notices for this chat",
@@ -39,7 +39,7 @@ export function parseDuration(value: string) {
 }
 
 function tokens(count: number) {
-	return count >= 1000 ? `${(count / 1000).toFixed(1)}k` : String(count);
+	return count >= 1000 ? `${Math.round(count / 1000)}k` : String(count);
 }
 
 /** A compaction runs independently; its reply follows the native task/placement outcome. */
@@ -84,8 +84,8 @@ export async function runCommand(options: {
 				BACKGROUND_CONTEXT,
 			);
 	};
-	// The /status report: user messages, context usage, model and optionally the run (ADR 0013).
-	// Cumulative token totals are deliberately omitted; they confused more than they informed.
+	// The /status report: user messages with context usage, then model with thinking (ADR 0013).
+	// A third line appears only while a /run is active. Cumulative token totals are deliberately omitted.
 	const status = async (withRun: boolean) => {
 		const agent = await conversation.agent(BACKGROUND_CONTEXT);
 		const context = await conversation.context(BACKGROUND_CONTEXT);
@@ -99,13 +99,13 @@ export async function runCommand(options: {
 			[
 				`${context.messages.filter((message) => message.role === "user").length} msgs`,
 				window
-					? `context ${used === undefined ? "?" : `${((used / window) * 100).toFixed(1)}%`}/${tokens(window)}`
+					? `${used === undefined ? "?" : `${((used / window) * 100).toFixed(1)}%`} / ${tokens(window)}`
 					: "",
 			]
 				.filter(Boolean)
-				.join(" - "),
-			`Model: ${agent.model ? `${agent.model.provider}/${agent.model.modelId}` : "unset"}, thinking: ${agent.thinkingLevel}`,
-			...(withRun ? [`Run: ${run ? `until ${new Date(run.deadline).toISOString()}` : "none"}`] : []),
+				.join(" · "),
+			`${agent.model ? `${agent.model.provider}/${agent.model.modelId}` : "unset"} · ${agent.thinkingLevel}`,
+			...(withRun && run ? [`run · until ${new Date(run.deadline).toISOString()}`] : []),
 		].join("\n");
 	};
 	switch (name) {
