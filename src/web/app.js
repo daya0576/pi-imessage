@@ -690,11 +690,11 @@ function renderTasks() {
 			item.append(detail);
 		}
 		const descendants = children.get(key) || [];
-		const hidden = node.type === "conversation" ? data.hidden?.[node.id] : undefined;
-		if (descendants.length || hidden) {
+		const more = node.type === "conversation" && data.more?.[node.id];
+		if (descendants.length || more) {
 			const list = element("ul", undefined, "task-tree");
 			for (const child of descendants) list.append(renderNode(child));
-			if (hidden) list.append(element("li", `${hidden} older finished tasks not listed`, "meta"));
+			if (more) list.append(element("li", "older tasks not listed", "meta"));
 			item.append(list);
 		}
 		return item;

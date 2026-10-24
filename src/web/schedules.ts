@@ -1,5 +1,5 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Cursor, Harness } from "@earendil-works/pi-durable";
+import type { Harness } from "@earendil-works/pi-durable";
 import { DirectSends } from "../agent/direct-send.ts";
 import { EXECUTION_KIND, Schedules } from "../agent/scheduling.ts";
 
@@ -14,46 +14,34 @@ export function readSchedules(harness: Harness) {
 			const checkpoint = task?.state.checkpoint;
 			const state =
 				checkpoint && typeof checkpoint === "object" && !Array.isArray(checkpoint) ? checkpoint : undefined;
-			const executions = [];
-			let cursor: Cursor | undefined;
-			do {
-				const page = await tx.scanTasks(
-					{ conversationId: schedule.conversationId, kind: EXECUTION_KIND },
-					100,
-					cursor,
-				);
-				executions.push(...page.items);
-				cursor = page.next;
-			} while (cursor);
-			// Native scans merge live/terminal records; their order is not execution chronology.
-			const runs = executions
-				.sort((a, b) => b.id - a.id)
-				.slice(0, 10)
-				.map((run) => {
-					const outcome = run.state.outcome;
-					const result =
-						outcome?.status === "completed" &&
-						outcome.result &&
-						typeof outcome.result === "object" &&
-						!Array.isArray(outcome.result)
-							? outcome.result
-							: undefined;
-					const receipt =
-						typeof result?.requestId === "string"
-							? sends.requests.find((item) => item.requestId === result.requestId)
-							: undefined;
-					return {
-						id: run.id,
-						input: run.input,
-						status: outcome?.status ?? run.state.status,
-						result,
-						error:
-							outcome?.status === "failed" || outcome?.status === "faulted"
-								? outcome.error.message
-								: undefined,
-						delivery: receipt?.textStatus ?? (result?.requestId ? "queued" : undefined),
-					};
-				});
+			// Occurrence IDs grow with admission time; the newest ten are the history shown.
+			const executions = await tx.scanTasks(
+				{ conversationId: schedule.conversationId, kind: EXECUTION_KIND, order: "descending" },
+				10,
+			);
+			const runs = executions.items.map((run) => {
+				const outcome = run.state.outcome;
+				const result =
+					outcome?.status === "completed" &&
+					outcome.result &&
+					typeof outcome.result === "object" &&
+					!Array.isArray(outcome.result)
+						? outcome.result
+						: undefined;
+				const receipt =
+					typeof result?.requestId === "string"
+						? sends.requests.find((item) => item.requestId === result.requestId)
+						: undefined;
+				return {
+					id: run.id,
+					input: run.input,
+					status: outcome?.status ?? run.state.status,
+					result,
+					error:
+						outcome?.status === "failed" || outcome?.status === "faulted" ? outcome.error.message : undefined,
+					delivery: receipt?.textStatus ?? (result?.requestId ? "queued" : undefined),
+				};
+			});
 			jobs.push({
 				id: schedule.id,
 				name: schedule.name,

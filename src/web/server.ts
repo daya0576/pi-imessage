@@ -335,7 +335,7 @@ export async function startWeb(options: {
 		else if (page === "/logs") {
 			const cursor = readCursor(url.searchParams.get("cursor"));
 			const tasks = await options.agent.harness.commit(
-				(tx) => tx.scanTasks({}, 100, cursor),
+				(tx) => tx.scanTasks(cursor ? {} : { order: "descending" }, 100, cursor),
 				BACKGROUND_CONTEXT,
 			);
 			let hostLog = "";
