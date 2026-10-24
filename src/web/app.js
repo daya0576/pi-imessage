@@ -462,8 +462,9 @@ function renderChatSettings() {
 			const row = body.insertRow();
 			if (!chat.replies) row.className = "chat-silent";
 			const name = row.insertCell();
-			name.append(link(chat.groupName || chat.chatGuid, `/chat?conversationId=${chat.conversationId}`));
-			if (chat.groupName) name.append(element("div", chat.chatGuid, "meta"));
+			// Group name, or the handle of a direct chat; the raw GUID stays in the native state only.
+			const handle = chat.chatGuid.includes(";+;") ? "unnamed group" : chat.chatGuid.split(";").at(-1);
+			name.append(link(chat.groupName || handle, `/chat?conversationId=${chat.conversationId}`));
 			const [provider, ...modelId] = (chat.model || "").split("/");
 			const activity =
 				typeof chat.updatedAt === "number"
