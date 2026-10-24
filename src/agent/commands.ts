@@ -9,7 +9,6 @@ import {
 	type SubmissionRecord,
 	type TaskId,
 	type TaskOutcome,
-	UsageDoc,
 	UserEntry,
 } from "@earendil-works/pi-durable";
 import { type AgentDefaults, chatConversation } from "./chats.ts";
@@ -18,10 +17,10 @@ import { activeRun, Runs, startRun } from "./run.ts";
 const help = [
 	"/help - list commands",
 	"/new - stop current work and start an empty context",
-	"/status - show messages, tokens, context usage, model and run",
+	"/status - show messages, context usage, model and run",
 	"/compact [instructions] - compress context",
 	"/thinking <level|default> - set thinking for this chat",
-	"/reload - reload models, instructions and skills; apply the default model to this chat",
+	"/reload - reload models, instructions and skills; apply the default model to this chat and show /status",
 	"/run <duration> [task] - keep working until done, blocked or the deadline, e.g. /run 1h",
 	"/stop - stop the current work or /run",
 ].join("\n");
@@ -82,6 +81,30 @@ export async function runCommand(options: {
 				BACKGROUND_CONTEXT,
 			);
 	};
+	// The /status report: user messages, context usage, model and optionally the run (ADR 0013).
+	// Cumulative token totals are deliberately omitted; they confused more than they informed.
+	const status = async (withRun: boolean) => {
+		const agent = await conversation.agent(BACKGROUND_CONTEXT);
+		const context = await conversation.context(BACKGROUND_CONTEXT);
+		const last = context.messages.findLast(
+			(message) => message.role === "assistant" && message.usage.totalTokens > 0,
+		);
+		const window =
+			agent.model && options.models.getModel(agent.model.provider, agent.model.modelId)?.contextWindow;
+		const used = last?.role === "assistant" ? last.usage.totalTokens : undefined;
+		return [
+			[
+				`${context.messages.filter((message) => message.role === "user").length} msgs`,
+				window
+					? `context ${used === undefined ? "?" : `${((used / window) * 100).toFixed(1)}%`}/${tokens(window)}`
+					: "",
+			]
+				.filter(Boolean)
+				.join(" - "),
+			`Model: ${agent.model ? `${agent.model.provider}/${agent.model.modelId}` : "unset"}, thinking: ${agent.thinkingLevel}`,
+			...(withRun ? [`Run: ${run ? `until ${new Date(run.deadline).toISOString()}` : "none"}`] : []),
+		].join("\n");
+	};
 	switch (name) {
 		case "/help":
 			return { reply: help };
@@ -123,43 +146,13 @@ export async function runCommand(options: {
 			return { reply: "Stopped." };
 		}
 		case "/new":
-		case "/status": {
-			if (name === "/new") {
-				// The run task belongs to the chat conversation, so this abort stops it too.
-				await conversation.abort(BACKGROUND_CONTEXT);
-				await options.closeBrowsers?.(conversation.id);
-				await conversation.reset(undefined, BACKGROUND_CONTEXT);
-			}
-			const agent = await conversation.agent(BACKGROUND_CONTEXT);
-			const context = await conversation.context(BACKGROUND_CONTEXT);
-			const usage = Object.values(
-				(await harness.snapshot(UsageDoc, conversation.id, BACKGROUND_CONTEXT))?.models ?? {},
-			);
-			const last = context.messages.findLast(
-				(message) => message.role === "assistant" && message.usage.totalTokens > 0,
-			);
-			const window =
-				agent.model && options.models.getModel(agent.model.provider, agent.model.modelId)?.contextWindow;
-			const used = last?.role === "assistant" ? last.usage.totalTokens : undefined;
-			return {
-				reply: [
-					[
-						`${context.messages.filter((message) => message.role === "user").length} msgs -`,
-						`in ${tokens(usage.reduce((sum, item) => sum + item.input, 0))}`,
-						`out ${tokens(usage.reduce((sum, item) => sum + item.output, 0))}`,
-						window
-							? `${used === undefined ? "?" : `${((used / window) * 100).toFixed(1)}%`}/${tokens(window)}`
-							: "",
-					]
-						.join(" ")
-						.trim(),
-					`Model: ${agent.model ? `${agent.model.provider}/${agent.model.modelId}` : "unset"}, thinking: ${agent.thinkingLevel}`,
-					...(name === "/status"
-						? [`Run: ${run ? `until ${new Date(run.deadline).toISOString()}` : "none"}`]
-						: []),
-				].join("\n"),
-			};
-		}
+			// The run task belongs to the chat conversation, so this abort stops it too.
+			await conversation.abort(BACKGROUND_CONTEXT);
+			await options.closeBrowsers?.(conversation.id);
+			await conversation.reset(undefined, BACKGROUND_CONTEXT);
+			return { reply: await status(false) };
+		case "/status":
+			return { reply: await status(true) };
 		case "/compact":
 			return {
 				wait: await conversation.compact(argument || undefined, BACKGROUND_CONTEXT),
@@ -176,7 +169,8 @@ export async function runCommand(options: {
 		case "/reload": {
 			const current = await options.reload();
 			await configure({ model: current.model });
-			return { reply: `Reloaded. Model: ${current.model.provider}/${current.model.modelId}` };
+			// Reply in the /status format so the applied model and run are visible at once.
+			return { reply: await status(true) };
 		}
 		case "/run": {
 			const duration = parseDuration(rest[0] ?? "");

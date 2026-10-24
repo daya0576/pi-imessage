@@ -208,7 +208,9 @@ it("loads skills and request settings, then refreshes resources and native polic
 		expect(exhausted).toMatchObject({ status: "unanswered", reason: "model_error" });
 		expect(faux.state.callCount).toBe(10); // The configured one-retry cap, not Durable's default cap.
 		// No automatic message or model work is started by resource loading itself.
-		expect(send.mock.calls.map(([, text]) => text)).toEqual([expect.stringContaining("Reloaded.")]);
+		expect(send.mock.calls.map(([, text]) => text)).toEqual([
+			expect.stringMatching(/^\d+ msgs - context \S+\nModel: faux\/faux-1, thinking: \w+\nRun: none$/),
+		]);
 	} finally {
 		await agent?.close();
 		await rm(directory, { recursive: true, force: true });
