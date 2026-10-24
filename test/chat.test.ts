@@ -742,7 +742,7 @@ it("uses supplied agent configuration and releases ownership after startup failu
 	expect(faux.state.callCount).toBe(0);
 });
 
-// #39: a tool running at the stop reruns once; at the second stop in a row it is aborted (ADR 0051).
+// #39: a tool running at the stop reruns once; at the second stop in a row it is aborted.
 // #33 Phase 1: shutting down must cancel active model work before releasing ownership.
 it("closes during tool and model execution, rerunning the tool once and never sending an answer", async () => {
 	let runs = 0;

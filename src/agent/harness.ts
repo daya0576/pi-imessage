@@ -94,7 +94,7 @@ export async function openHarness(
 	}
 }
 
-/** Tool tasks that were running at the last ordinary stop; each is rerun once (ADR 0051). */
+/** Tool tasks that were running at the last ordinary stop; each is rerun once (#39). */
 const StopInterruptions = defineDoc<{ tasks: number[] }>({
 	kind: "imessage.stop-interruptions",
 	version: 1,
@@ -107,7 +107,7 @@ const StopInterruptions = defineDoc<{ tasks: number[] }>({
 const ABORT_SETTLE_MS = 5_000;
 
 /**
- * ADR 0051: a tool running at an ordinary stop is rerun at the next start, as ADR 0041 says. A tool task still running
+ * #39: a tool running at an ordinary stop is rerun at the next start, as ADR 0041 says. A tool task still running
  * at the following stop was already rerun once, so it is marked for abort instead; the mark is durable, and the model
  * gets the partial output. This ends a tool call that stops the service itself after one extra restart.
  */

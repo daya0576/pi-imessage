@@ -261,7 +261,7 @@ known. Require:
 4. Interrupted work continues; scheduler deadlines are unchanged; receipt
    counts change only by new sends and sends interrupted by the stop. A tool
    running at the stop reruns once; one still running at the next stop ends
-   aborted and the model decides whether to call it again (ADR 0051). The old
+   aborted and the model decides whether to call it again (#39). The old
    log then shows `Tool aborted by stop: interrupted twice in a row`.
 
 On a timeout, lock, occupied port or startup failure, stop and report it. Do not
