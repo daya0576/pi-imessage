@@ -10,6 +10,7 @@ export function renderPage(page: string, state: string) {
 	const active = page === "/" || page === "/chat" ? "/" : page;
 	const navigation = [
 		["/", "Recent Chats"],
+		["/chats", "Chat settings"],
 		["/tasks", "Tasks"],
 		["/scheduled", "Scheduled"],
 		["/logs", "Logs"],

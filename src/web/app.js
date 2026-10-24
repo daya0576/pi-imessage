@@ -17,6 +17,7 @@ if (conversationId) document.body.classList.add("conversation-detail");
 document.getElementById("title").textContent =
 	{
 		"/chat": "Recent Chats",
+		"/chats": "Chat settings",
 		"/tasks": "Tasks",
 		"/scheduled": "Scheduled tasks",
 		"/logs": "Logs",
@@ -424,6 +425,44 @@ function renderSettings() {
 	}
 }
 
+function renderChatSettings() {
+	view.replaceChildren(
+		element(
+			"p",
+			"Read-only per-chat choices. /verbose and /thinking change them in the chat; settings.json supplies the default.",
+			"muted",
+		),
+	);
+	const table = element("table", undefined, "task-table");
+	const heading = table.insertRow();
+	for (const label of ["Chat", "Replies", "Verbose", "Model", "Thinking", "Last activity"])
+		heading.append(element("th", label));
+	for (const chat of data.chats || []) {
+		const row = table.insertRow();
+		const name = row.insertCell();
+		name.append(link(chat.groupName || chat.chatGuid, `/chat?conversationId=${chat.conversationId}`));
+		if (chat.groupName) name.append(element("div", chat.chatGuid, "muted"));
+		const verbose = `${chat.verbose.effective ? "on" : "off"} (${chat.verbose.chat === undefined ? "default" : "this chat"})`;
+		for (const value of [
+			chat.replies ? "on" : "off",
+			verbose,
+			chat.model || "-",
+			chat.thinking || "-",
+			typeof chat.updatedAt === "number" ? new Date(chat.updatedAt).toLocaleString("sv-SE") : "-",
+		])
+			row.append(element("td", value));
+	}
+	view.append(table);
+	if (!data.chats?.length) view.append(element("p", "No chats yet.", "empty"));
+	view.append(
+		element(
+			"p",
+			`Default verbose: ${data.defaults?.progressMessages ? "on" : "off"} (settings.json progressMessages)`,
+			"muted",
+		),
+	);
+}
+
 function renderLogs() {
 	const scrollPositions = Array.from(view.querySelectorAll(".card-content"), (node) => ({
 		top: node.scrollTop,
@@ -702,6 +741,7 @@ async function render() {
 	if (page === "/chat") await loadChats();
 	else if (page === "/memory") renderMemory();
 	else if (page === "/settings") renderSettings();
+	else if (page === "/chats") renderChatSettings();
 	else if (page === "/logs") renderLogs();
 	else if (page === "/tasks") renderTasks();
 	else if (page === "/scheduled") renderScheduled();

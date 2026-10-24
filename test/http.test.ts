@@ -109,8 +109,16 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 			expect.stringContaining("Chat answer"),
 			"Follow-up answer",
 		]);
-		for (const path of ["/", "/chat/data", "/settings", "/memory", "/logs"])
+		for (const path of ["/", "/chat/data", "/chats", "/settings", "/memory", "/logs"])
 			expect((await fetch(base + path)).status).toBe(200);
+		// The Chat settings tab projects the chat record and conversation agent, without history or secrets.
+		const chatSettings = await (await fetch(`${base}/chats/data`)).json();
+		expect(chatSettings.chats.find((chat: { chatGuid: string }) => chat.chatGuid === "chat")).toMatchObject({
+			replies: true,
+			verbose: { effective: false },
+			model: `${model.provider}/${model.id}`,
+		});
+		expect(JSON.stringify(chatSettings)).not.toContain("Chat answer");
 		const chatState = await (await fetch(`${base}/chat/data`)).json();
 		const conversationId = chatState.chats.items[0].conversationId;
 		// The overview batches display-only history; full native APIs remain unchanged.

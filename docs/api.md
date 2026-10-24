@@ -5,7 +5,10 @@
 Default address: `http://localhost:7750` (configured by `WEB_HOST` and `WEB_PORT`).
 The server has no authentication; do not expose it to untrusted networks.
 
-The pages `/`, `/chat`, `/tasks`, `/scheduled`, `/settings`, `/memory` and `/logs` are read-only.
+The pages `/`, `/chat`, `/chats`, `/tasks`, `/scheduled`, `/settings`, `/memory` and `/logs` are read-only.
+The Chat settings tab (`/chats`, `/chats/data`) lists one row per chat: reply
+eligibility, the `/verbose` choice with its effective value, the conversation's
+model and thinking level, and last activity. It never shows message text.
 The Tasks tab shows real chat and native schedule ownership trees, including
 subagent child conversations and terminal tasks. Internal-only conversations such as model-health
 are hidden, including when selected by URL; their stored data is not deleted.
