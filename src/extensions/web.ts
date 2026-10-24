@@ -10,6 +10,7 @@ export const WebResults = defineDoc<{ queries: Record<string, string> }>({
 	history: "rewindable",
 	fork: "asOf",
 	initial: () => ({ queries: {} }),
+	checkpointWhen: () => false,
 });
 
 async function fetchBounded(url: string, options: RequestInit = {}) {
@@ -66,7 +67,7 @@ export function webExtension(apiKey = process.env.BRAVE_API_KEY ?? process.env.B
 						const keys = Object.keys(results.queries);
 						for (const key of keys.slice(0, Math.max(0, keys.length - 20))) delete results.queries[key];
 					}, context);
-					return { content: [{ type: "text", text }] };
+					return { output: [{ type: "text", text }] };
 				},
 			}),
 			defineTool({
@@ -82,7 +83,7 @@ export function webExtension(apiKey = process.env.BRAVE_API_KEY ?? process.env.B
 							? (await Defuddle(result.bytes.toString(), result.url, { markdown: true, useAsync: false }))
 									.content
 							: result.bytes.toString();
-					return { content: [{ type: "text", text: text.slice(0, 50000) }] };
+					return { output: [{ type: "text", text: text.slice(0, 50000) }] };
 				},
 			}),
 			defineTool({
@@ -92,7 +93,7 @@ export function webExtension(apiKey = process.env.BRAVE_API_KEY ?? process.env.B
 				replay: "safe",
 				async execute(args, api, context) {
 					const data = await api.snapshot(WebResults, api.conversationId, context);
-					return { content: [{ type: "text", text: data?.queries[args.query] ?? "No saved result" }] };
+					return { output: [{ type: "text", text: data?.queries[args.query] ?? "No saved result" }] };
 				},
 			}),
 		],

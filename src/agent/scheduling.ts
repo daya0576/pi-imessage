@@ -43,6 +43,7 @@ export const Schedules = defineDoc<{ items: Schedule[] }>({
 	version: 1,
 	scope: "session",
 	initial: () => ({ items: [] }),
+	checkpointWhen: () => false,
 });
 
 export const RunRequests = defineDoc<{
@@ -59,6 +60,7 @@ export const RunRequests = defineDoc<{
 	version: 1,
 	scope: "session",
 	initial: () => ({ items: [] }),
+	checkpointWhen: () => false,
 });
 
 function nextAt(schedule: Schedule, previous: number, now: number) {
@@ -164,13 +166,10 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 		phases: {
 			async sleep(task, runtime, context) {
 				const { at } = task.state.checkpoint;
-				await runtime.sleep(at, context);
+				// A sleeping task resumes this phase at the same checkpoint once it is due.
+				if (runtime.now() < at) return runtime.sleepUntil(at, task.state.checkpoint, context);
 				// Due-now work must not start between the configuration commit and registry publication.
-				if (!admissionReady) {
-					await runtime.sleep(runtime.now() + 100, context);
-					await runtime.commit(() => ({ status: "running", checkpoint: task.state.checkpoint }), context);
-					return;
-				}
+				if (!admissionReady) return runtime.sleepUntil(runtime.now() + 100, task.state.checkpoint, context);
 				await runtime.commit(async (tx) => {
 					const schedule = (await tx.doc(Schedules)).items.find((item) => item.id === task.input.jobId);
 					if (!schedule) throw new Error("Scheduled job is missing");
@@ -188,7 +187,7 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 					if (!task.input.requestId && beforeToday)
 						return { status: "running", checkpoint: { phase: "sleep", at: nextAt(schedule, at, now) } };
 					// All triggers of a job share its non-overlap boundary.
-					for (const status of ["pending", "running", "waiting", "completing"] as const) {
+					for (const status of ["pending", "running", "waiting", "sleeping", "completing"] as const) {
 						const existing = (
 							await tx.scanTasks({ conversationId: schedule.conversationId, kind: EXECUTION_KIND, status }, 1)
 						).items[0];

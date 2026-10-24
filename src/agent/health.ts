@@ -17,6 +17,7 @@ export const Sessions = defineDoc<{
 	version: 1,
 	scope: "session",
 	initial: () => ({ items: [] }),
+	checkpointWhen: () => false,
 });
 
 /** Explicit health checks reuse one tool-less conversation and never deliver to a chat. */

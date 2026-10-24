@@ -31,6 +31,7 @@ export const ScheduledOutbox = defineDoc<{
 	version: 1,
 	scope: "session",
 	initial: () => ({ items: [] }),
+	checkpointWhen: () => false,
 });
 
 export function validateSchedules(extensions: readonly WorkspaceExtension[]) {

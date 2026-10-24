@@ -38,6 +38,7 @@ export const Runs = defineDoc<{ items: RunRecord[] }>({
 	version: 1,
 	scope: "session",
 	initial: () => ({ items: [] }),
+	checkpointWhen: () => false,
 });
 
 /** Model-visible notes in the chat conversation about what happened in a run. */
@@ -143,7 +144,7 @@ export const RunExtension = defineExtension({
 					);
 					if (run) run.endReason = args.reason;
 				}, context);
-				return { content: [{ type: "text", text: "The run ends after this answer." }] };
+				return { output: [{ type: "text", text: "The run ends after this answer." }] };
 			},
 		}),
 	],

@@ -19,6 +19,7 @@ export const DirectSends = defineDoc<{ requests: DirectSendReceipt[] }>({
 	version: 1,
 	scope: "session",
 	initial: () => ({ requests: [] }),
+	checkpointWhen: () => false,
 });
 
 export async function deliverDirect(harness: Harness, input: DirectSendInput, sender: MessageSender) {

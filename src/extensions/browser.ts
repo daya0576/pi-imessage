@@ -328,7 +328,7 @@ export async function createBrowser(workingDir: string, agentDir: string) {
 				executionMode: "sequential",
 				async execute(args, api, context) {
 					return {
-						content: [{ type: "text", text: await run(api.conversationId, args, context.abortSignal) }],
+						output: [{ type: "text", text: await run(api.conversationId, args, context.abortSignal) }],
 					};
 				},
 			}),

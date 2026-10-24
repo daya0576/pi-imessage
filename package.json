@@ -34,10 +34,10 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
-		"@earendil-works/chord": "1.0.2",
-		"@earendil-works/pi-ai": "1.0.2",
-		"@earendil-works/pi-coding-agent": "1.0.2",
-		"@earendil-works/pi-durable": "1.0.2",
+		"@earendil-works/chord": "1.4.0",
+		"@earendil-works/pi-ai": "1.4.0",
+		"@earendil-works/pi-coding-agent": "1.4.0",
+		"@earendil-works/pi-durable": "1.4.0",
 		"better-sqlite3": "13.0.3",
 		"defuddle": "0.19.4",
 		"sharp": "0.35.5",

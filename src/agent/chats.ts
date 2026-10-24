@@ -15,6 +15,7 @@ export const Chats = defineDoc<{ items: { chatGuid: string; conversationId: Conv
 	version: 1,
 	scope: "session",
 	initial: () => ({ items: [] }),
+	checkpointWhen: () => false,
 });
 
 export const WatchCursor = defineDoc<{ rowid?: number }>({
@@ -22,6 +23,7 @@ export const WatchCursor = defineDoc<{ rowid?: number }>({
 	version: 1,
 	scope: "session",
 	initial: () => ({}),
+	checkpointWhen: () => false,
 });
 
 export type AgentDefaults = { model: ModelRef; thinkingLevel?: ModelThinkingLevel };

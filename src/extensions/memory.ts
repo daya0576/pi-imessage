@@ -18,7 +18,7 @@ async function memoryCli(workingDir: string, args: string[], signal?: AbortSigna
 	return stdout;
 }
 
-const text = (value: string) => ({ content: [{ type: "text" as const, text: value }] });
+const text = (value: string) => ({ output: [{ type: "text" as const, text: value }] });
 
 /** Structured memory tools; the namespace list and core memory are read when the extension is built. */
 export async function memoryExtension(workingDir: string) {

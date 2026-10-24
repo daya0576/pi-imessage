@@ -133,7 +133,7 @@ it("maps chats separately, passes source GUIDs, and sends only final text", asyn
 it("admits all busy-chat additions at the next tool boundary without repeating completed work", async () => {
 	await agent.close();
 	const lookup = vi.fn(async () => ({
-		content: [{ type: "text" as const, text: "Lookup completed: museum is open." }],
+		output: [{ type: "text" as const, text: "Lookup completed: museum is open." }],
 	}));
 	const tools = defineExtension({
 		name: "fixture",

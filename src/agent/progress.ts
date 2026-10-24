@@ -17,6 +17,8 @@ async function calledTool(harness: Harness, task: TaskRecord<JsonValue, JsonValu
 	if (task.kind !== "pi.tool") return;
 	// The registered native task owns this input shape and its branded assistant ID.
 	const input = task.input as ToolTaskInput;
+	// Nested calls belong to a parent tool; only model-issued calls get progress notices.
+	if (input.kind !== "model") return;
 	const entry = await harness.commit((tx) => tx.entry(input.assistant), BACKGROUND_CONTEXT);
 	const message = entry?.model?.[0];
 	if (message?.role !== "assistant") return;
@@ -115,7 +117,10 @@ export async function startProgress(harness: Harness, workingDir: string, sender
 				result && typeof result === "object" && "entryId" in result ? result.entryId : undefined;
 			const entry =
 				typeof entryId === "number"
-					? await harness.commit((tx) => tx.entry(entryId as ToolTaskResult["entryId"]), BACKGROUND_CONTEXT)
+					? await harness.commit(
+							(tx) => tx.entry(entryId as Extract<ToolTaskResult, { kind: "model" }>["entryId"]),
+							BACKGROUND_CONTEXT,
+						)
 					: undefined;
 			const message = entry?.model?.[0];
 			success = message?.role === "toolResult" && !message.isError;

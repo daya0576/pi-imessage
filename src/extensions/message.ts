@@ -34,7 +34,7 @@ export function messageExtension(messaging: {
 						text: args.text,
 						filePath: args.filePath,
 					});
-					return { content: [{ type: "text", text: JSON.stringify(receipt) }] };
+					return { output: [{ type: "text", text: JSON.stringify(receipt) }] };
 				},
 			}),
 		],

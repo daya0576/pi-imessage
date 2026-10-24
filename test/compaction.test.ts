@@ -108,10 +108,10 @@ it("schedules quiet native compaction, skips empty/reset chats and preserves con
 		const fixtureSource = `
 module.exports = ({ config, defineDoc, defineTask, defineExtension, ScheduledOutbox }) => {
  const version = "v1";
- const Effects = defineDoc({ kind: "fixture.effects", version: 1, scope: "session", initial: () => ({ values: [] }) });
+ const Effects = defineDoc({ kind: "fixture.effects", version: 1, scope: "session", initial: () => ({ values: [] }), checkpointWhen: () => false });
  const task = name => defineTask({ name, version: 1, initial: () => ({ phase: "work" }), phases: {
   async work(record, runtime, context) {
-   if (config.pauseUntil) await runtime.sleep(config.pauseUntil, context);
+   if (config.pauseUntil && runtime.now() < config.pauseUntil) return runtime.sleepUntil(config.pauseUntil, record.state.checkpoint, context);
    await runtime.commit(async tx => {
     (await tx.doc(Effects)).values.push(version + ":" + record.input.jobId);
     const { chatGuid, jobId, date } = record.input;
@@ -137,6 +137,7 @@ module.exports = ({ config, defineDoc, defineTask, defineExtension, ScheduledOut
 			version: 1,
 			scope: "session",
 			initial: () => ({ values: [] }),
+			checkpointWhen: () => false,
 		});
 		let now = Date.parse("2026-10-07T07:40:00");
 		vi.spyOn(Date, "now").mockImplementation(() => now);

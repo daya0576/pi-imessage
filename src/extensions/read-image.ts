@@ -23,7 +23,7 @@ export const ImageRead = defineExtension({
 				if (!api.env) throw new Error("No image filesystem");
 				const path = getOrThrow(await api.env.canonicalPath(args.path, context));
 				return {
-					content: [{ type: "text", text: imagePrefix + JSON.stringify(path) }],
+					output: [{ type: "text", text: imagePrefix + JSON.stringify(path) }],
 					details: { imagePath: path },
 				};
 			},

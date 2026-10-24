@@ -18,4 +18,5 @@ export const Deliveries = defineDoc<{
 	history: "latest",
 	fork: "initial",
 	initial: () => ({ answers: {} }),
+	checkpointWhen: () => false,
 });

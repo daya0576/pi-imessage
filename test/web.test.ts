@@ -26,7 +26,7 @@ module.exports = async ({ workingDir, config, Type, defineExtension, defineTool,
   const value = config.value + ":" + await readFile(join(workingDir, "extensions/fixture/value.txt"), "utf8");
   return defineExtension({ name: "personal-fixture", sections: [section("personal_fixture", () => value)], tools: [defineTool({
     name: "personal_echo", description: "Domain-neutral fixture", parameters: Type.Object({ text: Type.String() }), replay: "safe",
-    async execute(args) { return { content: [{ type: "text", text: value + ":" + args.text }] }; }
+    async execute(args) { return { output: [{ type: "text", text: value + ":" + args.text }] }; }
   })] });
 };
 `,

@@ -46,7 +46,7 @@ export const Subagent = defineExtension({
 				const answer = await api.commit((tx) => tx.entry(result.answer), context);
 				const message = answer?.model?.[0];
 				return {
-					content: [
+					output: [
 						{
 							type: "text",
 							text: finalReplyText(message) ?? "",

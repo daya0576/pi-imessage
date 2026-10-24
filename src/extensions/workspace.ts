@@ -45,7 +45,7 @@ export function workspaceExtension(reload: () => Promise<unknown>) {
 				parameters: Type.Object({}),
 				async execute() {
 					await reload();
-					return { content: [{ type: "text", text: "Workspace extensions and configuration reloaded." }] };
+					return { output: [{ type: "text", text: "Workspace extensions and configuration reloaded." }] };
 				},
 			}),
 		],
