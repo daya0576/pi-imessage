@@ -241,10 +241,17 @@ controller alive when the initiating agent's own turn is interrupted. For a
 launchd controller, use that job's lifecycle instead; never `launchctl kickstart -k`
 from inside the service.
 
+When the service restarts itself from a chat tool call, that call must end right
+after `open`: no `sleep`, polling or verification in the same call. Tools are
+replay-safe by default (ADR 0039), so a call still running when the controller
+stops the service reruns on every start, launches another controller and loops
+(#39). Verify in a later call.
+
 ### 4. Verify
 
-Read `controller.log`, `new.pid`, the service log and the listener first. Never
-launch the controller twice before the first outcome is known. Require:
+In a new tool call, read `controller.log`, `new.pid`, the service log and the
+listener first. Never launch the controller twice before the first outcome is
+known. Require:
 
 1. Old PID gone; exactly one new process and listener, cwd in the release
    directory.
