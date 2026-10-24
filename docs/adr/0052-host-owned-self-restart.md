@@ -1,14 +1,15 @@
 # 0052. The host owns its own restart
 
-Status: proposed (owner-requested implementation, 2026-10-24)
+Status: accepted (owner accepted on 2026-10-24)
 
 **Problem.** A chat assistant restarts the service by writing a controller
 script and running it from a `bash` tool call. The host cannot tell that this
 call is about to stop it. When the call is still running at the stop, ADR 0041
 reruns it on the next start, which launches another controller and stops the
-service again (#39: about 70 restarts in eleven minutes). ADR 0051 limits the
-damage after the fact; it does not remove the cause, and it aborts any long
-tool that two deployments happen to interrupt in a row.
+service again (#39: about 70 restarts in eleven minutes). A host-side stop
+heuristic that aborts a tool interrupted twice in a row was tried the same
+day; it limits the damage after the fact, does not remove the cause, and
+aborts any long tool that two deployments happen to interrupt in a row.
 
 **Example.**
 
@@ -46,7 +47,7 @@ listener, the log and the running release directory.
 **Consequences.** A self-restart costs one restart and no extra model turn.
 The stop still happens at a tool boundary of the requesting chat, so that chat's
 next model request is repeated after the restart, as ADR 0041 accepts. The
-restart loop of #39 cannot recur through this tool; ADR 0051 is no longer
-needed for it and becomes a decision about long tools only. A chat that writes
+restart loop of #39 cannot recur through this tool, so the stop heuristic is
+removed and ADR 0041 applies unchanged to every other tool. A chat that writes
 its own controller through `bash` is still subject to the ops rule of ending
 the call right after `open`.

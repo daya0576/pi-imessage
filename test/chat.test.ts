@@ -797,61 +797,8 @@ it("uses supplied agent configuration and releases ownership after startup failu
 	expect(faux.state.callCount).toBe(0);
 });
 
-// #39: a tool running at the stop reruns once; at the second stop in a row it is aborted (ADR 0051).
 // #33 Phase 1: shutting down must cancel active model work before releasing ownership.
-it("closes during tool and model execution, rerunning the tool once and never sending an answer", async () => {
-	let runs = 0;
-	let toolStarted = Promise.withResolvers<void>();
-	const blocking = defineExtension({
-		name: "blocking",
-		tools: [
-			defineTool({
-				name: "block",
-				description: "Run until aborted",
-				parameters: Type.Object({}),
-				execute: async (_args, _api, context) => {
-					runs++;
-					toolStarted.resolve();
-					await new Promise<never>((_resolve, reject) => {
-						context.abortSignal?.addEventListener("abort", () => reject(new Error("aborted")), {
-							once: true,
-						});
-					});
-					return { output: [] };
-				},
-			}),
-		],
-	});
-	await agent.close();
-	options.extensions = () => [blocking];
-	agent = await startService(options);
-	let toolResult: TranscriptContext["messages"][number] | undefined;
-	faux.setResponses([
-		fauxAssistantMessage(fauxToolCall("block", {}), { stopReason: "toolUse" }),
-		(context) => {
-			toolResult = context.messages.findLast((message) => message.role === "toolResult");
-			return fauxAssistantMessage("after the stop");
-		},
-	]);
-	await agent.submit({ chatGuid: "chat", guid: "tool", text: "block" });
-	await toolStarted.promise;
-	await agent.close();
-	toolStarted = Promise.withResolvers<void>();
-	agent = await startService(options);
-	// The service resumes recovery itself; a bare agent resumes on its first wait.
-	void agent.harness.waitForIdle(BACKGROUND_CONTEXT).catch(() => {});
-	await toolStarted.promise;
-	expect(runs).toBe(2);
-	await agent.close();
-	agent = await startService(options);
-	await agent.harness.waitForIdle(BACKGROUND_CONTEXT);
-	expect(faux.state.callCount).toBe(2);
-	await agent.deliver();
-	expect(textCalls()).toEqual([["chat", "after the stop"]]);
-	expect(runs).toBe(2);
-	expect(toolResult).toMatchObject({ role: "toolResult", isError: true });
-	expect(JSON.stringify(toolResult)).toContain("was aborted");
-
+it("closes during model execution without waiting for a final answer or sending one", async () => {
 	const started = Promise.withResolvers<void>();
 	const gate = Promise.withResolvers<void>();
 	let signal: AbortSignal | undefined;
@@ -870,7 +817,7 @@ it("closes during tool and model execution, rerunning the tool once and never se
 		await agent.close();
 		expect(signal?.aborted).toBe(true);
 		await expect(access(join(directory, "durable", "owner.lock"))).rejects.toMatchObject({ code: "ENOENT" });
-		expect(send).toHaveBeenCalledTimes(1);
+		expect(send).not.toHaveBeenCalled();
 	} finally {
 		gate.resolve();
 	}
