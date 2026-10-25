@@ -8,6 +8,7 @@ import type {
 	TaskId,
 	TaskRecord,
 } from "@earendil-works/pi-durable";
+import { UserEntry } from "@earendil-works/pi-durable";
 import { displayHistory, historyActivity } from "./history.ts";
 
 /** Newest tasks listed per conversation; older finished ones are only flagged. */
@@ -20,8 +21,8 @@ type Summary = TaskRecord<unknown, unknown, unknown>;
  * conversation, their parent chains and the newest tasks of each conversation. Descending scans stop at the
  * window instead of reading the whole task history (earendil-works/pi#10546).
  *
- * A generation `continues` the previous generation of its conversation when no user message was recorded
- * between them: the agent loop ran tools and generated again, so the browser chains them into one turn.
+ * A generation `continues` the previous generation of its conversation when no user message (a `pi.user`
+ * entry; sent-message run records also carry the user role) was recorded between them: the agent loop ran tools and generated again, so the browser chains them into one turn.
  * Entries and tasks share one id sequence, which makes that ordering exact.
  */
 export function readTaskTree(harness: Harness) {
@@ -37,9 +38,7 @@ export function readTaskTree(harness: Harness) {
 				const history = await tx.scanEntries({ conversationId: conversation.id }, 100);
 				const { groupName } = displayHistory(history, 1);
 				userEntries.set(conversation.id, {
-					ids: history.items
-						.filter((entry) => entry.model?.some((message) => message.role === "user"))
-						.map((entry) => Number(entry.id)),
+					ids: history.items.filter((entry) => UserEntry.is(entry)).map((entry) => Number(entry.id)),
 					oldest: history.next ? Math.min(...history.items.map((entry) => Number(entry.id))) : 0,
 				});
 				conversations.push({
