@@ -615,7 +615,6 @@ function renderScheduled() {
 
 function renderTasks() {
 	view.replaceChildren();
-	const children = new Map();
 	const conversations = new Map(data.conversations.map((conversation) => [conversation.id, conversation]));
 	const chatNames = new Map(
 		(data.chats?.items || []).map((chat) => [
@@ -623,106 +622,157 @@ function renderTasks() {
 			chatName({ ...chat, history: { groupName: conversations.get(chat.conversationId)?.groupName } }, []),
 		]),
 	);
-	const conversationNames = new Map(chatNames);
 	const scheduleNames = new Map((data.schedules?.items || []).map((job) => [job.conversationId, job.name]));
-	for (const [id, name] of scheduleNames) conversationNames.set(id, name);
-	for (const session of data.sessions?.items || []) {
-		if (!conversationNames.has(session.conversationId))
-			conversationNames.set(session.conversationId, session.label);
-	}
-	function conversationName(id) {
-		const name = conversationNames.get(id);
-		if (name) return name;
+	const sessionNames = new Map(
+		(data.sessions?.items || []).map((session) => [session.conversationId, session.label]),
+	);
+	// Every conversation is named by the session document that created it, or by the task that owns it.
+	function source(id) {
+		if (chatNames.has(id)) return { name: `chat ${chatNames.get(id)}`, doc: "imessage.chats" };
+		if (scheduleNames.has(id))
+			return { name: `schedule ${scheduleNames.get(id)}`, doc: "imessage.schedules" };
+		if (sessionNames.has(id)) return { name: `session ${sessionNames.get(id)}`, doc: "imessage.sessions" };
 		const owner = conversations.get(id)?.owner;
-		if (!owner) return "";
-		const parentName = conversationName(owner.conversationId);
-		return parentName ? `${parentName} / subagent` : "subagent";
+		return owner ? { name: "subagent", doc: `owner Tool #${owner.taskId}` } : { name: "", doc: "" };
 	}
 	function belongsToChat(id) {
 		if (chatNames.has(id) || scheduleNames.has(id)) return true;
 		const owner = conversations.get(id)?.owner;
 		return owner ? belongsToChat(owner.conversationId) : false;
 	}
-	for (const conversation of data.conversations.toSorted(compareConversations)) {
-		const key = conversation.owner ? `task-${conversation.owner.taskId}` : "root";
+	// Children by storage relation: conversations under their owner task, tasks under their owner task or
+	// conversation, entries under the task that wrote them (byTaskId). A pi.user entry opens a turn: the
+	// later root tasks and loose entries of its conversation nest under it until the next one.
+	const children = new Map();
+	const add = (key, node) => {
 		if (!children.has(key)) children.set(key, []);
-		children.get(key).push({ type: "conversation", ...conversation });
-	}
-	// A generation that continues the previous one (tools ran, no new user message) chains under it, so one
-	// turn reads top-down as generation, tools, generation, until the final answer.
+		children.get(key).push(node);
+	};
 	const taskIds = new Set(data.tasks.map((task) => task.id));
-	for (const task of data.tasks) {
-		const parent = task.continues !== undefined && taskIds.has(task.continues) ? task.continues : task.owner;
-		const key = parent === undefined ? `conversation-${task.conversationId}` : `task-${parent}`;
-		if (!children.has(key)) children.set(key, []);
-		children.get(key).push({ type: "task", ...task });
+	for (const conversation of data.conversations) {
+		if (conversation.owner)
+			add(`task-${conversation.owner.taskId}`, { type: "conversation", ...conversation });
 	}
-	// Chains read chronologically; the turns of a conversation stay newest first.
-	for (const [key, nodes] of children) {
-		if (key.startsWith("conversation-")) nodes.sort((left, right) => right.id - left.id);
-		else nodes.sort((left, right) => left.id - right.id);
+	const turns = new Map();
+	for (const entry of data.entries || []) {
+		if (entry.kind !== "pi.user") continue;
+		if (!turns.has(entry.conversationId)) turns.set(entry.conversationId, []);
+		turns.get(entry.conversationId).push(entry.id);
+	}
+	// Entries arrive newest first; a turn lookup needs ascending ids.
+	for (const ids of turns.values()) ids.sort((left, right) => left - right);
+	function turnKey(conversationId, id) {
+		const opened = (turns.get(conversationId) || []).filter((turn) => turn < id).at(-1);
+		return opened === undefined ? `conversation-${conversationId}` : `entry-${opened}`;
+	}
+	for (const task of data.tasks) {
+		add(task.owner === undefined ? turnKey(task.conversationId, task.id) : `task-${task.owner}`, {
+			type: "task",
+			...task,
+		});
+	}
+	for (const entry of data.entries || []) {
+		if (entry.kind === "pi.user") add(`conversation-${entry.conversationId}`, { type: "entry", ...entry });
+		else if (entry.byTaskId !== undefined && taskIds.has(entry.byTaskId))
+			add(`task-${entry.byTaskId}`, { type: "entry", ...entry });
+		else add(turnKey(entry.conversationId, entry.id), { type: "entry", ...entry });
+	}
+	// Records read in storage order; conversation cards are sorted by activity below.
+	for (const nodes of children.values()) nodes.sort((left, right) => left.id - right.id);
+	function lazyDetails(summary, url) {
+		const detail = element("details");
+		const content = element("pre", "Loading latest state...");
+		detail.append(summary, content);
+		let loaded = false;
+		detail.addEventListener("toggle", async () => {
+			if (!detail.open || loaded) return;
+			loaded = true;
+			try {
+				content.textContent = JSON.stringify(await fetchData(url), null, 2);
+			} catch (error) {
+				loaded = false;
+				content.textContent = error.message;
+			}
+		});
+		return detail;
+	}
+	function taskSummary(node) {
+		const label =
+			node.kind === "pi.generation"
+				? `Generation #${node.id}`
+				: node.kind === "pi.tool"
+					? `Tool ${node.name || "?"} #${node.id}`
+					: `${node.kind} #${node.id}`;
+		const summary = element("summary", label);
+		const state = node.outcome ? [node.outcome] : [node.status, node.phase].filter(Boolean);
+		const waiting = node.on?.length ? ` on [${node.on.join(", ")}]` : "";
+		const sleeping =
+			typeof node.until === "number" ? ` until ${new Date(node.until).toLocaleString("sv-SE")}` : "";
+		const flags = `${node.background ? " [background]" : ""}${node.abortRequested ? " [abort requested]" : ""}`;
+		summary.append(element("span", `  [${state.join(" / ")}]${waiting}${sleeping}${flags}`, "meta"));
+		return summary;
+	}
+	function entrySummary(node) {
+		const summary = element("summary", `~ #${node.id} ${node.kind.replace(/^pi\./, "")}`);
+		if (node.text) summary.append(element("span", `  "${node.text}"`, "entry-text"));
+		return summary;
 	}
 	function renderNode(node) {
 		const item = element("li");
 		const key = `${node.type}-${node.id}`;
 		item.id = `tree-${key}`;
 		if (node.type === "conversation") {
-			const heading = element("span", `Conversation #${node.id}`);
-			const name = conversationName(node.id);
-			if (name) heading.append(element("span", ` / ${name}  `, "meta"));
-			if (chatNames.has(node.id)) {
-				heading.append(link("Chat", `/chat?conversationId=${node.id}`, "meta"));
-			}
-			item.append(heading);
-		} else {
-			const detail = element("details");
+			const { name, doc } = source(node.id);
+			// A card is one conversation; a conversation owned by a task folds under it.
+			const heading = element(node.owner ? "summary" : "span", `Conversation #${node.id}`);
+			if (name) heading.append(element("span", `  ${name}`));
+			if (doc) heading.append(element("span", `  <- ${doc}`, "meta"));
+			if (chatNames.has(node.id))
+				heading.append(element("span", "  "), link("Chat", `/chat?conversationId=${node.id}`, "meta"));
+			if (node.owner) {
+				const detail = element("details");
+				detail.id = key;
+				detail.append(heading);
+				item.append(detail);
+			} else item.append(heading);
+		} else if (node.type === "task") {
+			const detail = lazyDetails(taskSummary(node), `/tasks/task/data?taskId=${node.id}`);
 			detail.id = key;
-			const summary = element(
-				"summary",
-				`${node.continues !== undefined ? "> " : ""}${node.kind}${node.name ? `: ${node.name}` : ""} #${node.id}`,
-			);
-			const status = [node.status, node.phase, node.outcome].filter(Boolean).join(" / ");
-			const waiting = node.on?.length ? ` on [${node.on.join(", ")}]` : "";
-			const flags = `${node.background ? " [background]" : ""}${node.abortRequested ? " [abort requested]" : ""}`;
-			summary.append(element("span", `  ${status}${waiting}${flags}`, "meta"));
-			const content = element("pre", "Loading latest state...");
-			detail.append(summary, content);
-			let loaded = false;
-			detail.addEventListener("toggle", async () => {
-				if (!detail.open || loaded) return;
-				loaded = true;
-				try {
-					const task = await fetchData(`/tasks/task/data?taskId=${node.id}`);
-					content.textContent = JSON.stringify(task, null, 2);
-				} catch (error) {
-					loaded = false;
-					content.textContent = error.message;
-				}
-			});
+			item.append(detail);
+		} else {
+			item.className = node.kind === "pi.user" ? "entry turn" : "entry";
+			const detail = lazyDetails(entrySummary(node), `/tasks/entry/data?entryId=${node.id}`);
+			detail.id = key;
 			item.append(detail);
 		}
 		const descendants = children.get(key) || [];
 		const more = node.type === "conversation" && data.more?.[node.id];
 		if (descendants.length || more) {
 			const list = element("ul", undefined, "task-tree");
+			if (more) list.append(element("li", "older turns not listed", "meta"));
 			for (const child of descendants) list.append(renderNode(child));
-			if (more) list.append(element("li", "older tasks not listed", "meta"));
-			item.append(list);
+			(node.type === "conversation" && node.owner ? item.firstChild : item).append(list);
 		}
 		return item;
 	}
 	const roots = conversationId
-		? data.conversations
-				.filter((conversation) => String(conversation.id) === conversationId)
-				.map((conversation) => ({ type: "conversation", ...conversation }))
-		: children.get("root") || [];
+		? data.conversations.filter((conversation) => String(conversation.id) === conversationId)
+		: data.conversations.filter((conversation) => !conversation.owner);
 	const visible = roots.filter((conversation) => belongsToChat(conversation.id));
+	if (!conversationId && data.session)
+		view.append(
+			element(
+				"p",
+				`Session ${data.session}  docs: imessage.chats, imessage.schedules, imessage.sessions`,
+				"muted",
+			),
+		);
 	if (!visible.length) view.append(element("p", "No conversations.", "empty"));
 	for (const conversation of visible.toSorted(compareConversations)) {
 		const card = element("section", undefined, "card");
 		card.id = `tasks-${conversation.id}`;
 		const list = element("ul", undefined, "task-tree task-root");
-		list.append(renderNode(conversation));
+		list.append(renderNode({ type: "conversation", ...conversation }));
 		card.append(list);
 		view.append(card);
 	}

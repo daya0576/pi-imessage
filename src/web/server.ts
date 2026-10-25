@@ -8,6 +8,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import {
 	type ConversationId,
 	type Cursor,
+	type EntryId,
 	type Harness,
 	LiveDoc,
 	type TaskId,
@@ -320,9 +321,18 @@ export async function startWeb(options: {
 				schedules: await options.agent.harness.snapshot(Schedules, BACKGROUND_CONTEXT),
 				chats: await options.agent.harness.snapshot(Chats, BACKGROUND_CONTEXT),
 				sessions: await options.agent.harness.snapshot(Sessions, BACKGROUND_CONTEXT),
+				session: join(options.workingDir, "durable"),
 				revision: viewRevision(),
 			};
 			compact = true;
+		} else if (url.pathname === "/tasks/entry/data") {
+			const id = url.searchParams.get("entryId");
+			if (!id || !/^\d+$/.test(id) || !Number.isSafeInteger(Number(id))) throw new Error("Invalid entry ID");
+			value = await options.agent.harness.commit((tx) => tx.entry(Number(id) as EntryId), BACKGROUND_CONTEXT);
+			if (!value) {
+				await json(response, 404, { error: "Entry not found" });
+				return;
+			}
 		} else if (url.pathname === "/tasks/task/data") {
 			const id = url.searchParams.get("taskId");
 			if (!id || !/^\d+$/.test(id) || !Number.isSafeInteger(Number(id))) throw new Error("Invalid task ID");

@@ -439,6 +439,20 @@ body.page-logs .native-state {
 	padding: 8px 0 8px 16px;
 }
 
+/* Entries are history records, not work: dimmer, no tree branch of their own. */
+.task-tree li.entry > details > summary {
+	opacity: 0.6;
+	list-style: none;
+}
+
+.task-tree li.entry.turn > details > summary {
+	opacity: 1;
+}
+
+.entry-text {
+	opacity: 0.7;
+}
+
 .schedule-row {
 	background: var(--surface);
 	margin-bottom: 6px;
