@@ -34,6 +34,7 @@ Accepted ADR files are never edited; this index records which ones are current.
 | [0048](0048-quiet-attachment-reads.md) | Quiet attachment reads | Proposed; owner-requested implementation in #38 |
 | [0049](0049-per-chat-progress-notices.md) | Per-chat progress notices via `/verbose` | Proposed; owner-requested implementation |
 | [0052](0052-host-owned-self-restart.md) | The host owns its own restart (`restart_service`) | Active; owner accepted on 2026-10-24 (#39) |
+| [0053](0053-service-log-errors.md) | Service-log errors for failures that break normal operation | Proposed; first kind (model call failed) implemented |
 
 ## Replaced or rejected
 

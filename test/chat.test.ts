@@ -52,6 +52,7 @@ beforeEach(async () => {
 	send.mockReset().mockResolvedValue(undefined);
 	sendAttachment.mockReset().mockResolvedValue(undefined);
 	vi.spyOn(console, "warn").mockImplementation(() => {});
+	vi.spyOn(console, "error").mockImplementation(() => {});
 	options = {
 		workingDir: directory,
 		agentDir: join(directory, "agent"),
@@ -316,10 +317,10 @@ it("retains a held draft after reconciliation fails and the service reopens", as
 		expect(send).not.toHaveBeenCalled();
 		finish.resolve();
 		expect(await second.wait(BACKGROUND_CONTEXT)).toMatchObject({ status: "unanswered" });
-		// The model error reaches the service log with its provider and model; Durable records alone are not visible.
-		expect(console.warn).toHaveBeenCalledWith(
+		// ADR 0053: the model error reaches the service log with its provider and model.
+		expect(console.error).toHaveBeenCalledWith(
 			expect.any(String),
-			"Generation failed",
+			"Model call failed",
 			expect.objectContaining({
 				conversation: first.conversationId,
 				provider: faux.getModel().provider,

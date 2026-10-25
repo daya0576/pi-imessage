@@ -7,10 +7,12 @@ const failedAssistant = (message: Message): message is AssistantMessage =>
 	message.role === "assistant" && message.stopReason === "error";
 
 /**
- * Write every failed model generation to the service log. Durable keeps the error only in records,
- * so without this a provider outage or exhausted quota leaves stdout silent while the host looks healthy.
+ * Service-log error lines for failures that break normal operation (ADR 0053). Durable keeps a failed
+ * task only in its records, so without this an exhausted provider quota leaves stdout silent while the
+ * process, port and HTTP checks look healthy. Each error kind is one branch here; the first is a model
+ * call that ends failed, which leaves the chat or scheduled job without the answer it was waiting for.
  */
-export function logGenerationFailures(harness: Harness) {
+export function logErrors(harness: Harness) {
 	return harness.subscribeCommits(({ changes }: CommitPublication) => {
 		for (const change of changes) {
 			if (change.type !== "task" || change.value.kind !== "pi.generation") continue;
@@ -26,7 +28,8 @@ export function logGenerationFailures(harness: Harness) {
 						: [],
 				)
 				.find(failedAssistant);
-			console.warn(new Date().toISOString(), "Generation failed", {
+			console.error(new Date().toISOString(), "Model call failed", {
+				kind: task.kind,
 				task: task.id,
 				conversation: task.conversationId,
 				status: outcome.status,
