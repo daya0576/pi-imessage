@@ -677,8 +677,11 @@ function renderTasks() {
 			add(`task-${entry.byTaskId}`, { type: "entry", ...entry });
 		else add(turnKey(entry.conversationId, entry.id), { type: "entry", ...entry });
 	}
-	// Records read in storage order; conversation cards are sorted by activity below.
-	for (const nodes of children.values()) nodes.sort((left, right) => left.id - right.id);
+	// Newest turn first in a card; inside a turn the chain reads in storage order. Cards are sorted by activity.
+	for (const [key, nodes] of children) {
+		if (key.startsWith("conversation-")) nodes.sort((left, right) => right.id - left.id);
+		else nodes.sort((left, right) => left.id - right.id);
+	}
 	function lazyDetails(summary, url) {
 		const detail = element("details");
 		const content = element("pre", "Loading latest state...");
@@ -749,8 +752,8 @@ function renderTasks() {
 		const more = node.type === "conversation" && data.more?.[node.id];
 		if (descendants.length || more) {
 			const list = element("ul", undefined, "task-tree");
-			if (more) list.append(element("li", "older turns not listed", "meta"));
 			for (const child of descendants) list.append(renderNode(child));
+			if (more) list.append(element("li", "older turns not listed", "meta"));
 			(node.type === "conversation" && node.owner ? item.firstChild : item).append(list);
 		}
 		return item;
