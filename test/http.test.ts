@@ -505,6 +505,13 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 			expect(updatedTree.tasks).toContainEqual(
 				expect.objectContaining({ id: subagent.id, status: "terminal" }),
 			);
+			// The answer after the tool call chains to the generation that called it; the first does not.
+			expect(updatedTree.tasks).toContainEqual(
+				expect.objectContaining({ conversationId, kind: "pi.generation", continues: subagent.owner }),
+			);
+			expect(updatedTree.tasks.find((task: { id: number }) => task.id === subagent.owner).continues).toBe(
+				undefined,
+			);
 		} finally {
 			releaseChild.resolve();
 		}

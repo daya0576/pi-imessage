@@ -648,10 +648,19 @@ function renderTasks() {
 		if (!children.has(key)) children.set(key, []);
 		children.get(key).push({ type: "conversation", ...conversation });
 	}
+	// A generation that continues the previous one (tools ran, no new user message) chains under it, so one
+	// turn reads top-down as generation, tools, generation, until the final answer.
+	const taskIds = new Set(data.tasks.map((task) => task.id));
 	for (const task of data.tasks) {
-		const key = task.owner === undefined ? `conversation-${task.conversationId}` : `task-${task.owner}`;
+		const parent = task.continues !== undefined && taskIds.has(task.continues) ? task.continues : task.owner;
+		const key = parent === undefined ? `conversation-${task.conversationId}` : `task-${parent}`;
 		if (!children.has(key)) children.set(key, []);
 		children.get(key).push({ type: "task", ...task });
+	}
+	// Chains read chronologically; the turns of a conversation stay newest first.
+	for (const [key, nodes] of children) {
+		if (key.startsWith("conversation-")) nodes.sort((left, right) => right.id - left.id);
+		else nodes.sort((left, right) => left.id - right.id);
 	}
 	function renderNode(node) {
 		const item = element("li");
@@ -668,7 +677,10 @@ function renderTasks() {
 		} else {
 			const detail = element("details");
 			detail.id = key;
-			const summary = element("summary", `${node.kind}${node.name ? `: ${node.name}` : ""} #${node.id}`);
+			const summary = element(
+				"summary",
+				`${node.continues !== undefined ? "> " : ""}${node.kind}${node.name ? `: ${node.name}` : ""} #${node.id}`,
+			);
 			const status = [node.status, node.phase, node.outcome].filter(Boolean).join(" / ");
 			const waiting = node.on?.length ? ` on [${node.on.join(", ")}]` : "";
 			const flags = `${node.background ? " [background]" : ""}${node.abortRequested ? " [abort requested]" : ""}`;

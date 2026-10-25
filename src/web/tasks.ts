@@ -19,18 +19,29 @@ type Summary = TaskRecord<unknown, unknown, unknown>;
  * Read one consistent tree, newest first: all conversations, every unfinished task, every task that owns a
  * conversation, their parent chains and the newest tasks of each conversation. Descending scans stop at the
  * window instead of reading the whole task history (earendil-works/pi#10546).
+ *
+ * A generation `continues` the previous generation of its conversation when no user message was recorded
+ * between them: the agent loop ran tools and generated again, so the browser chains them into one turn.
+ * Entries and tasks share one id sequence, which makes that ordering exact.
  */
 export function readTaskTree(harness: Harness) {
 	return harness.commit(async (tx) => {
 		const conversations: (ConversationRecord & { updatedAt: number; groupName?: string })[] = [];
 		const kept = new Map<TaskId, Summary>();
 		const more: Record<string, true> = {};
+		const userEntries = new Map<ConversationRecord["id"], { ids: number[]; oldest: number }>();
 		let cursor: Cursor | undefined;
 		do {
 			const page = await tx.scanConversations({}, 100, cursor);
 			for (const conversation of page.items) {
 				const history = await tx.scanEntries({ conversationId: conversation.id }, 100);
 				const { groupName } = displayHistory(history, 1);
+				userEntries.set(conversation.id, {
+					ids: history.items
+						.filter((entry) => entry.model?.some((message) => message.role === "user"))
+						.map((entry) => Number(entry.id)),
+					oldest: history.next ? Math.min(...history.items.map((entry) => Number(entry.id))) : 0,
+				});
 				conversations.push({
 					...conversation,
 					updatedAt: historyActivity(history),
@@ -66,6 +77,21 @@ export function readTaskTree(harness: Harness) {
 				kept.set(parent.id, parent);
 			}
 		}
+		const continues = new Map<TaskId, TaskId>();
+		const previousGeneration = new Map<ConversationRecord["id"], TaskId>();
+		for (const task of [...kept.values()].sort((a, b) => Number(a.id) - Number(b.id))) {
+			if (task.kind !== "pi.generation" || task.owner !== undefined) continue;
+			const previous = previousGeneration.get(task.conversationId);
+			const entries = userEntries.get(task.conversationId);
+			if (
+				previous !== undefined &&
+				entries &&
+				Number(previous) >= entries.oldest &&
+				!entries.ids.some((id) => id > Number(previous) && id < Number(task.id))
+			)
+				continues.set(task.id, previous);
+			previousGeneration.set(task.conversationId, task.id);
+		}
 		const assistants = new Map<EntryId, EntryRecord | undefined>();
 		const tasks = [];
 		for (const task of [...kept.values()].sort((a, b) => Number(b.id) - Number(a.id))) {
@@ -88,6 +114,7 @@ export function readTaskTree(harness: Harness) {
 				id: task.id,
 				conversationId: task.conversationId,
 				owner: task.owner,
+				continues: continues.get(task.id),
 				kind: task.kind,
 				name,
 				background: task.background,
