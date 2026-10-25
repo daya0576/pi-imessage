@@ -316,6 +316,17 @@ it("retains a held draft after reconciliation fails and the service reopens", as
 		expect(send).not.toHaveBeenCalled();
 		finish.resolve();
 		expect(await second.wait(BACKGROUND_CONTEXT)).toMatchObject({ status: "unanswered" });
+		// The model error reaches the service log with its provider and model; Durable records alone are not visible.
+		expect(console.warn).toHaveBeenCalledWith(
+			expect.any(String),
+			"Generation failed",
+			expect.objectContaining({
+				conversation: first.conversationId,
+				provider: faux.getModel().provider,
+				model: faux.getModel().id,
+				reason: "invalid input",
+			}),
+		);
 		await agent.close();
 		agent = await startService(options);
 		await agent.deliver();

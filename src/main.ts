@@ -15,6 +15,7 @@ import { compactionReply, isCommand, runCommand } from "./agent/commands.ts";
 import { compactChats } from "./agent/compaction.ts";
 import { deliverReplies, recoverSending, type SendText } from "./agent/deliver.ts";
 import { type DirectSendInput, deliverDirect } from "./agent/direct-send.ts";
+import { logGenerationFailures } from "./agent/generation-log.ts";
 import { openHarness } from "./agent/harness.ts";
 import { submitHealth } from "./agent/health.ts";
 import { openModels, readDefaults, requestSettings, withModelPolicy } from "./agent/models.ts";
@@ -130,6 +131,7 @@ export async function startService(
 	const { harness, storage } = owner;
 	const scheduling = schedulingExtension(harness, defaults);
 	let progress: Awaited<ReturnType<typeof startProgress>>;
+	const stopGenerationLog = logGenerationFailures(harness);
 	try {
 		// The native owner lock is acquired before cleaning up browsers left by a previous process.
 		await browser.close();
@@ -447,6 +449,7 @@ export async function startService(
 			closing ??= (async () => {
 				await Promise.allSettled([...operations]);
 				await progress.close();
+				stopGenerationLog();
 				await owner.close(browser.close);
 			})();
 			return closing;
