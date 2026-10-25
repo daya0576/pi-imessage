@@ -633,7 +633,7 @@ function renderTasks() {
 			return { name: `schedule ${scheduleNames.get(id)}`, doc: "imessage.schedules" };
 		if (sessionNames.has(id)) return { name: `session ${sessionNames.get(id)}`, doc: "imessage.sessions" };
 		const owner = conversations.get(id)?.owner;
-		return owner ? { name: "subagent", doc: `owner Tool #${owner.taskId}` } : { name: "", doc: "" };
+		return owner ? { name: "subagent", doc: "owned by a tool" } : { name: "", doc: "" };
 	}
 	function belongsToChat(id) {
 		if (chatNames.has(id) || scheduleNames.has(id)) return true;
@@ -702,13 +702,13 @@ function renderTasks() {
 	function taskSummary(node) {
 		const label =
 			node.kind === "pi.generation"
-				? `Generation #${node.id}`
+				? "Generation"
 				: node.kind === "pi.tool"
-					? `Tool ${node.name || "?"} #${node.id}`
-					: `${node.kind} #${node.id}`;
+					? `Tool ${node.name || "?"}`
+					: node.kind;
 		const summary = element("summary", label);
 		const state = node.outcome ? [node.outcome] : [node.status, node.phase].filter(Boolean);
-		const waiting = node.on?.length ? ` on [${node.on.join(", ")}]` : "";
+		const waiting = node.on?.length ? ` on ${node.on.length} task${node.on.length === 1 ? "" : "s"}` : "";
 		const sleeping =
 			typeof node.until === "number" ? ` until ${new Date(node.until).toLocaleString("sv-SE")}` : "";
 		const flags = `${node.background ? " [background]" : ""}${node.abortRequested ? " [abort requested]" : ""}`;
@@ -716,7 +716,7 @@ function renderTasks() {
 		return summary;
 	}
 	function entrySummary(node) {
-		const summary = element("summary", `#${node.id} ${node.kind.replace(/^pi\./, "")}`);
+		const summary = element("summary", node.kind.replace(/^pi\./, ""));
 		if (node.text) summary.append(element("span", `  "${node.text}"`, "entry-text"));
 		return summary;
 	}
@@ -727,7 +727,7 @@ function renderTasks() {
 		if (node.type === "conversation") {
 			const { name, doc } = source(node.id);
 			// A card is one conversation; a conversation owned by a task folds under it.
-			const heading = element(node.owner ? "summary" : "span", `Conversation #${node.id}`);
+			const heading = element(node.owner ? "summary" : "span", "Conversation");
 			if (name) heading.append(element("span", `  ${name}`));
 			if (doc) heading.append(element("span", `  <- ${doc}`, "meta"));
 			if (chatNames.has(node.id))
