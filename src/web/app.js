@@ -716,7 +716,7 @@ function renderTasks() {
 		return summary;
 	}
 	function entrySummary(node) {
-		const summary = element("summary", `~ #${node.id} ${node.kind.replace(/^pi\./, "")}`);
+		const summary = element("summary", `#${node.id} ${node.kind.replace(/^pi\./, "")}`);
 		if (node.text) summary.append(element("span", `  "${node.text}"`, "entry-text"));
 		return summary;
 	}
