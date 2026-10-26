@@ -128,6 +128,11 @@ it("automatically routes DM, group and SMS, archives attachments and logs disabl
 	database.prepare("UPDATE message SET thread_originator_guid='dm' WHERE ROWID=?").run(group);
 	database.prepare("INSERT INTO attachment VALUES (?)").run(source);
 	database.prepare("INSERT INTO message_attachment_join VALUES (?,1)").run(group);
+	// A deleted link-preview payload is skipped instead of holding the row.
+	database
+		.prepare("INSERT INTO attachment VALUES (?)")
+		.run(join(directory, "preview.pluginPayloadAttachment"));
+	database.prepare("INSERT INTO message_attachment_join VALUES (?,2)").run(group);
 	const sms = insert("sms", null, 3);
 	// Small attributedBody fixture for the legacy NSString decoder.
 	database
@@ -155,7 +160,10 @@ it("automatically routes DM, group and SMS, archives attachments and logs disabl
 	expect(prompts).toContain("[SMS from sender] third");
 	expect(prompts).not.toContain("logged only");
 	expect(prompts).not.toContain(source);
-	expect(prompts).toContain(join(directory, "attachments", encodeURIComponent("iMessage;+;group")));
+	const archive = join(directory, "attachments", encodeURIComponent("iMessage;+;group"));
+	expect(prompts).toContain(archive);
+	expect(await readdir(archive)).toHaveLength(1);
+	expect(onError).not.toHaveBeenCalled();
 	const chats = await service.harness.snapshot(Chats, BACKGROUND_CONTEXT);
 	const disabled = chats?.items.find((chat) => chat.chatGuid === "disabled");
 	if (!disabled) throw new Error("Missing logged chat");
