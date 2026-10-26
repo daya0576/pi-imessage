@@ -22,12 +22,13 @@ it("searches and fetches through native tools without sharing cached results acr
 			`
 const { readFile } = require("node:fs/promises");
 const { join } = require("node:path");
-module.exports = async ({ workingDir, config, Type, defineExtension, defineTool, section }) => {
+module.exports = async ({ workingDir, config, Type, defineExtension, defineTool, section, hook, GenerationTask }) => {
   const value = config.value + ":" + await readFile(join(workingDir, "extensions/fixture/value.txt"), "utf8");
   return defineExtension({ name: "personal-fixture", sections: [section("personal_fixture", () => value)], tools: [defineTool({
     name: "personal_echo", description: "Domain-neutral fixture", parameters: Type.Object({ text: Type.String() }), replay: "safe",
     async execute(args) { return { output: [{ type: "text", text: value + ":" + args.text }] }; }
-  })] });
+  })], hooks: [hook(GenerationTask, { beforeRequest: (request) => ({ messages: request.messages.map((message) =>
+    message.role === "user" && typeof message.content === "string" ? { ...message, content: message.content + " [trailer " + config.value + "]" } : message) }) })] });
 };
 `,
 		);
@@ -128,6 +129,10 @@ module.exports = async ({ workingDir, config, Type, defineExtension, defineTool,
 					expect(
 						JSON.stringify(context.messages.findLast((message) => message.role === "toolResult")),
 					).toContain(`config-${version}:private fixture ${version}:${version === "v2" ? "HELLO" : "hello"}`);
+					// A workspace generation hook rewrites the request only; the stored user entry stays as written.
+					expect(context.messages.findLast((message) => message.role === "user")?.content).toBe(
+						`Use fixture personal tool [trailer config-${version}]`,
+					);
 					return fauxAssistantMessage("Personal tool completed");
 				},
 			]);

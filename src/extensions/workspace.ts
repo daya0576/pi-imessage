@@ -8,6 +8,8 @@ import {
 	defineExtension,
 	defineTask,
 	defineTool,
+	GenerationTask,
+	hook,
 	section,
 } from "@earendil-works/pi-durable";
 import {
@@ -31,6 +33,9 @@ export type WorkspaceExtensionContext = {
 	configure: typeof configure;
 	ScheduledOutbox: typeof ScheduledOutbox;
 	section: typeof section;
+	/** Generation hooks, for example a per-request trailer on user messages. */
+	hook: typeof hook;
+	GenerationTask: typeof GenerationTask;
 };
 
 /** A chat assistant can apply its own workspace changes through the existing host owner. */
@@ -96,6 +101,8 @@ export async function loadWorkspaceExtensions(workingDir: string) {
 			configure,
 			ScheduledOutbox,
 			section,
+			hook,
+			GenerationTask,
 		} satisfies WorkspaceExtensionContext);
 		if (
 			!extension ||
