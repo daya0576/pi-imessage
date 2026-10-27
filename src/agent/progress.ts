@@ -8,7 +8,6 @@ import type { Harness, TaskRecord, ToolTaskInput, ToolTaskResult } from "@earend
 import { isReplyEnabled, readSettings } from "../config/settings.ts";
 import type { MessageSender } from "../transport/send.ts";
 import { Chats, progressEnabled } from "./chats.ts";
-import { takeScheduledCompaction } from "./compaction.ts";
 import { deliverDirect } from "./direct-send.ts";
 import { argumentSummary, commandPreview, formatProgress, type ProgressEvent } from "./progress-format.ts";
 import { Runs } from "./run.ts";
@@ -63,7 +62,6 @@ export async function startProgress(harness: Harness, workingDir: string, sender
 	const active = new Map<number, Notice>();
 	let pending = Promise.resolve();
 	async function notify(task: TaskRecord<JsonValue, JsonValue, JsonValue>, notice: Notice) {
-		if (task.kind === "pi.compaction" && (await takeScheduledCompaction(harness, task.id))) return;
 		const settings = await readSettings(workingDir);
 		const chats = (await harness.snapshot(Chats, BACKGROUND_CONTEXT))?.items ?? [];
 		// Nothing can be enabled when the global setting is off and no chat chose /verbose on.

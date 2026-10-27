@@ -13,7 +13,7 @@ Accepted ADR files are never edited; this index records which ones are current.
 | [0004](0004-native-extensions.md) | Native Durable extensions, not an SDK adapter | Active; Codex tier clause replaced by 0036 |
 | [0006](0006-jsonl-storage.md) | One JSONL storage, backed up by hand | Active |
 | [0007](0007-images-by-path.md) | Store images as file paths | Active |
-| [0008](0008-compaction-and-run.md) | Six-hour compaction | `/run` clause replaced by 0012; six-hour clause retired by 0054 |
+| [0008](0008-compaction-and-run.md) | Six-hour compaction | `/run` clause replaced by 0012; six-hour timer removed by 0054 |
 | [0010](0010-test-budget.md) | About 40 tests | Active |
 | [0011](0011-reconcile-unsent-answers.md) | Reconcile unsent answers | Active |
 | [0012](0012-run-in-owned-conversation.md) | `/run` in an owned conversation | Active |
@@ -34,7 +34,7 @@ Accepted ADR files are never edited; this index records which ones are current.
 | [0048](0048-quiet-attachment-reads.md) | Quiet attachment reads | Proposed; owner-requested implementation in #38 |
 | [0049](0049-per-chat-progress-notices.md) | Per-chat progress notices via `/verbose` | Proposed; owner-requested implementation |
 | [0052](0052-host-owned-self-restart.md) | The host owns its own restart (`restart_service`) | Active; owner accepted on 2026-10-24 (#39) |
-| [0054](0054-window-thresholds-replace-timer.md) | The advertised model window bounds chat context; six-hour timer retired | Active; owner accepted on 2026-10-27 |
+| [0054](0054-window-thresholds-replace-timer.md) | The advertised model window bounds chat context; six-hour timer removed | Active; owner accepted on 2026-10-27 |
 
 ## Replaced or rejected
 
@@ -47,7 +47,7 @@ Accepted ADR files are never edited; this index records which ones are current.
 | [0030](0030-shared-web-read-cache.md) | Shared web read cache | Rejected; removed |
 | [0019](0019-remove-scheduled-services.md) | Remove scheduled services | 0042 |
 | [0020](0020-chat-task-progress.md)–[0028](0028-command-preview-120.md) | Progress notice format | 0040 |
-| [0031](0031-quiet-compaction-progress.md) | Quiet six-hour compaction progress | 0040 |
+| [0031](0031-quiet-compaction-progress.md) | Quiet six-hour compaction progress | 0040; timer removed by 0054 |
 | [0032](0032-native-background-schedules.md)–[0035](0035-external-business-task-extensions.md) | Native schedules, operator run, local time, workspace extensions | 0042 |
 | [0037](0037-restart-during-in-flight-work.md)–[0039](0039-rerun-interrupted-tools.md) | Restart and tool rerun | 0041 |
 

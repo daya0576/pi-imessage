@@ -28,7 +28,6 @@ import sharp from "sharp";
 import { getGlobalDispatcher } from "undici";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Chats, WatchCursor } from "../src/agent/chats.ts";
-import { compactChats } from "../src/agent/compaction.ts";
 import type { SendText } from "../src/agent/deliver.ts";
 import { DirectSends } from "../src/agent/direct-send.ts";
 import * as modelConfig from "../src/agent/models.ts";
@@ -174,13 +173,8 @@ it("automatically routes DM, group and SMS, archives attachments and logs disabl
 	expect((await service.harness.snapshot(WatchCursor, BACKGROUND_CONTEXT))?.rowid).toBe(last);
 	expect(onError).not.toHaveBeenCalled();
 	expect(intervals.mock.calls.some(([, duration]) => duration === 6 * 60 * 60 * 1000)).toBe(false);
-	const schedules = (await service.harness.snapshot(Schedules, BACKGROUND_CONTEXT))?.items;
-	expect(schedules).toHaveLength(1);
-	if (!schedules?.[0]) throw new Error("Missing scheduled compaction");
-	expect(await service.harness.getTask(schedules[0].taskId, BACKGROUND_CONTEXT)).toMatchObject({
-		kind: "imessage.schedule",
-		background: true,
-	});
+	// ADR 0054: the host defines no schedule of its own.
+	expect((await service.harness.snapshot(Schedules, BACKGROUND_CONTEXT))?.items).toEqual([]);
 	await service.close();
 });
 
@@ -508,7 +502,7 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 });
 
 // #33 Phase 3: command rows must settle without becoming model input or blocking following source rows.
-it("routes commands and hides only six-hour compaction progress", async () => {
+it("routes commands and reports compaction progress", async () => {
 	await writeFile(
 		join(directory, "settings.json"),
 		JSON.stringify({ chatAllowlist: { whitelist: ["*"], blacklist: [] }, progressMessages: true }),
@@ -528,15 +522,6 @@ it("routes commands and hides only six-hour compaction progress", async () => {
 	]);
 	expect(faux.state.callCount).toBe(1);
 	expect((await service.harness.snapshot(WatchCursor, BACKGROUND_CONTEXT))?.rowid).toBe(last);
-	// Scheduled native compactions emit neither admission nor settlement notices.
-	const tasks = await compactChats(service.harness);
-	expect(tasks).toHaveLength(1);
-	for (const task of tasks) await service.harness.waitForTask(task, BACKGROUND_CONTEXT);
-	await service.poll();
-	expect(send).toHaveBeenCalledTimes(4);
-	expect((await service.harness.snapshot(DirectSends, BACKGROUND_CONTEXT))?.requests ?? []).not.toEqual(
-		expect.arrayContaining([expect.objectContaining({ requestId: expect.stringMatching(/^progress:/) })]),
-	);
 	// Explicit /compact retains both progress phases and its command result.
 	insert("manual-compact", "/compact");
 	await vi.waitFor(async () => {

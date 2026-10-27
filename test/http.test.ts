@@ -52,16 +52,10 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 				expect((await fetch(base + path, { method })).status, `${method} ${path}`).toBe(404);
 		}
 		// #33 / ADR 0032: reading native schedules does not start model work.
-		expect((await agent.harness.snapshot(Schedules, BACKGROUND_CONTEXT))?.items).toHaveLength(1);
+		// ADR 0054: the host defines no schedule of its own.
+		expect((await agent.harness.snapshot(Schedules, BACKGROUND_CONTEXT))?.items).toEqual([]);
 		const scheduled = await (await fetch(`${base}/scheduled/data`)).json();
-		expect(scheduled.jobs).toHaveLength(1);
-		expect(scheduled.jobs[0]).toMatchObject({
-			id: "compact-chats",
-			intervalMs: 21600000,
-			timezone: new Intl.DateTimeFormat().resolvedOptions().timeZone,
-			phase: "sleep",
-			runs: [],
-		});
+		expect(scheduled.jobs).toEqual([]);
 		expect(scheduled.recent).toEqual([]);
 		expect((await fetch(`${base}/scheduled`)).status).toBe(200);
 		for (const method of ["POST", "DELETE"])

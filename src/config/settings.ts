@@ -5,8 +5,6 @@ export type Settings = {
 	chatAllowlist: { whitelist: string[]; blacklist: string[] };
 	richText: { enabled: boolean; markdown: boolean };
 	progressMessages: boolean;
-	/** The six-hour compaction timer (ADR 0008); `false` retires it in favor of window thresholds (ADR 0054). */
-	scheduledCompaction: boolean;
 	/** No fallback or priority tier is selected unless explicitly configured. */
 	modelPolicy: {
 		fallback?: { provider: string; modelId: string };
@@ -49,7 +47,6 @@ export async function readSettings(workingDir: string): Promise<Settings> {
 		...raw,
 		modelPolicy,
 		progressMessages: raw.progressMessages === true,
-		scheduledCompaction: raw.scheduledCompaction !== false,
 		chatAllowlist: {
 			whitelist: Array.isArray(allowlist?.whitelist)
 				? allowlist.whitelist.filter((v) => typeof v === "string")

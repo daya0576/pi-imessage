@@ -12,7 +12,6 @@ import {
 	WatchCursor,
 } from "./agent/chats.ts";
 import { compactionReply, isCommand, runCommand } from "./agent/commands.ts";
-import { compactChats } from "./agent/compaction.ts";
 import { deliverReplies, recoverSending, type SendText } from "./agent/deliver.ts";
 import { type DirectSendInput, deliverDirect } from "./agent/direct-send.ts";
 import { openHarness } from "./agent/harness.ts";
@@ -53,10 +52,7 @@ export async function startService(
 	reloadHttpTransport?: () => Promise<void>,
 ) {
 	let runtime = options.runtime;
-	const initialSettings = await readSettings(options.workingDir);
-	let modelPolicy = initialSettings.modelPolicy;
-	// The timer state a schedule initialization applies; a failed reload restores the published value.
-	let scheduledCompaction = initialSettings.scheduledCompaction;
+	let modelPolicy = (await readSettings(options.workingDir)).modelPolicy;
 	// Installed auth and models; an isolated test runtime has nothing to reload.
 	let installed: Awaited<ReturnType<typeof openModels>> | undefined;
 	if (!runtime) {
@@ -131,7 +127,7 @@ export async function startService(
 		requestSettings(settings),
 	);
 	const { harness, storage } = owner;
-	const scheduling = schedulingExtension(harness, defaults, () => scheduledCompaction);
+	const scheduling = schedulingExtension(harness, defaults);
 	let progress: Awaited<ReturnType<typeof startProgress>>;
 	try {
 		// The native owner lock is acquired before cleaning up browsers left by a previous process.
@@ -157,7 +153,6 @@ export async function startService(
 			const saved = savedSchedules?.items.find((schedule) => schedule.id === jobId);
 			if (
 				saved &&
-				saved.id !== "compact-chats" &&
 				!activeExtensions.some((extension) =>
 					extension.schedules?.some((schedule) => schedule.id === saved.id),
 				)
@@ -187,8 +182,7 @@ export async function startService(
 
 	/** Running calls keep the code they started with; later requests and new chats use the reloaded state. */
 	async function reloadResources() {
-		const nextSettings = await readSettings(options.workingDir);
-		const nextPolicy = nextSettings.modelPolicy;
+		const nextPolicy = (await readSettings(options.workingDir)).modelPolicy;
 		const nextDefaults = installed
 			? await readDefaults(installed, options.workingDir, options.agentDir, nextPolicy)
 			: defaults;
@@ -244,21 +238,14 @@ export async function startService(
 		// A failed business initializer rolls back all schedule/configuration changes before publication.
 		await reloadHttpTransport?.();
 		await settings.reload();
-		const publishedCompaction = scheduledCompaction;
-		scheduledCompaction = nextSettings.scheduledCompaction;
-		try {
-			await scheduling.initialize(next, undefined, () => {
-				Object.assign(defaults, nextDefaults);
-				modelPolicy = nextPolicy;
-				// Publish before newly due triggers can admit business work.
-				for (const extension of activeExtensions) owner.registry.uninstall(extension);
-				for (const extension of [...retained, ...next]) owner.registry.install(extension);
-				activeExtensions = [...retained, ...next];
-			});
-		} catch (error) {
-			scheduledCompaction = publishedCompaction;
-			throw error;
-		}
+		await scheduling.initialize(next, undefined, () => {
+			Object.assign(defaults, nextDefaults);
+			modelPolicy = nextPolicy;
+			// Publish before newly due triggers can admit business work.
+			for (const extension of activeExtensions) owner.registry.uninstall(extension);
+			for (const extension of [...retained, ...next]) owner.registry.install(extension);
+			activeExtensions = [...retained, ...next];
+		});
 		console.log(new Date().toISOString(), "Agent reloaded", { model: defaults.model });
 		return { ...defaults, model: { ...defaults.model } };
 	}
@@ -414,23 +401,6 @@ export async function startService(
 						BACKGROUND_CONTEXT,
 					);
 				return receipt;
-			});
-		},
-		/** Admit quiet native compactions; observing their results must not hold shutdown open. */
-		compact() {
-			return track(async () => {
-				const tasks = await compactChats(harness);
-				for (const task of tasks)
-					void harness
-						.waitForTask(task, BACKGROUND_CONTEXT)
-						.then((settled) => {
-							if (settled.state.outcome.status !== "completed")
-								console.warn("Scheduled compaction ended", task, settled.state.outcome);
-						})
-						.catch((error) => {
-							if (!closed) console.warn("Scheduled compaction observation failed", task, error);
-						});
-				return tasks;
 			});
 		},
 		// Explicit host boundary; no model loop, timer or transport runs on import.

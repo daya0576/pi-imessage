@@ -70,10 +70,6 @@ Optional `settings.json` fields, applied at startup and `/reload`:
 Without a fallback, an unavailable default fails explicitly. `codexServiceTier`
 accepts `default` or `priority`; priority may have a different cost.
 
-`"scheduledCompaction": false` retires the quiet six-hour compaction timer;
-chats then compact only at Durable's thresholds near the window the model
-advertises (ADR 0054).
-
 ### Environment Variables
 
 All variables are optional.

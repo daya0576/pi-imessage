@@ -35,7 +35,7 @@ export const ScheduledOutbox = defineDoc<{
 });
 
 export function validateSchedules(extensions: readonly WorkspaceExtension[]) {
-	const ids = new Set(["compact-chats"]);
+	const ids = new Set<string>();
 	const requestIds = new Set<string>();
 	for (const extension of extensions) {
 		for (const schedule of extension.schedules ?? []) {

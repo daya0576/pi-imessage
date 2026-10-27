@@ -32,8 +32,8 @@ replace a detail of the previous one.
   domains are defanged so iMessage shows no link preview. Other tools show
   bounded argument summaries; URLs show only a defanged hostname; timeouts are
   omitted. Never show outputs, thinking, prompts or document contents.
-- Six-hour maintenance compaction is quiet. Manual `/compact` and Durable's
-  automatic threshold/overflow compactions are reported.
+- Manual `/compact` and Durable's automatic threshold/overflow compactions are
+  reported (the quiet six-hour timer was removed by 0054).
 - `src/agent/progress-format.ts` holds a transport-independent `ProgressEvent`
   and pure formatting and screening functions; iMessage is one adapter.
 - Each notice uses a direct-send receipt keyed by task ID. Unknown sends are not

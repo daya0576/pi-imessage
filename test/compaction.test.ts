@@ -15,8 +15,8 @@ import { RunRequests, ScheduledOutbox, Schedules } from "../src/agent/scheduling
 import { startService } from "../src/main.ts";
 import { readSchedules } from "../src/web/schedules.ts";
 
-// #33: host scheduling stays quiet, native no-ops do not infer, and admission failures preserve context.
-it("schedules quiet native compaction, skips empty/reset chats and preserves context on failure", async () => {
+// #33 / ADR 0054: the host reports native compaction and runs workspace schedules; it defines none of its own.
+it("reports manual compaction and runs workspace schedules natively", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "imessage-compact-"));
 	let agent: Awaited<ReturnType<typeof startService>> | undefined;
 	try {
@@ -36,7 +36,6 @@ it("schedules quiet native compaction, skips empty/reset chats and preserves con
 		models.setProvider(faux.provider);
 		const model = faux.getModel();
 		const send = vi.fn();
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		agent = await startService({
 			workingDir: directory,
 			agentDir: join(directory, "agent"),
@@ -45,25 +44,11 @@ it("schedules quiet native compaction, skips empty/reset chats and preserves con
 			send,
 			sendAttachment: vi.fn(),
 		});
-		expect(await agent.compact()).toEqual([]);
 		faux.setResponses([fauxAssistantMessage("Short answer")]);
 		const record = await (
 			await agent.submit({ chatGuid: "chat", guid: "question", text: "Short question" })
 		).wait(BACKGROUND_CONTEXT);
-		const conversation = await agent.harness.conversation(record.conversationId, BACKGROUND_CONTEXT);
-		if (!conversation) throw new Error("Missing conversation");
-		const before = await conversation.context(BACKGROUND_CONTEXT);
-		const tasks = await agent.compact();
-		expect(tasks).toHaveLength(1);
-		await agent.harness.waitForTask(tasks[0], BACKGROUND_CONTEXT);
-		expect(faux.state.callCount).toBe(1);
-		expect(await conversation.context(BACKGROUND_CONTEXT)).toEqual(before);
 		expect(send).not.toHaveBeenCalled();
-		vi.spyOn(agent.harness, "conversation").mockResolvedValueOnce(conversation);
-		vi.spyOn(conversation, "compact").mockRejectedValueOnce(new Error("fixture admission failure"));
-		expect(await agent.compact()).toEqual([]);
-		expect(warn).toHaveBeenCalledWith("Scheduled compaction admission failed", "chat", expect.any(Error));
-		expect(await conversation.context(BACKGROUND_CONTEXT)).toEqual(before);
 		// #33: manual no-op reports no work, rather than claiming a summary was applied.
 		await agent.command({ chatGuid: "chat", guid: "compact-command", text: "/compact" });
 		await vi.waitFor(() => expect(send.mock.calls.map(([, text]) => text)).toEqual(["Nothing to compact."]), {
@@ -92,8 +77,6 @@ it("schedules quiet native compaction, skips empty/reset chats and preserves con
 			"Compaction summary was not applied.",
 		);
 		expect(compactionReply(completed)).toBe("Compaction result unavailable.");
-		await conversation.reset(undefined, BACKGROUND_CONTEXT);
-		expect(await agent.compact()).toEqual([]);
 		await agent.close();
 
 		// #33 / ADR 0032 / ADR 0035: business-neutral workspace schedules, deadlines and the outbox.
@@ -124,7 +107,8 @@ module.exports = ({ config, defineDoc, defineTask, defineExtension, ScheduledOut
  const first = task("fixture.first"), second = task("fixture.second");
  return { ...defineExtension({ name: "fixture", tasks: [first, second] }), schedules: [
   { id: "fixture-daily", name: "Daily fixture", enabled: config.enabled !== false, time: config.time, chatGuid: config.chatGuid, task: first.definition.name },
-  ...(config.intervalMs ? [{ id: "fixture-interval", name: "Interval fixture", enabled: true, intervalMs: config.intervalMs, task: second.definition.name, async initialize() { if (config.invalid) throw new Error("fixture initializer failed"); } }] : [])
+  ...(config.intervalMs ? [{ id: "fixture-interval", name: "Interval fixture", enabled: true, intervalMs: config.intervalMs, task: second.definition.name, async initialize() { if (config.invalid) throw new Error("fixture initializer failed"); } }] : []),
+  ...(config.maintenanceMs ? [{ id: "fixture-maintenance", name: "Maintenance fixture", enabled: true, intervalMs: config.maintenanceMs, task: first.definition.name }] : [])
  ] };
 };`;
 		await writeFile(join(fixture, "index.ts"), fixtureSource);
@@ -152,12 +136,10 @@ module.exports = ({ config, defineDoc, defineTask, defineExtension, ScheduledOut
 		const calls = faux.state.callCount;
 		agent = await startService(scheduledOptions);
 		const jobs = (await agent.harness.snapshot(Schedules, BACKGROUND_CONTEXT))?.items;
+		expect(jobs).toHaveLength(1); // ADR 0054: no framework job of its own.
 		const daily = jobs?.find((job) => job.id === "fixture-daily");
-		const compact = jobs?.find((job) => job.kind === "compaction");
-		if (!daily || !compact) throw new Error("Missing native jobs");
-		const timezone = new Intl.DateTimeFormat().resolvedOptions().timeZone;
-		expect(daily.timezone).toBe(timezone);
-		expect(compact.timezone).toBe(timezone);
+		if (!daily) throw new Error("Missing native job");
+		expect(daily.timezone).toBe(new Intl.DateTimeFormat().resolvedOptions().timeZone);
 		const deadline = await agent.harness.getTask(daily.taskId, BACKGROUND_CONTEXT);
 		expect(deadline).toMatchObject({
 			background: true,
@@ -275,36 +257,31 @@ module.exports = ({ config, defineDoc, defineTask, defineExtension, ScheduledOut
 				}),
 			{ timeout: 5000 },
 		);
-		await vi.waitFor(
-			async () => {
-				if (!agent) throw new Error("Missing service");
-				const maintenance = (await readSchedules(agent.harness)).jobs.find(
-					(job) => job.kind === "compaction",
-				);
-				expect(maintenance?.phase).toBe("sleep");
-				expect(maintenance?.runs[0].status).toBe("completed");
-			},
-			{ timeout: 5000 },
-		);
 		expect((await agent.harness.snapshot(effects, BACKGROUND_CONTEXT))?.values).toEqual([
 			"v1:fixture-daily",
 			"v1:fixture-daily",
 		]);
 		await agent.close();
-		await writeFile(join(fixture, "config.json"), JSON.stringify({ time: "07:45", enabled: false }));
+		// A chat-less interval job keeps a ten-run history and stays quiet.
+		const maintenanceMs = 6 * 3600000;
+		await writeFile(
+			join(fixture, "config.json"),
+			JSON.stringify({ time: "07:45", enabled: false, maintenanceMs }),
+		);
+		agent = await startService(scheduledOptions); // First deadline: one interval after creation.
+		await agent.close();
 		for (let index = 0; index < 12; index++) {
-			now += 6 * 3600000;
+			now += maintenanceMs;
 			agent = await startService(scheduledOptions);
 			agent.harness.resume();
 			await vi.waitFor(
 				async () => {
 					if (!agent) throw new Error("Missing service");
-					const current = await readSchedules(agent.harness);
-					expect(current.jobs.find((job) => job.kind === "compaction")?.phase).toBe("sleep");
-					expect(current.jobs.find((job) => job.kind === "compaction")?.runs[0]).toMatchObject({
-						status: "completed",
-						input: { startedAt: now },
-					});
+					const current = (await readSchedules(agent.harness)).jobs.find(
+						(job) => job.id === "fixture-maintenance",
+					);
+					expect(current?.phase).toBe("sleep");
+					expect(current?.runs[0]).toMatchObject({ status: "completed", input: { startedAt: now } });
 				},
 				{ timeout: 5000 },
 			);
@@ -312,25 +289,32 @@ module.exports = ({ config, defineDoc, defineTask, defineExtension, ScheduledOut
 		}
 		agent = await startService(scheduledOptions);
 		view = await readSchedules(agent.harness);
-		expect(view.jobs.find((job) => job.kind === "compaction")?.runs).toHaveLength(10);
+		const maintenance = view.jobs.find((job) => job.id === "fixture-maintenance");
+		if (!maintenance) throw new Error("Missing maintenance fixture");
+		expect(maintenance.runs).toHaveLength(10);
 		expect(view.recent).toHaveLength(10);
 		expect(view.recent.map((run) => run.id)).toEqual(view.recent.map((run) => run.id).sort((a, b) => b - a));
 		expect(send).toHaveBeenCalledTimes(1); // Maintenance remains quiet.
-		await agent.harness.abortTask(compact.taskId, BACKGROUND_CONTEXT);
-		await agent.harness.waitForTask(compact.taskId, BACKGROUND_CONTEXT);
-		await agent.close();
-		agent = await startService(scheduledOptions);
-		expect((await readSchedules(agent.harness)).jobs.find((job) => job.kind === "compaction")?.status).toBe(
-			"aborted",
-		);
+		// ADR 0054: a framework-owned job without a definition leaves the view and its timer is aborted.
+		await agent.harness.commit(async (tx) => {
+			const job = (await tx.doc(Schedules)).items.find((item) => item.id === "fixture-maintenance");
+			if (job) job.extension = "scheduling";
+		}, BACKGROUND_CONTEXT);
 
 		// #33 / ADR 0035: multi-task schedules reload, roll back and remove safely.
 		await writeFile(join(fixture, "config.json"), JSON.stringify({ time: "23:59", intervalMs: 100 }));
 		await agent.command({ chatGuid: "control", guid: "add-interval", text: "/reload" });
+		agent.harness.resume();
+		const removedHarness = agent.harness;
+		await vi.waitFor(async () =>
+			expect(await removedHarness.getTask(maintenance.taskId, BACKGROUND_CONTEXT)).toMatchObject({
+				state: { outcome: { status: "aborted" } },
+			}),
+		);
 		const fixtureJobs = (await readSchedules(agent.harness)).jobs.filter((job) =>
 			job.id.startsWith("fixture-"),
 		);
-		expect(fixtureJobs).toHaveLength(2);
+		expect(fixtureJobs.map((job) => job.id)).toEqual(["fixture-daily", "fixture-interval"]);
 		const savedTasks = await Promise.all(
 			fixtureJobs.map((job) => agent?.harness.getTask(job.taskId, BACKGROUND_CONTEXT)),
 		);
@@ -428,6 +412,7 @@ module.exports = ({ config, defineDoc, defineTask, defineExtension, ScheduledOut
 		expect((await agent.harness.snapshot(effects, BACKGROUND_CONTEXT))?.values).toEqual([
 			"v1:fixture-daily",
 			"v1:fixture-daily",
+			...Array<string>(12).fill("v1:fixture-maintenance"),
 			"v2:fixture-daily",
 			"v2:fixture-interval",
 		]);
