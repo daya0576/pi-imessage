@@ -10,12 +10,6 @@ export type Settings = {
 		fallback?: { provider: string; modelId: string };
 		codexServiceTier?: "default" | "priority";
 	};
-	/**
-	 * Context budget compaction (ADR 0054): blocking compaction at `budgetTokens`, background compaction
-	 * `backgroundTokens` below it, per model window; `exempt` models (`provider/modelId`) never compact
-	 * automatically. Absent: Durable's near-window thresholds and the six-hour timer.
-	 */
-	compaction?: { budgetTokens: number; backgroundTokens: number; exempt: string[] };
 };
 
 export async function readSettings(workingDir: string): Promise<Settings> {
@@ -48,33 +42,9 @@ export async function readSettings(workingDir: string): Promise<Settings> {
 			throw new Error("Invalid modelPolicy.codexServiceTier");
 		modelPolicy.codexServiceTier = policy.codexServiceTier;
 	}
-	let compaction: Settings["compaction"];
-	if (raw.compaction !== undefined) {
-		const budget = raw.compaction as Record<string, unknown> | null;
-		if (!budget || typeof budget !== "object" || Array.isArray(budget)) throw new Error("Invalid compaction");
-		const budgetTokens = budget.budgetTokens;
-		const backgroundTokens = budget.backgroundTokens ?? 60_000;
-		const exempt = budget.exempt ?? [];
-		if (typeof budgetTokens !== "number" || !Number.isInteger(budgetTokens) || budgetTokens <= 0)
-			throw new Error("compaction.budgetTokens must be a positive integer");
-		if (
-			typeof backgroundTokens !== "number" ||
-			!Number.isInteger(backgroundTokens) ||
-			backgroundTokens < 0 ||
-			backgroundTokens >= budgetTokens
-		)
-			throw new Error("compaction.backgroundTokens must be an integer below budgetTokens");
-		if (
-			!Array.isArray(exempt) ||
-			!exempt.every((model) => typeof model === "string" && /^[^/]+\/.+$/.test(model))
-		)
-			throw new Error("compaction.exempt must list provider/modelId strings");
-		compaction = { budgetTokens, backgroundTokens, exempt: exempt as string[] };
-	}
 	return {
 		// Preserve opaque workspace-owned settings in read-only configuration projections.
 		...raw,
-		...(compaction ? { compaction } : {}),
 		modelPolicy,
 		progressMessages: raw.progressMessages === true,
 		chatAllowlist: {

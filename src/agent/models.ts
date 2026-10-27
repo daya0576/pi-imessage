@@ -1,11 +1,7 @@
 import { join } from "node:path";
 import type { Models, ModelsSimpleStreamOptions } from "@earendil-works/pi-ai";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
-import {
-	type CompactionPolicy,
-	DEFAULT_COMPACTION_POLICY,
-	type HarnessSettings,
-} from "@earendil-works/pi-durable";
+import type { HarnessSettings } from "@earendil-works/pi-durable";
 import type { Settings } from "../config/settings.ts";
 import type { AgentDefaults } from "./chats.ts";
 
@@ -44,45 +40,8 @@ export async function readDefaults(
 }
 
 /** Match Pi's experimental Durable request policy; execution and retries remain native. */
-/**
- * Durable thresholds for a context budget (ADR 0054): blocking compaction at the budget and background compaction
- * `backgroundTokens` below it, computed from each known model's window; exempt models never compact automatically.
- */
-export function compactionSettings(
-	models: Models,
-	budget: Settings["compaction"],
-): HarnessSettings["compaction"] {
-	if (!budget) return undefined;
-	const modelOverrides: Record<string, Partial<CompactionPolicy>> = {};
-	for (const model of models.getModels()) {
-		if (model.contextWindow > budget.budgetTokens)
-			modelOverrides[`${model.provider}/${model.id}`] = {
-				reserveTokens: model.contextWindow - budget.budgetTokens,
-				backgroundTokens: budget.backgroundTokens,
-			};
-	}
-	for (const key of budget.exempt) modelOverrides[key] = { enabled: false };
-	return { ...DEFAULT_COMPACTION_POLICY, modelOverrides };
-}
-
-/** The window `/status` reports: the budget where it caps a non-exempt model's window. */
-export function budgetedWindow(
-	model: { provider: string; id: string; contextWindow: number } | undefined,
-	budget: Settings["compaction"],
-) {
-	if (!model) return undefined;
-	if (!budget || budget.exempt.includes(`${model.provider}/${model.id}`)) return model.contextWindow;
-	return Math.min(model.contextWindow, budget.budgetTokens);
-}
-
-export function requestSettings(
-	settings: SettingsManager,
-	compaction: () => HarnessSettings["compaction"] = () => undefined,
-): Pick<HarnessSettings, "stream" | "retry" | "compaction"> {
+export function requestSettings(settings: SettingsManager): Pick<HarnessSettings, "stream" | "retry"> {
 	return {
-		get compaction() {
-			return compaction();
-		},
 		get stream() {
 			const provider = settings.getProviderRetrySettings();
 			const idle = settings.getHttpIdleTimeoutMs();

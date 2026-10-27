@@ -17,13 +17,7 @@ import { deliverReplies, recoverSending, type SendText } from "./agent/deliver.t
 import { type DirectSendInput, deliverDirect } from "./agent/direct-send.ts";
 import { openHarness } from "./agent/harness.ts";
 import { submitHealth } from "./agent/health.ts";
-import {
-	compactionSettings,
-	openModels,
-	readDefaults,
-	requestSettings,
-	withModelPolicy,
-} from "./agent/models.ts";
+import { openModels, readDefaults, requestSettings, withModelPolicy } from "./agent/models.ts";
 import { startProgress } from "./agent/progress.ts";
 import { loadPrompt } from "./agent/prompt.ts";
 import { Runs, runRecord } from "./agent/run.ts";
@@ -59,11 +53,7 @@ export async function startService(
 	reloadHttpTransport?: () => Promise<void>,
 ) {
 	let runtime = options.runtime;
-	const initialSettings = await readSettings(options.workingDir);
-	let modelPolicy = initialSettings.modelPolicy;
-	let budget = initialSettings.compaction;
-	// The budget a schedule initialization plans for; equals `budget` outside a reload.
-	let plannedBudget = budget;
+	let modelPolicy = (await readSettings(options.workingDir)).modelPolicy;
 	// Installed auth and models; an isolated test runtime has nothing to reload.
 	let installed: Awaited<ReturnType<typeof openModels>> | undefined;
 	if (!runtime) {
@@ -74,9 +64,6 @@ export async function startService(
 		};
 	}
 	const defaults = { ...runtime.defaults, model: { ...runtime.defaults.model } };
-	// Recomputed on reload from the refreshed model list; read by the harness at each request (ADR 0054).
-	const models = runtime.models;
-	let compaction = compactionSettings(models, budget);
 	const browser = await createBrowser(options.workingDir, options.agentDir);
 	if (!runtime.models.getModel(defaults.model.provider, defaults.model.modelId))
 		throw new Error(`Model is unavailable: ${defaults.model.provider}/${defaults.model.modelId}`);
@@ -138,10 +125,10 @@ export async function startService(
 		options.workingDir,
 		withModelPolicy(runtime.models, () => modelPolicy),
 		activeExtensions,
-		requestSettings(settings, () => compaction),
+		requestSettings(settings),
 	);
 	const { harness, storage } = owner;
-	const scheduling = schedulingExtension(harness, defaults, () => !plannedBudget);
+	const scheduling = schedulingExtension(harness, defaults);
 	let progress: Awaited<ReturnType<typeof startProgress>>;
 	try {
 		// The native owner lock is acquired before cleaning up browsers left by a previous process.
@@ -197,12 +184,10 @@ export async function startService(
 
 	/** Running calls keep the code they started with; later requests and new chats use the reloaded state. */
 	async function reloadResources() {
-		const nextSettings = await readSettings(options.workingDir);
-		const nextPolicy = nextSettings.modelPolicy;
+		const nextPolicy = (await readSettings(options.workingDir)).modelPolicy;
 		const nextDefaults = installed
 			? await readDefaults(installed, options.workingDir, options.agentDir, nextPolicy)
 			: defaults;
-		const nextCompaction = compactionSettings(models, nextSettings.compaction);
 		const next = await loadExtensions();
 		const activeNames = new Set(activeExtensions.map((extension) => extension.name));
 		const unfinishedTasks = (await harness.inspect(BACKGROUND_CONTEXT)).tasks;
@@ -255,21 +240,14 @@ export async function startService(
 		// A failed business initializer rolls back all schedule/configuration changes before publication.
 		await reloadHttpTransport?.();
 		await settings.reload();
-		plannedBudget = nextSettings.compaction;
-		try {
-			await scheduling.initialize(next, undefined, () => {
-				Object.assign(defaults, nextDefaults);
-				modelPolicy = nextPolicy;
-				budget = nextSettings.compaction;
-				compaction = nextCompaction;
-				// Publish before newly due triggers can admit business work.
-				for (const extension of activeExtensions) owner.registry.uninstall(extension);
-				for (const extension of [...retained, ...next]) owner.registry.install(extension);
-				activeExtensions = [...retained, ...next];
-			});
-		} finally {
-			plannedBudget = budget;
-		}
+		await scheduling.initialize(next, undefined, () => {
+			Object.assign(defaults, nextDefaults);
+			modelPolicy = nextPolicy;
+			// Publish before newly due triggers can admit business work.
+			for (const extension of activeExtensions) owner.registry.uninstall(extension);
+			for (const extension of [...retained, ...next]) owner.registry.install(extension);
+			activeExtensions = [...retained, ...next];
+		});
 		console.log(new Date().toISOString(), "Agent reloaded", { model: defaults.model });
 		return { ...defaults, model: { ...defaults.model } };
 	}
@@ -341,7 +319,6 @@ export async function startService(
 					harness,
 					models: runtime.models,
 					defaults,
-					compaction: () => budget,
 					reload,
 					workingDir: options.workingDir,
 					chatGuid: snapshot.chatGuid,

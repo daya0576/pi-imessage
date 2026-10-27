@@ -63,8 +63,7 @@ job's dedicated conversation owns a background scheduler, whose checkpoint saves
 the next deadline. Each occurrence is a child execution task delegating to an
 extension's native business task; terminal receipts supply Web history, not a
 parallel UI log. The framework owns daily/interval cadence, non-overlap, recovery
-and quiet six-hour native compaction, replaced by per-model context budget
-thresholds when `settings.json` configures one (ADR 0054). Workspace tasks own business policy and
+and quiet six-hour native compaction. Workspace tasks own business policy and
 documents, and can commit their state and the generic outgoing item atomically.
 The host delivery poll uses existing direct-send receipts and passive chat records.
 `web/schedules.ts` projects these native records, including latest-ten history.

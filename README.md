@@ -70,26 +70,6 @@ Optional `settings.json` fields, applied at startup and `/reload`:
 Without a fallback, an unavailable default fails explicitly. `codexServiceTier`
 accepts `default` or `priority`; priority may have a different cost.
 
-### Context budget
-
-Optional; without it Durable compacts near the model window and a quiet
-six-hour timer compacts every active chat (ADR 0008):
-
-```json
-{
-  "compaction": {
-    "budgetTokens": 160000,
-    "backgroundTokens": 60000,
-    "exempt": ["your-provider/long-context-model"]
-  }
-}
-```
-
-Blocking compaction starts at `budgetTokens` and background compaction
-`backgroundTokens` below it, for every model whose window is wider; exempt
-`provider/modelId` refs never compact automatically. A configured budget
-disables the six-hour timer (ADR 0054).
-
 ### Environment Variables
 
 All variables are optional.
