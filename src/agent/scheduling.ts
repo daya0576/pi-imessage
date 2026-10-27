@@ -87,7 +87,12 @@ type ScheduleState =
 	| { phase: "retry"; at: number; execution: TaskId<ExecutionResult> };
 
 /** Durable owns cadence and execution receipts; extensions own business tasks and documents. */
-export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
+/** `scheduledCompaction` is read at each initialize: a configured context budget retires the six-hour timer (ADR 0054). */
+export function schedulingExtension(
+	harness: Harness,
+	defaults: AgentDefaults,
+	scheduledCompaction: () => boolean = () => true,
+) {
 	let admissionReady = true;
 	const Execution = defineTask<ExecutionInput, ExecutionState, ExecutionResult>({
 		name: EXECUTION_KIND,
@@ -275,7 +280,7 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 						id: "compact-chats",
 						name: "Chat compaction",
 						kind: "compaction",
-						enabled: true,
+						enabled: scheduledCompaction(),
 						intervalMs: SIX_HOURS,
 						timezone,
 						extension: "scheduling",

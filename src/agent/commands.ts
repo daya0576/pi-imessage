@@ -13,8 +13,9 @@ import {
 	type TaskOutcome,
 	UserEntry,
 } from "@earendil-works/pi-durable";
-import { readSettings } from "../config/settings.ts";
+import { readSettings, type Settings } from "../config/settings.ts";
 import { type AgentDefaults, Chats, chatConversation, progressEnabled, setChatProgress } from "./chats.ts";
+import { budgetedWindow } from "./models.ts";
 import { activeRun, Runs, startRun } from "./run.ts";
 
 const help = [
@@ -65,6 +66,8 @@ export async function runCommand(options: {
 	harness: Harness;
 	models: Models;
 	defaults: AgentDefaults;
+	/** The current context budget, so `/status` reports usage against the window that actually applies. */
+	compaction?: () => Settings["compaction"];
 	reload: () => Promise<AgentDefaults>;
 	closeBrowsers?: (chat: ConversationId) => Promise<void>;
 	workingDir: string;
@@ -91,8 +94,10 @@ export async function runCommand(options: {
 	const status = async (withRun: boolean) => {
 		const agent = await conversation.agent(BACKGROUND_CONTEXT);
 		const context = await conversation.context(BACKGROUND_CONTEXT);
-		const window =
-			agent.model && options.models.getModel(agent.model.provider, agent.model.modelId)?.contextWindow;
+		const window = budgetedWindow(
+			agent.model && options.models.getModel(agent.model.provider, agent.model.modelId),
+			options.compaction?.(),
+		);
 		// Context size: the last reported usage, or before the first reply a local estimate of about four characters
 		// per token. After /new the next request restates the system prompt and tools, so the estimate replays them
 		// from the context just before the reset marker.

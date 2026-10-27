@@ -12,7 +12,7 @@ export async function openHarness(
 	workingDir: string,
 	models: Models,
 	extensions: readonly Extension[],
-	policy: Pick<HarnessSettings, "stream" | "retry">,
+	policy: Pick<HarnessSettings, "stream" | "retry" | "compaction">,
 ) {
 	const directory = join(workingDir, "durable");
 	await mkdir(directory, { recursive: true });
@@ -46,6 +46,10 @@ export async function openHarness(
 						},
 						get retry() {
 							return policy.retry;
+						},
+						// Context budget thresholds (ADR 0054); undefined keeps Durable's defaults.
+						get compaction() {
+							return policy.compaction;
 						},
 						steeringMode: "all",
 						// Only run conversations select the run extension; reread so reinstalls apply.
