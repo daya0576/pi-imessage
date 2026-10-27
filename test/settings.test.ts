@@ -47,6 +47,11 @@ it("reads existing settings without rewriting them and preserves allowlist prece
 			await writeFile(join(directory, "settings.json"), JSON.stringify({ modelPolicy }));
 			await expect(readSettings(directory)).rejects.toThrow("modelPolicy");
 		}
+		// ADR 0054: the six-hour timer stays on unless settings retire it explicitly.
+		await writeFile(join(directory, "settings.json"), JSON.stringify({ scheduledCompaction: false }));
+		expect((await readSettings(directory)).scheduledCompaction).toBe(false);
+		await writeFile(join(directory, "settings.json"), "{}");
+		expect((await readSettings(directory)).scheduledCompaction).toBe(true);
 		await writeFile(join(directory, "settings.json"), "{broken");
 		expect(isReplyEnabled(await readSettings(directory), "chat")).toBe(false);
 	} finally {

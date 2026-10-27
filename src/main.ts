@@ -53,7 +53,10 @@ export async function startService(
 	reloadHttpTransport?: () => Promise<void>,
 ) {
 	let runtime = options.runtime;
-	let modelPolicy = (await readSettings(options.workingDir)).modelPolicy;
+	const initialSettings = await readSettings(options.workingDir);
+	let modelPolicy = initialSettings.modelPolicy;
+	// The timer state a schedule initialization applies; a failed reload restores the published value.
+	let scheduledCompaction = initialSettings.scheduledCompaction;
 	// Installed auth and models; an isolated test runtime has nothing to reload.
 	let installed: Awaited<ReturnType<typeof openModels>> | undefined;
 	if (!runtime) {
@@ -128,7 +131,7 @@ export async function startService(
 		requestSettings(settings),
 	);
 	const { harness, storage } = owner;
-	const scheduling = schedulingExtension(harness, defaults);
+	const scheduling = schedulingExtension(harness, defaults, () => scheduledCompaction);
 	let progress: Awaited<ReturnType<typeof startProgress>>;
 	try {
 		// The native owner lock is acquired before cleaning up browsers left by a previous process.
@@ -184,7 +187,8 @@ export async function startService(
 
 	/** Running calls keep the code they started with; later requests and new chats use the reloaded state. */
 	async function reloadResources() {
-		const nextPolicy = (await readSettings(options.workingDir)).modelPolicy;
+		const nextSettings = await readSettings(options.workingDir);
+		const nextPolicy = nextSettings.modelPolicy;
 		const nextDefaults = installed
 			? await readDefaults(installed, options.workingDir, options.agentDir, nextPolicy)
 			: defaults;
@@ -240,14 +244,21 @@ export async function startService(
 		// A failed business initializer rolls back all schedule/configuration changes before publication.
 		await reloadHttpTransport?.();
 		await settings.reload();
-		await scheduling.initialize(next, undefined, () => {
-			Object.assign(defaults, nextDefaults);
-			modelPolicy = nextPolicy;
-			// Publish before newly due triggers can admit business work.
-			for (const extension of activeExtensions) owner.registry.uninstall(extension);
-			for (const extension of [...retained, ...next]) owner.registry.install(extension);
-			activeExtensions = [...retained, ...next];
-		});
+		const publishedCompaction = scheduledCompaction;
+		scheduledCompaction = nextSettings.scheduledCompaction;
+		try {
+			await scheduling.initialize(next, undefined, () => {
+				Object.assign(defaults, nextDefaults);
+				modelPolicy = nextPolicy;
+				// Publish before newly due triggers can admit business work.
+				for (const extension of activeExtensions) owner.registry.uninstall(extension);
+				for (const extension of [...retained, ...next]) owner.registry.install(extension);
+				activeExtensions = [...retained, ...next];
+			});
+		} catch (error) {
+			scheduledCompaction = publishedCompaction;
+			throw error;
+		}
 		console.log(new Date().toISOString(), "Agent reloaded", { model: defaults.model });
 		return { ...defaults, model: { ...defaults.model } };
 	}
