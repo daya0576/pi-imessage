@@ -35,6 +35,7 @@ Accepted ADR files are never edited; this index records which ones are current.
 | [0049](0049-per-chat-progress-notices.md) | Per-chat progress notices via `/verbose` | Proposed; owner-requested implementation |
 | [0052](0052-host-owned-self-restart.md) | The host owns its own restart (`restart_service`) | Active; owner accepted on 2026-10-24 (#39) |
 | [0054](0054-window-thresholds-replace-timer.md) | The advertised model window bounds chat context; six-hour timer removed | Active; owner accepted on 2026-10-27 |
+| [0055](0055-idle-context-reset.md) | A chat context over 60k tokens idle for an hour starts fresh on the next message | Active; owner accepted on 2026-10-30 |
 
 ## Replaced or rejected
 

@@ -1,6 +1,8 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
+import { calculateContextTokens } from "@earendil-works/pi-coding-agent";
 import {
+	type Conversation,
 	type ConversationId,
 	configure,
 	defineDoc,
@@ -92,6 +94,28 @@ export async function chatConversation(harness: Harness, defaults: AgentDefaults
 	return conversation;
 }
 
+/** A chat whose last turn ended this long ago with at least this much context starts fresh (ADR 0055). */
+export const IDLE_RESET_AFTER_MS = 3600000;
+export const IDLE_RESET_MIN_TOKENS = 60000;
+
+/**
+ * One context read, as /status does. The last message is the assistant's only when the chat is idle at a turn
+ * boundary, so a busy chat is never reset.
+ */
+async function resetIdleContext(conversation: Conversation, now: number) {
+	const last = (await conversation.context(BACKGROUND_CONTEXT)).messages.at(-1);
+	if (last?.role !== "assistant") return false;
+	const tokens = calculateContextTokens(last.usage);
+	if (tokens <= IDLE_RESET_MIN_TOKENS || now - last.timestamp <= IDLE_RESET_AFTER_MS) return false;
+	await conversation.reset(undefined, BACKGROUND_CONTEXT);
+	console.log(new Date(now).toISOString(), "Idle context reset", {
+		conversation: conversation.id,
+		tokens,
+		idleMinutes: Math.round((now - last.timestamp) / 60000),
+	});
+	return true;
+}
+
 export async function submitMessage(
 	harness: Harness,
 	defaults: AgentDefaults,
@@ -113,7 +137,10 @@ export async function submitMessage(
 	const message = { type: "input", content, requestId: guid, whenBusy: "steer" } as const;
 	const run = activeRun((await harness.snapshot(Runs, BACKGROUND_CONTEXT))?.items, conversation.id);
 	const target = run && (await harness.conversation(run.conversationId, BACKGROUND_CONTEXT));
-	if (!target) return conversation.submit(message, BACKGROUND_CONTEXT);
+	if (!target) {
+		await resetIdleContext(conversation, Date.now());
+		return conversation.submit(message, BACKGROUND_CONTEXT);
+	}
 	// During a run, the chat has one place where work happens; its own conversation keeps the record.
 	const submission = await target.submit(message, BACKGROUND_CONTEXT);
 	await conversation.submit(log, BACKGROUND_CONTEXT);
