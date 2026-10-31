@@ -56,7 +56,16 @@ OS sandbox; see [browser operations and retention](browser.md).
 
 The model is offered a fixed core of tools; every other built-in or workspace tool
 is deferred and loaded on demand with Durable's `tool_search`, the same in every
-conversation.
+conversation. The core includes Durable's `codemode` (`extensions/codemode.ts`):
+the model writes a script that calls the conversation's tools in a QuickJS
+sandbox and only the script's output enters the context; `models.*` is off, so
+scripts cannot start model calls, and the prompt section lists callable tools
+within a small token budget.
+
+`/run <duration>` (ADR 0008) treats the duration as time to use: after the
+stated task is done the run keeps verifying and improving within its scope
+until the deadline, and `end_run` ends it early only when blocked, when the
+user is needed or when nothing in scope remains.
 
 
 ### Native schedules

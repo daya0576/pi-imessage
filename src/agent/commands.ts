@@ -33,7 +33,7 @@ const help = [
 	"/verbose [on|off|default] - show or set tool progress notices for this chat",
 	"/interim [on|off|default] - show or set the model's messages between tool calls for this chat",
 	"/reload - reload models, instructions and skills; apply the default model to this chat and show /status",
-	"/run <duration> [task] - keep working until done, blocked or the deadline, e.g. /run 1h",
+	"/run <duration> [task] - keep working on the task for the whole duration, e.g. /run 1h; ends early only when blocked",
 	"/stop - stop the current work or /run",
 ].join("\n");
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
