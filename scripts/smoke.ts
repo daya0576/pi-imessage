@@ -8,7 +8,7 @@ const option = (name: string) => (args.includes(name) ? args[args.indexOf(name) 
 const chatGuid = option("--chat");
 if (!args.includes("--live") || !chatGuid) {
 	console.log(
-		"Operator only: node --experimental-strip-types ops/smoke.ts --live --chat CHAT_GUID [--url http://localhost:7750] [--timeout 300]",
+		"Operator only: node --experimental-strip-types scripts/smoke.ts --live --chat CHAT_GUID [--url http://localhost:7750] [--timeout 300]",
 	);
 } else {
 	const base = option("--url") ?? "http://localhost:7750";

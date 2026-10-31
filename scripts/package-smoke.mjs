@@ -15,7 +15,7 @@ try {
     const [manifest] = JSON.parse(packed.stdout);
     assert.equal(manifest.name, "@kingcrab/pi-imessage");
     for (const file of manifest.files) {
-      assert.ok(/^(dist\/|docs\/|examples\/|ops\/(README\.md|preflight\.mjs)$|package\.json$|README\.md$|LICENSE$)/.test(file.path), `Unexpected package file: ${file.path}`);
+      assert.ok(/^(dist\/|docs\/|examples\/|package\.json$|README\.md$|LICENSE$)/.test(file.path), `Unexpected package file: ${file.path}`);
       assert.ok(!/(^|\/)(?:\.env(?:\.|$)|\.npmrc$|auth\.json$|settings\.json$|node_modules\/|test\/)/.test(file.path), `Private or development file: ${file.path}`);
     }
     specification = join(directory, manifest.filename);

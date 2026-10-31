@@ -10,9 +10,7 @@
 	"files": [
 		"dist",
 		"docs",
-		"examples",
-		"ops/README.md",
-		"ops/preflight.mjs"
+		"examples"
 	],
 	"publishConfig": {
 		"access": "public",
@@ -28,7 +26,7 @@
 	"scripts": {
 		"build": "tsc -p tsconfig.build.json && cp src/web/app.js src/web/style.css dist/web/",
 		"prepack": "npm run build",
-		"test:package": "npm run build && node ops/package-smoke.mjs",
+		"test:package": "npm run build && node scripts/package-smoke.mjs",
 		"start": "node --use-env-proxy --experimental-strip-types src/cli.ts serve",
 		"check": "tsc --noEmit && biome check .",
 		"test": "vitest run"

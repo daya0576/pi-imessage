@@ -86,7 +86,7 @@ CAPTCHA/2FA or perform an unapproved irreversible action.
 - `test/browser.test.ts` uses a faux model and fake CLI boundary to check native
   registration, forced arguments/environment, forbidden controls, literal flag-like
   form text, owned stop/reset/restart, retention, cancellation and unsafe replay.
-- `node --experimental-strip-types ops/browser-smoke.mjs` uses the real installed
+- `node --experimental-strip-types scripts/browser-smoke.mjs` uses the real installed
   CLI and headless Chrome with temporary profiles and loopback pages. It checks
   same-name sessions, daemon discovery, cookies/local storage, tabs/output files,
   literal arguments, selective cleanup and preserved login checkpoints on reopen.

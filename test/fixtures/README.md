@@ -18,4 +18,4 @@ reimplement the store's validation, deduplication, or correction logic.
 `browser-cli.cjs` is a fake argv/environment subprocess boundary, not a browser
 engine. It records only fixture inputs in private temporary scopes and provides
 controlled output, failure and cancellation. Real pinned CLI/Chrome behavior is
-covered separately by the loopback-only `ops/browser-smoke.mjs` fixture.
+covered separately by the loopback-only `scripts/browser-smoke.mjs` fixture.

@@ -254,7 +254,7 @@ NO_PROXY="127.0.0.1,localhost"
 			};
 			const preflight = await execute(
 				process.execPath,
-				["--experimental-strip-types", resolve("ops/preflight.mjs")],
+				["--experimental-strip-types", resolve("src/cli.ts"), "preflight"],
 				{ env: preflightEnvironment, timeout: 10_000 },
 			);
 			expect(preflight.stdout).toContain("browser CLI runtime");
@@ -263,7 +263,7 @@ NO_PROXY="127.0.0.1,localhost"
 			await expect(access(temporaryBrowserState)).rejects.toMatchObject({ code: "ENOENT" });
 			await writeFile(browserCli, '#!/bin/sh\nprintf "runtime missing\\n" >&2\nexit 1\n');
 			await expect(
-				execute(process.execPath, ["--experimental-strip-types", resolve("ops/preflight.mjs")], {
+				execute(process.execPath, ["--experimental-strip-types", resolve("src/cli.ts"), "preflight"], {
 					env: preflightEnvironment,
 					timeout: 10_000,
 				}),

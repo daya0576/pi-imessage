@@ -89,7 +89,7 @@ export function restartExtension(options: RestartOptions) {
 			defineTool({
 				name: "restart_service",
 				description:
-					"Restart this service into a prepared release directory: a sibling of the running one named by its full commit hash, with npm ci and ops/preflight.mjs done. The service stops only after this call has settled; end the call at once and verify in a later call: controller.log and new.pid in the returned directory, then the service log, the listener and the running release directory. Never call it again before the first outcome is known.",
+					"Restart this service into a prepared release directory: a sibling of the running one named by its full commit hash, with npm ci and `src/cli.ts preflight` done. The service stops only after this call has settled; end the call at once and verify in a later call: controller.log and new.pid in the returned directory, then the service log, the listener and the running release directory. Never call it again before the first outcome is known.",
 				parameters: Type.Object({
 					release: Type.String({ description: "Full commit hash of the prepared release directory" }),
 				}),

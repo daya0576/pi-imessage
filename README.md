@@ -28,7 +28,7 @@ pi-imessage install     # write a launchd job; loading it is a separate operator
 ```
 
 Enable replies for your chats by adding their GUIDs to the [settings allowlist](#settings).
-For installation and service operations, see [ops/README.md](ops/README.md).
+For installation, see [docs/install.md](docs/install.md).
 
 ## Commands
 
@@ -114,7 +114,7 @@ pi-imessage/                      framework, shared by every deployment
 │   └── config/                   settings, environment, chat allowlist
 ├── docs/                         architecture and ADRs (the design ground truth)
 ├── examples/workspace-extensions/ reference extensions to copy into a workspace
-├── ops/                          deployment, preflight and smoke scripts
+├── scripts/                      package, browser and live smoke scripts
 └── test/
 
 WORKING_DIR/  (default ~/.pi/imessage)   one deployment, back it up yourself
