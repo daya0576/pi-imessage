@@ -1,4 +1,4 @@
-# 0007. Store images as file paths
+# 0005. Store images as file paths
 
 Status: accepted (2026-10-04; owner accepted 2026-10-05)
 

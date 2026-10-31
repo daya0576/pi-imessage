@@ -6,13 +6,13 @@ These are the decisions in force. Accepted ADR files are never edited.
 |---|---|
 | [0001](0001-durable-owns-state.md) | Pi Durable owns all chat state |
 | [0002](0002-module-layering.md) | Modules in strict layers |
-| [0004](0004-native-extensions.md) | Native Durable extensions, not an SDK adapter |
-| [0006](0006-jsonl-storage.md) | One JSONL storage, backed up by hand |
-| [0007](0007-images-by-path.md) | Store images as file paths |
-| [0010](0010-test-budget.md) | About 40 tests |
-| [0011](0011-reconcile-unsent-answers.md) | Reconcile unsent answers |
-| [0012](0012-run-in-owned-conversation.md) | `/run` in an owned conversation |
-| [0032](0032-native-background-schedules.md) | Native background schedules and read-only execution history |
+| [0003](0003-native-extensions.md) | Native Durable extensions, not an SDK adapter |
+| [0004](0004-jsonl-storage.md) | One JSONL storage, backed up by hand |
+| [0005](0005-images-by-path.md) | Store images as file paths |
+| [0006](0006-test-budget.md) | About 40 tests |
+| [0007](0007-reconcile-unsent-answers.md) | Reconcile unsent answers |
+| [0008](0008-run-in-owned-conversation.md) | `/run` in an owned conversation |
+| [0009](0009-native-background-schedules.md) | Native background schedules and read-only execution history |
 
 ## Adding an ADR
 
@@ -25,5 +25,6 @@ the code.
 ## Removed ADRs
 
 All other ADRs were removed on 2026-10-31, together with every reference to
-them. The files are kept at the annotated tag `archive/adr-pre-prune`
+them, and the rest renumbered without gaps. The files are kept, under their old
+numbers, at the annotated tag `archive/adr-pre-prune`
 (`git show archive/adr-pre-prune:docs/adr/<file>`).

@@ -112,7 +112,7 @@ it("maps chats separately, passes source GUIDs, and sends only final text", asyn
 			if (message.role === "system") expect(message.toolsAdded ?? []).toHaveLength(0);
 		}
 	}
-	// #33 / ADR 0011: a passive user entry is not an intervening ordinary input.
+	// #33 / ADR 0007: a passive user entry is not an intervening ordinary input.
 	const conversation = await agent.harness.conversation(records[0].conversationId, BACKGROUND_CONTEXT);
 	if (!conversation) throw new Error("Missing conversation");
 	await (
@@ -211,7 +211,7 @@ it("admits all busy-chat additions at the next tool boundary without repeating c
 	}
 });
 
-// #33 / ADR 0011: late input from another sender holds an unattempted draft until reconciliation.
+// #33 / ADR 0007: late input from another sender holds an unattempted draft until reconciliation.
 it("reconciles unsent answers with multiple senders and preserves the replaced draft", async () => {
 	const firstStarted = Promise.withResolvers<void>();
 	const finishFirst = Promise.withResolvers<void>();
@@ -292,7 +292,7 @@ it("reconciles unsent answers with multiple senders and preserves the replaced d
 	}
 });
 
-// #33 / ADR 0011: reconciliation failure is not permission to release the obsolete draft.
+// #33 / ADR 0007: reconciliation failure is not permission to release the obsolete draft.
 it("retains a held draft after reconciliation fails and the service reopens", async () => {
 	faux.setResponses([fauxAssistantMessage("obsolete draft")]);
 	const first = await answered(await agent.submit({ chatGuid: "chat", guid: "old", text: "Old condition." }));
@@ -330,7 +330,7 @@ it("retains a held draft after reconciliation fails and the service reopens", as
 	}
 });
 
-// #33 / ADR 0011: input after a transport claim cannot retract that send or overtake it.
+// #33 / ADR 0007: input after a transport claim cannot retract that send or overtake it.
 it("keeps an already claimed reply and sends the subsequent answer only after it settles", async () => {
 	faux.setResponses([
 		fauxAssistantMessage("claimed answer"),

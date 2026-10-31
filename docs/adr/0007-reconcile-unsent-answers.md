@@ -1,4 +1,4 @@
-# 0011. Reconcile unsent answers after intervening input
+# 0007. Reconcile unsent answers after intervening input
 
 Status: accepted (2026-10-04; owner chose reconciliation and explicitly included different senders)
 

@@ -106,7 +106,7 @@ it("runs each command once by source GUID and replies without the model", async 
 	expect(faux.state.callCount).toBe(0);
 });
 
-// #33 / ADR 0012: a run works in a fork, takes the chat's messages and delivers every answer as it is written.
+// #33 / ADR 0008: a run works in a fork, takes the chat's messages and delivers every answer as it is written.
 it("runs in a fork of the chat, routes ordinary messages to it and records it in the chat", async () => {
 	faux.setResponses([fauxAssistantMessage("noted")]);
 	await (await agent.submit({ chatGuid: "chat", guid: "context", text: "The trip is in Kyoto." })).wait(
@@ -226,7 +226,7 @@ it("runs in a fork of the chat, routes ordinary messages to it and records it in
 	expect(faux.state.callCount).toBe(7);
 });
 
-// #33 / ADR 0012: /stop ends a run with its queued messages, or ordinary work keeping later messages.
+// #33 / ADR 0008: /stop ends a run with its queued messages, or ordinary work keeping later messages.
 it("refuses a run while the chat is busy and stops runs and ordinary work", async () => {
 	const chatStarted = Promise.withResolvers<void>();
 	const finishChat = Promise.withResolvers<void>();
