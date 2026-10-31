@@ -7,6 +7,8 @@ export type Settings = {
 	progressMessages: boolean;
 	/** Text the model writes next to a tool call is sent at once; on unless set to false. */
 	interimMessages: boolean;
+	/** Skill names left out of the prompt catalog (ADR 0057); their files stay readable. */
+	hiddenSkills: string[];
 	/** No fallback or priority tier is selected unless explicitly configured. */
 	modelPolicy: {
 		fallback?: { provider: string; modelId: string };
@@ -50,6 +52,9 @@ export async function readSettings(workingDir: string): Promise<Settings> {
 		modelPolicy,
 		progressMessages: raw.progressMessages === true,
 		interimMessages: raw.interimMessages !== false,
+		hiddenSkills: Array.isArray(raw.hiddenSkills)
+			? raw.hiddenSkills.filter((name): name is string => typeof name === "string")
+			: [],
 		chatAllowlist: {
 			whitelist: Array.isArray(allowlist?.whitelist)
 				? allowlist.whitelist.filter((v) => typeof v === "string")

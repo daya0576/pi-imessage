@@ -72,6 +72,9 @@ module.exports = async ({ workingDir, config, Type, defineExtension, defineTool,
 		});
 		faux.setResponses([
 			fauxAssistantMessage(fauxToolCall("web_search", { query: "fixture query" }), { stopReason: "toolUse" }),
+			fauxAssistantMessage(fauxToolCall("tool_search", { query: "get_search_results" }), {
+				stopReason: "toolUse",
+			}),
 			fauxAssistantMessage(fauxToolCall("get_search_results", { query: "fixture query" }), {
 				stopReason: "toolUse",
 			}),
@@ -87,6 +90,9 @@ module.exports = async ({ workingDir, config, Type, defineExtension, defineTool,
 				expect(JSON.stringify(context.messages)).toContain("Readable source text");
 				return fauxAssistantMessage("Web answer");
 			},
+			fauxAssistantMessage(fauxToolCall("tool_search", { query: "get_search_results" }), {
+				stopReason: "toolUse",
+			}),
 			fauxAssistantMessage(fauxToolCall("get_search_results", { query: "fixture query" }), {
 				stopReason: "toolUse",
 			}),
@@ -122,8 +128,17 @@ module.exports = async ({ workingDir, config, Type, defineExtension, defineTool,
 			}
 			faux.setResponses([
 				...(version === "v2"
-					? [fauxAssistantMessage(fauxToolCall("reload_extensions", {}), { stopReason: "toolUse" })]
-					: []),
+					? [
+							fauxAssistantMessage(fauxToolCall("tool_search", { query: "reload_extensions" }), {
+								stopReason: "toolUse",
+							}),
+							fauxAssistantMessage(fauxToolCall("reload_extensions", {}), { stopReason: "toolUse" }),
+						]
+					: [
+							fauxAssistantMessage(fauxToolCall("tool_search", { query: "personal_echo" }), {
+								stopReason: "toolUse",
+							}),
+						]),
 				fauxAssistantMessage(fauxToolCall("personal_echo", { text: "hello" }), { stopReason: "toolUse" }),
 				(context) => {
 					expect(

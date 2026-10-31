@@ -440,6 +440,9 @@ it("schedules a self-restart after the tool call settles and rejects an unprepar
 	const call = (release: string) =>
 		fauxAssistantMessage(fauxToolCall("restart_service", { release }), { stopReason: "toolUse" });
 	faux.setResponses([
+		fauxAssistantMessage(fauxToolCall("tool_search", { query: "restart_service" }), {
+			stopReason: "toolUse",
+		}),
 		call("c".repeat(40)),
 		(context) => {
 			results.push(lastToolResult(context));
@@ -637,26 +640,35 @@ it("starts quietly and wires default coding/image tools, model defaults and work
 	expect(resolved?.model).toEqual(options.runtime.defaults.model);
 	expect(resolved?.tools.map((tool) => tool.name).sort()).toEqual([
 		"bash",
-		"browser",
 		"edit",
 		"fetch_content",
-		"get_search_results",
 		"load_memory",
 		"read",
-		"reload_extensions",
-		"restart_service",
 		"save_memory",
 		"search_memory",
 		"send_message",
-		"subagent",
+		"tool_search",
 		"web_search",
 		"write",
 	]);
+	// ADR 0057: rarely used tools wait for tool_search, and the prompt names them.
+	expect(resolved?.deferred.map((tool) => tool.name).sort()).toEqual([
+		"browser",
+		"get_search_results",
+		"reload_extensions",
+		"restart_service",
+		"subagent",
+	]);
+	expect(JSON.stringify(stream.mock.calls[0][1])).toContain(
+		"before calling it: browser, get_search_results, reload_extensions, restart_service, subagent.",
+	);
 	// ADR 0039: built-ins default to safe; browser mutations (ADR 0017) and self-restart (ADR 0052) opt out.
 	const unsafe = new Set(["browser", "restart_service"]);
-	expect(resolved?.tools.every((tool) => tool.replay === (unsafe.has(tool.name) ? "unsafe" : "safe"))).toBe(
-		true,
-	);
+	expect(
+		[...(resolved?.tools ?? []), ...(resolved?.deferred ?? [])].every(
+			(tool) => tool.replay === (unsafe.has(tool.name) ? "unsafe" : "safe"),
+		),
+	).toBe(true);
 	expect(resolved?.tools.find((tool) => tool.name === "read")?.description).toContain(
 		"Images are kept as file references",
 	);

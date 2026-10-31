@@ -107,3 +107,7 @@ Text the model writes next to a tool call is sent at once as an interim message
 in reply-enabled chats; subagent text stays private. `interimMessages: false` in
 `settings.json` turns this off by default, and `/interim on|off|default` sets it
 for one chat ([ADR 0056](adr/0056-interim-messages.md)).
+
+`hiddenSkills` in `settings.json` is a list of skill names left out of the
+prompt's skill catalog; their files stay readable by path. It is read at startup
+and on `/reload` ([ADR 0057](adr/0057-deferred-tools-and-compact-prompt.md)).

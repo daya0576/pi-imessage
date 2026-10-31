@@ -445,6 +445,7 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 		const childStarted = Promise.withResolvers<void>();
 		const releaseChild = Promise.withResolvers<void>();
 		faux.setResponses([
+			fauxAssistantMessage(fauxToolCall("tool_search", { query: "subagent" }), { stopReason: "toolUse" }),
 			fauxAssistantMessage(
 				fauxToolCall("subagent", { task: "Tree probe <script> sk-fixturecheckpointkey" }),
 				{ stopReason: "toolUse" },

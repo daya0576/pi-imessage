@@ -47,6 +47,7 @@ afterEach(async () => {
 it("delegates into a read-only child and returns only its final text to the parent", async () => {
 	await writeFile(join(directory, "fixture.txt"), "child lookup");
 	faux.setResponses([
+		fauxAssistantMessage(fauxToolCall("tool_search", { query: "subagent" }), { stopReason: "toolUse" }),
 		fauxAssistantMessage(fauxToolCall("subagent", { task: "Read fixture.txt" }), { stopReason: "toolUse" }),
 		(context) => {
 			const messages = JSON.stringify(context.messages);
@@ -57,7 +58,6 @@ it("delegates into a read-only child and returns only its final text to the pare
 				.flatMap((message) => message.toolsAdded ?? []);
 			expect(tools.map((tool) => tool.name).sort()).toEqual([
 				"fetch_content",
-				"get_search_results",
 				"load_memory",
 				"read",
 				"search_memory",
@@ -100,6 +100,7 @@ it("cancels the foreground child with its parent without cancelling another chat
 	const started = Promise.withResolvers<void>();
 	let childSignal: AbortSignal | undefined;
 	faux.setResponses([
+		fauxAssistantMessage(fauxToolCall("tool_search", { query: "subagent" }), { stopReason: "toolUse" }),
 		fauxAssistantMessage(fauxToolCall("subagent", { task: "Wait for cancellation" }), {
 			stopReason: "toolUse",
 		}),

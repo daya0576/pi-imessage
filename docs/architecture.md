@@ -55,6 +55,10 @@ stop/reset/shutdown/restart cleanup, while Durable owns invocation state and
 unsafe replay policy. Read-only contexts do not offer the tool. This is not an
 OS sandbox; see [browser operations and retention](browser.md) and ADR 0017.
 
+The model is offered a fixed core of tools; every other built-in or workspace tool
+is deferred and loaded on demand with Durable's `tool_search`, the same in every
+conversation (ADR 0057).
+
 
 ### Native schedules
 

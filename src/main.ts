@@ -2,6 +2,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { type Cursor, createRegistry, type Extension } from "@earendil-works/pi-durable";
+import { createToolSearchExtension } from "@earendil-works/pi-durable/tool-search";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import {
 	type AgentDefaults,
@@ -36,6 +37,31 @@ import { openHttpTransport } from "./transport/http.ts";
 import type { MessageSender } from "./transport/send.ts";
 import { createWatcher } from "./transport/watch.ts";
 import { startWeb } from "./web/server.ts";
+
+/** ADR 0057: tools offered upfront; every other built-in or workspace tool waits for tool_search. */
+const OFFERED_TOOLS = new Set([
+	"read",
+	"bash",
+	"edit",
+	"write",
+	"send_message",
+	"search_memory",
+	"load_memory",
+	"save_memory",
+	"web_search",
+	"fetch_content",
+	"tool_search",
+]);
+
+function deferRare<T extends Extension>(extension: T): T {
+	if (!extension.tools) return extension;
+	return {
+		...extension,
+		tools: extension.tools.map((tool) =>
+			OFFERED_TOOLS.has(tool.name) ? tool : { ...tool, deferred: true as const },
+		),
+	};
+}
 
 /** Explicit startup; pass an isolated runtime in tests instead of opening installed auth. */
 export async function startService(
@@ -89,6 +115,8 @@ export async function startService(
 				: [
 						CodingTools,
 						ImageRead,
+						// ADR 0057: Durable's own tool_search loads the deferred tools.
+						createToolSearchExtension(),
 						await memoryExtension(options.workingDir),
 						webExtension(),
 						browser.extension,
@@ -102,8 +130,8 @@ export async function startService(
 							settled: (taskId) => harness.waitForTask(taskId, BACKGROUND_CONTEXT),
 							launch: launchInTerminal,
 						}),
-					]),
-			...(await loadWorkspaceExtensions(options.workingDir)),
+					].map(deferRare)),
+			...(await loadWorkspaceExtensions(options.workingDir)).map(deferRare),
 		];
 		validateSchedules(extensions);
 		const names = new Set<string>();

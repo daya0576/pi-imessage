@@ -87,6 +87,8 @@ it("loads skills and request settings, then refreshes resources and native polic
 				expect(prompt).toContain("Global fixture instructions.");
 				expect(prompt).toContain("Workspace instructions v1.");
 				expect(prompt).toContain("Polish fixture v1");
+				// ADR 0057: one line per skill under its shared directory, not one XML block each.
+				expect(prompt).toContain(`${packageDir}/<name>/SKILL.md:\\n- zblog-polish: Polish fixture v1`);
 				expect(prompt).toContain("Current system v1.");
 				expect(prompt).not.toContain("HIDDEN HISTORY");
 				// #33 / ADR 0019: the prompt must not advertise retired scheduling entry points.
