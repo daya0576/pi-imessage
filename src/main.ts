@@ -27,7 +27,6 @@ import { createBrowser } from "./extensions/browser.ts";
 import { memoryExtension } from "./extensions/memory.ts";
 import { messageExtension } from "./extensions/message.ts";
 import { ImageRead } from "./extensions/read-image.ts";
-import { launchInTerminal, restartExtension } from "./extensions/restart.ts";
 import { validateSchedules, type WorkspaceExtension } from "./extensions/schedules.ts";
 import { Subagent } from "./extensions/subagent.ts";
 import { webExtension } from "./extensions/web.ts";
@@ -122,14 +121,6 @@ export async function startService(
 						browser.extension,
 						Subagent,
 						workspaceExtension(reload),
-						// The service runs from a release directory; the controller starts after the call settles.
-						restartExtension({
-							workingDir: options.workingDir,
-							currentRelease: process.cwd(),
-							deployRoot: "/tmp",
-							settled: (taskId) => harness.waitForTask(taskId, BACKGROUND_CONTEXT),
-							launch: launchInTerminal,
-						}),
 					].map(deferRare)),
 			...(await loadWorkspaceExtensions(options.workingDir)).map(deferRare),
 		];

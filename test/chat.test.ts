@@ -1,6 +1,6 @@
-import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { type TranscriptContext, Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
@@ -11,21 +11,13 @@ import {
 	fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
-import {
-	defineExtension,
-	defineTool,
-	Harness,
-	type Submission,
-	type TaskId,
-	UserEntry,
-} from "@earendil-works/pi-durable";
+import { defineExtension, defineTool, Harness, type Submission, UserEntry } from "@earendil-works/pi-durable";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Chats } from "../src/agent/chats.ts";
 import type { SendText } from "../src/agent/deliver.ts";
 import { DirectSends } from "../src/agent/direct-send.ts";
 import * as modelConfig from "../src/agent/models.ts";
 import { Deliveries } from "../src/agent/replies.ts";
-import { restartExtension } from "../src/extensions/restart.ts";
 import { startService } from "../src/main.ts";
 import type { MessageSender } from "../src/transport/send.ts";
 
@@ -402,75 +394,6 @@ it("recovers an unsent saved answer, then preserves its sent receipt across reop
 	expect(faux.state.callCount).toBe(1);
 });
 
-// #39: the restart tool starts its controller only after its own call has settled and never reruns.
-it("schedules a self-restart after the tool call settles and rejects an unprepared release", async () => {
-	await agent.close();
-	const releases = join(directory, "releases");
-	const target = join(releases, "b".repeat(40));
-	for (const entry of ["src", "node_modules", "ops"]) await mkdir(join(target, entry), { recursive: true });
-	await writeFile(join(target, "src", "cli.ts"), "");
-	await writeFile(join(target, "ops", "restart.command"), "#!/bin/bash\n");
-	let restartTask: TaskId | undefined;
-	const launched = Promise.withResolvers<string>();
-	const launch = vi.fn(async (controller: string) => {
-		const task = (await agent.harness.inspect(BACKGROUND_CONTEXT)).tasks.find(
-			({ record }) => record.id === restartTask,
-		);
-		expect(task?.state.kind).not.toBe("running");
-		launched.resolve(controller);
-	});
-	options.extensions = () => [
-		restartExtension({
-			workingDir: directory,
-			currentRelease: join(releases, "a".repeat(40)),
-			deployRoot: directory,
-			settled(taskId) {
-				restartTask = taskId;
-				return agent.harness.waitForTask(taskId, BACKGROUND_CONTEXT);
-			},
-			launch,
-		}),
-	];
-	agent = await startService(options);
-	const results: string[] = [];
-	const lastToolResult = (context: TranscriptContext) =>
-		JSON.stringify(context.messages.findLast((message) => message.role === "toolResult"));
-	const call = (release: string) =>
-		fauxAssistantMessage(fauxToolCall("restart_service", { release }), { stopReason: "toolUse" });
-	faux.setResponses([
-		fauxAssistantMessage(fauxToolCall("tool_search", { query: "restart_service" }), {
-			stopReason: "toolUse",
-		}),
-		call("c".repeat(40)),
-		(context) => {
-			results.push(lastToolResult(context));
-			return call("b".repeat(40));
-		},
-		(context) => {
-			results.push(lastToolResult(context));
-			return call("b".repeat(40));
-		},
-		(context) => {
-			results.push(lastToolResult(context));
-			return fauxAssistantMessage("restart scheduled");
-		},
-	]);
-	const record = await answered(await agent.submit({ chatGuid: "chat", guid: "restart", text: "deploy" }));
-	expect(results[0]).toContain("not prepared");
-	expect(results[1]).toContain("is scheduled");
-	expect(results[2]).toContain("already scheduled");
-	const controller = await launched.promise;
-	expect(launch).toHaveBeenCalledTimes(1);
-	expect(controller.startsWith(join(directory, "pi-imessage-restart."))).toBe(true);
-	const control = await readFile(join(dirname(controller), "control.sh"), "utf8");
-	expect(control).toContain(`OLD_PID='${process.pid}'`);
-	expect(control).toContain(`REPO='${target}'`);
-	expect((await stat(join(dirname(controller), "environment.sh"))).mode & 0o777).toBe(0o600);
-	const conversation = await agent.harness.conversation(record.conversationId, BACKGROUND_CONTEXT);
-	const resolved = await conversation?.agent(BACKGROUND_CONTEXT);
-	expect(resolved?.tools.find((tool) => tool.name === "restart_service")?.replay).toBe("unsafe");
-});
-
 // #33 Phase 2: reread delivery settings without retrying a possibly completed rich send.
 it("passes live delivery settings and does not retry a sender that throws after a possible effect", async () => {
 	faux.setResponses([fauxAssistantMessage("uncertain")]);
@@ -654,14 +577,13 @@ it("starts quietly and wires default coding/image tools, model defaults and work
 		"browser",
 		"get_search_results",
 		"reload_extensions",
-		"restart_service",
 		"subagent",
 	]);
 	expect(JSON.stringify(stream.mock.calls[0][1])).toContain(
-		"before calling it: browser, get_search_results, reload_extensions, restart_service, subagent.",
+		"before calling it: browser, get_search_results, reload_extensions, subagent.",
 	);
-	// Built-ins default to safe; browser mutations and self-restart opt out.
-	const unsafe = new Set(["browser", "restart_service"]);
+	// Built-ins default to safe; browser mutations opt out.
+	const unsafe = new Set(["browser"]);
 	expect(
 		[...(resolved?.tools ?? []), ...(resolved?.deferred ?? [])].every(
 			(tool) => tool.replay === (unsafe.has(tool.name) ? "unsafe" : "safe"),
