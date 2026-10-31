@@ -12,7 +12,7 @@
 
 - Read `docs/architecture.md` and `docs/adr/` before changing what they cover.
 - Keep the layering; `test/architecture.test.ts` is the rule.
-- A new or reversed decision starts as a new ADR with status `proposed`; the user accepts it. Never edit an accepted ADR; supersede it with a new one.
+- Never add an ADR on your own initiative. A new ADR, including one that reverses an accepted one, is written only during a grilling session (the `grilling` skill) to record what the user settled there. Otherwise record the change in the GitHub issue, `docs/architecture.md` or the code. Never edit an accepted ADR.
 - Feature scope and progress live in the GitHub issue, not in docs.
 - Keep data users rely on compatible: `settings.json`, memory JSONL, `cron/jobs.json`, reminders, HTTP endpoints. Internal code keeps no backward compatibility.
 

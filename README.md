@@ -102,8 +102,8 @@ six hours and near the model's limit.
 This repository is the framework; `WORKING_DIR` is one deployment's data and code.
 Startup, `/reload` and the assistant's `reload_extensions` load the extensions.
 See [workspace extensions](docs/workspace-extensions.md),
-[ADR 0036](docs/adr/0036-workspace-policy-and-neutral-service-id.md) and
-[ADR 0042](docs/adr/0042-background-schedules-and-workspace-extensions.md).
+ADR 0036 and
+ADR 0042.
 
 ```text
 pi-imessage/                      framework, shared by every deployment

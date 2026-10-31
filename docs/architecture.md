@@ -76,8 +76,8 @@ The host delivery poll uses existing direct-send receipts and passive chat recor
 `web/schedules.ts` projects these native records, including latest-ten history.
 Daily slots and learning dates use the service machine's local timezone; the Web
 view uses the same timezone. Saved absolute deadlines survive restart. See
-[ADR 0032](adr/0032-native-background-schedules.md) and
-[ADR 0034](adr/0034-machine-local-schedule-time.md).
+ADR 0032 and
+ADR 0034.
 
 ## 2. Workflow
 

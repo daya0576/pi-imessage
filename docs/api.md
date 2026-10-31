@@ -99,15 +99,15 @@ previews. Raw outputs, commands, prompts and document contents stay local.
 Known credential indicators are redacted; arbitrary user-authored secrets cannot
 be guaranteed detectable. Missing or false keeps final-only delivery. The setting
 is reread for each notice; old tasks and unknown sends are not replayed
-([ADR 0040](adr/0040-chat-progress-notices.md)). `/verbose on|off` in a chat
+(ADR 0040). `/verbose on|off` in a chat
 overrides this default for that chat only and `/verbose default` removes the
-override ([ADR 0049](adr/0049-per-chat-progress-notices.md)).
+override (ADR 0049).
 
 Text the model writes next to a tool call is sent at once as an interim message
 in reply-enabled chats; subagent text stays private. `interimMessages: false` in
 `settings.json` turns this off by default, and `/interim on|off|default` sets it
-for one chat ([ADR 0056](adr/0056-interim-messages.md)).
+for one chat (ADR 0056).
 
 `hiddenSkills` in `settings.json` is a list of skill names left out of the
 prompt's skill catalog; their files stay readable by path. It is read at startup
-and on `/reload` ([ADR 0057](adr/0057-deferred-tools-and-compact-prompt.md)).
+and on `/reload` (ADR 0057).
