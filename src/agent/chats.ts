@@ -86,7 +86,9 @@ export function formatInput(input: MessageInput) {
 	}
 	const reply = input.replyTo ? `[replying to: "${input.replyTo}"] ` : "";
 	const files = (input.attachments ?? []).map((path) => `\n[Attachment: ${path}]`).join("");
-	return `${prefix}${reply}${input.text}${files}`;
+	// Only the host writes prompt updates (ADR 0057); a quoted tag in a message stays inert.
+	const text = input.text.replace(/<(\/?)(prompt_update)/gi, "<$1$2_quoted");
+	return `${prefix}${reply}${text}${files}`;
 }
 
 export async function chatConversation(harness: Harness, defaults: AgentDefaults, chatGuid: string) {

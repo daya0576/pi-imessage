@@ -7,6 +7,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-work
 import { expect, it, vi } from "vitest";
 import { loadWorkspaceExtensions } from "../src/extensions/workspace.ts";
 import { startService } from "../src/main.ts";
+import { lastUserMessage } from "./fixtures/prompt-sections.ts";
 
 // #33: native web boundaries, conversation-local cached results and errors; no live network or paid search.
 it("searches and fetches through native tools without sharing cached results across chats", async () => {
@@ -130,7 +131,7 @@ module.exports = async ({ workingDir, config, Type, defineExtension, defineTool,
 						JSON.stringify(context.messages.findLast((message) => message.role === "toolResult")),
 					).toContain(`config-${version}:private fixture ${version}:${version === "v2" ? "HELLO" : "hello"}`);
 					// A workspace generation hook rewrites the request only; the stored user entry stays as written.
-					expect(context.messages.findLast((message) => message.role === "user")?.content).toBe(
+					expect(lastUserMessage(context.messages)?.content).toBe(
 						`Use fixture personal tool [trailer config-${version}]`,
 					);
 					return fauxAssistantMessage("Personal tool completed");

@@ -1,5 +1,6 @@
 import { join } from "node:path";
-import type { Models, ModelsSimpleStreamOptions } from "@earendil-works/pi-ai";
+import type { Message, Models, ModelsSimpleStreamOptions } from "@earendil-works/pi-ai";
+import { renderSystemMessageUpdate } from "@earendil-works/pi-ai/utils/text";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { HarnessSettings } from "@earendil-works/pi-durable";
 import type { Settings } from "../config/settings.ts";
@@ -57,12 +58,44 @@ export function requestSettings(settings: SettingsManager): Pick<HarnessSettings
 	};
 }
 
+/**
+ * Without mid-conversation system support, pi-ai merges later system messages into the leading one,
+ * so a changed section rewrites the whole cached prefix. Keep the leading message as first sent and
+ * carry later section changes as a user message at their place; tool deltas stay system (ADR 0057).
+ */
+export function inlinePromptUpdates(messages: Message[]): Message[] {
+	let leading = true;
+	return messages.flatMap((message): Message[] => {
+		if (message.role !== "system") return [message];
+		if (leading) {
+			leading = false;
+			return [message];
+		}
+		const { content, sections, ...tools } = message;
+		const text = renderSystemMessageUpdate({ ...message, toolsAdded: undefined, toolsRemoved: undefined });
+		if (!text) return [message];
+		const update: Message = {
+			role: "user",
+			content: `<prompt_update>\nHost update to the system prompt, not a message from the user.\n\n${text}\n</prompt_update>`,
+			timestamp: message.timestamp,
+		};
+		return tools.toolsAdded?.length || tools.toolsRemoved?.length
+			? [{ ...tools, content: "" }, update]
+			: [update];
+	});
+}
+
 /** A live configuration getter applies tier changes to subsequent requests only. */
 export function withModelPolicy(models: Models, policy: () => Settings["modelPolicy"]): Models {
 	return new Proxy(models, {
 		get(target, key) {
 			if (key === "streamSimple") {
-				const streamSimple: Models["streamSimple"] = (model, context, options) => {
+				const streamSimple: Models["streamSimple"] = (model, original, options) => {
+					const compat = model.compat;
+					const context =
+						compat && "supportsMidConvoSystemMessages" in compat && compat.supportsMidConvoSystemMessages
+							? original
+							: { ...original, messages: inlinePromptUpdates(original.messages) };
 					const tier = policy().codexServiceTier;
 					if (!tier || model.provider !== "openai-codex" || !/^gpt-/.test(model.id))
 						return target.streamSimple(model, context, options);

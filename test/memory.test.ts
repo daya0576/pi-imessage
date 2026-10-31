@@ -11,6 +11,7 @@ import {
 } from "@earendil-works/pi-ai/providers/faux";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { startService } from "../src/main.ts";
+import { currentSections } from "./fixtures/prompt-sections.ts";
 
 let directory: string;
 let memoryRoot: string;
@@ -62,7 +63,7 @@ it("offers memory tools by default, forwards their CLI arguments and refreshes c
 	const fact = "--quoted 'fact'; $(touch forbidden)\n第二行";
 	faux.setResponses([
 		(context) => {
-			const memory = context.messages.filter((message) => message.role === "system").at(-1)?.sections?.memory;
+			const memory = currentSections(context.messages).memory;
 			expect(memory).toContain("Core fixture v1.");
 			expect(memory).toContain("fixture/one");
 			return fauxAssistantMessage(
@@ -136,9 +137,7 @@ it("offers memory tools by default, forwards their CLI arguments and refreshes c
 	await agent.command({ chatGuid: "chat", guid: "reload", text: "/reload" });
 	faux.setResponses([
 		(context) => {
-			const memory = context.messages
-				.filter((message) => message.role === "system")
-				.findLast((message) => message.sections?.memory)?.sections?.memory;
+			const memory = currentSections(context.messages).memory;
 			expect(memory).toContain("Core fixture v2.");
 			expect(memory).toContain("fixture/two");
 			expect(memory).not.toContain("fixture/one");

@@ -37,6 +37,7 @@ Accepted ADR files are never edited; this index records which ones are current.
 | [0054](0054-window-thresholds-replace-timer.md) | The advertised model window bounds chat context; six-hour timer removed | Active; owner accepted on 2026-10-27 |
 | [0055](0055-idle-context-reset.md) | A chat context over 60k tokens idle for an hour starts fresh on the next message | Active; owner accepted on 2026-10-30 |
 | [0056](0056-interim-messages.md) | Interim messages between tool calls via `/interim`, on by default | Proposed; owner-requested implementation |
+| [0057](0057-prompt-updates-as-messages.md) | Prompt section changes travel as user messages; the leading prompt stays cached | Proposed (#49) |
 
 ## Replaced or rejected
 

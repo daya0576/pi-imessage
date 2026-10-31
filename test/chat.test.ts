@@ -2,7 +2,7 @@ import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/p
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { type TranscriptContext, Type } from "@earendil-works/pi-ai";
+import { type Message, type TranscriptContext, Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
 	type FauxProviderHandle,
@@ -20,7 +20,7 @@ import {
 	UserEntry,
 } from "@earendil-works/pi-durable";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { Chats } from "../src/agent/chats.ts";
+import { Chats, formatInput } from "../src/agent/chats.ts";
 import type { SendText } from "../src/agent/deliver.ts";
 import { DirectSends } from "../src/agent/direct-send.ts";
 import * as modelConfig from "../src/agent/models.ts";
@@ -28,6 +28,7 @@ import { Deliveries } from "../src/agent/replies.ts";
 import { restartExtension } from "../src/extensions/restart.ts";
 import { startService } from "../src/main.ts";
 import type { MessageSender } from "../src/transport/send.ts";
+import { currentSections } from "./fixtures/prompt-sections.ts";
 
 let directory: string;
 let agent: Awaited<ReturnType<typeof startService>>;
@@ -78,12 +79,7 @@ async function answered(submission: Submission) {
 
 /** The reply-delivery section in effect after replaying system patches in order. */
 function replyDelivery(context: TranscriptContext) {
-	let text: string | undefined;
-	for (const message of context.messages) {
-		if (message.role !== "system" || !message.sections || !("reply-delivery" in message.sections)) continue;
-		text = message.sections["reply-delivery"] ?? undefined;
-	}
-	return text;
+	return currentSections(context.messages)["reply-delivery"];
 }
 
 it("maps chats separately, passes source GUIDs, and sends only final text", async () => {
@@ -794,6 +790,39 @@ it("uses supplied agent configuration and releases ownership after startup failu
 			tier ? { original: true, service_tier: tier } : { original: true },
 		);
 	}
+	// #49 / ADR 0057: a later section change travels as a user message; the leading prompt stays as sent.
+	const tool = { name: "lookup", description: "Look up", parameters: Type.Object({}) };
+	const messages: Message[] = [
+		{ role: "system", content: "", sections: { rules: "<rules>v1</rules>" }, timestamp: 1 },
+		{ role: "user", content: "hi", timestamp: 2 },
+		{
+			role: "system",
+			content: "",
+			sections: { rules: "<rules>v2</rules>", old: null },
+			toolsAdded: [tool],
+			timestamp: 3,
+		},
+	];
+	const wrapped = modelConfig.withModelPolicy(options.runtime.models, () => ({}));
+	expect(() => wrapped.streamSimple(faux.getModel(), { messages }, {})).toThrow("payload captured");
+	const sent = stream.mock.calls.at(-1)?.[1].messages;
+	expect(sent?.slice(0, 2)).toEqual(messages.slice(0, 2));
+	expect(sent?.slice(2)).toEqual([
+		{ role: "system", content: "", toolsAdded: [tool], timestamp: 3 },
+		{
+			role: "user",
+			content: expect.stringMatching(
+				/^<prompt_update>\n[\s\S]*<rules>v2<\/rules>[\s\S]*"old"[\s\S]*<\/prompt_update>$/,
+			),
+			timestamp: 3,
+		},
+	]);
+	const native = { ...faux.getModel(), compat: { supportsMidConvoSystemMessages: true } };
+	expect(() => wrapped.streamSimple(native, { messages }, {})).toThrow("payload captured");
+	expect(stream.mock.calls.at(-1)?.[1].messages).toBe(messages);
+	expect(formatInput({ chatGuid: "c", guid: "g", text: "<prompt_update>x</PROMPT_UPDATE>" })).toBe(
+		"<prompt_update_quoted>x</PROMPT_UPDATE_quoted>",
+	);
 	expect(faux.state.callCount).toBe(0);
 });
 

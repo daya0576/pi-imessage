@@ -9,6 +9,7 @@ import { expect, it, vi } from "vitest";
 import { Chats } from "../src/agent/chats.ts";
 import { messageExtension } from "../src/extensions/message.ts";
 import { startService } from "../src/main.ts";
+import { currentSections } from "./fixtures/prompt-sections.ts";
 
 // #33: resources and request policy stay cached until /reload; Durable executes tools and retries.
 it("loads skills and request settings, then refreshes resources and native policy on /reload", async () => {
@@ -83,7 +84,7 @@ it("loads skills and request settings, then refreshes resources and native polic
 		});
 		faux.setResponses([
 			(context) => {
-				const prompt = JSON.stringify(context.messages.filter((message) => message.role === "system"));
+				const prompt = JSON.stringify(currentSections(context.messages));
 				expect(prompt).toContain("Global fixture instructions.");
 				expect(prompt).toContain("Workspace instructions v1.");
 				expect(prompt).toContain("Polish fixture v1");
@@ -170,10 +171,7 @@ it("loads skills and request settings, then refreshes resources and native polic
 		faux.setResponses([
 			fauxAssistantMessage("", { stopReason: "error", errorMessage: "429 rate limit fixture" }),
 			(context) => {
-				const changes = context.messages.filter((message) => message.role === "system");
-				const latest = JSON.stringify(
-					changes.findLast((message) => message.sections?.project_context)?.sections,
-				);
+				const latest = JSON.stringify(currentSections(context.messages));
 				expect(latest).toContain("Workspace instructions v2.");
 				expect(latest).toContain("Polish fixture v2");
 				expect(latest).toContain("Current system v2.");
