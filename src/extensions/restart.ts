@@ -13,7 +13,7 @@ export type RestartOptions = {
 	currentRelease: string;
 	/** Parent of the private controller directories; `/tmp` in production. */
 	deployRoot: string;
-	/** Resolves once the calling tool task has settled, so the stop cannot interrupt the call (ADR 0052). */
+	/** Resolves once the calling tool task has settled, so the stop cannot interrupt the call. */
 	settled(taskId: TaskId): Promise<unknown>;
 	/** Starts the controller script; production opens it in Terminal. */
 	launch(controller: string): Promise<void>;

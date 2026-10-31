@@ -56,7 +56,7 @@ afterEach(async () => {
 	await rm(directory, { recursive: true, force: true });
 });
 
-// #33 / ADR 0013: tools delegate arguments and results to the existing CLI; no host memory backend.
+// #33: tools delegate arguments and results to the existing CLI; no host memory backend.
 it("offers memory tools by default, forwards their CLI arguments and refreshes core/namespaces on reload", async () => {
 	agent = await startService(options);
 	const fact = "--quoted 'fact'; $(touch forbidden)\n第二行";

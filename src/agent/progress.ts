@@ -112,7 +112,7 @@ export async function startProgress(harness: Harness, workingDir: string, sender
 		);
 		if (receipt.textStatus === "unknown") console.warn("Progress delivery unknown", task.id, chatGuid);
 	}
-	/** The model's own words between tool calls, sent before that call's notices (ADR 0056). */
+	/** The model's own words between tool calls, sent before that call's notices. */
 	async function interim(entry: EntryRecord) {
 		const text = AssistantEntry.is(entry) ? interimText(entry.model?.[0]) : undefined;
 		if (!text) return;

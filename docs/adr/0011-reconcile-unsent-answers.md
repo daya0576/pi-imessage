@@ -2,7 +2,7 @@
 
 Status: accepted (2026-10-04; owner chose reconciliation and explicitly included different senders)
 
-**Context.** Native steer places all selected messages after a tool round when configured with `steeringMode: "all"`. At a final-answer boundary, however, Durable first records the answer and settles that run's inputs; selected new messages start another run. The earlier answer remains eligible for delivery even when a newer message corrects its assumptions. An `onYield` continuation does not change this: it is ignored when the boundary selects user input. See [the state ownership decision](0001-durable-owns-state.md) and [at-most-once replies](0003-replies-at-most-once.md).
+**Context.** Native steer places all selected messages after a tool round when configured with `steeringMode: "all"`. At a final-answer boundary, however, Durable first records the answer and settles that run's inputs; selected new messages start another run. The earlier answer remains eligible for delivery even when a newer message corrects its assumptions. An `onYield` continuation does not change this: it is ignored when the boundary selects user input. See [the state ownership decision](0001-durable-owns-state.md).
 
 **Example.** The model is finishing a two-day itinerary when the user says “three days instead.” Sending both itineraries is confusing. Conversely, blindly dropping the first answer when the new message asks an unrelated question can lose useful work.
 

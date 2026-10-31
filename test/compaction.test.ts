@@ -20,7 +20,7 @@ it("reports manual compaction and runs workspace schedules natively", async () =
 	const directory = await mkdtemp(join(tmpdir(), "imessage-compact-"));
 	let agent: Awaited<ReturnType<typeof startService>> | undefined;
 	try {
-		// #33 / ADR 0034: timezone and DST checks run outside the test worker.
+		// #33: timezone and DST checks run outside the test worker.
 		for (const timezone of ["UTC", "America/New_York"])
 			await promisify(execFile)(
 				process.execPath,
@@ -79,7 +79,7 @@ it("reports manual compaction and runs workspace schedules natively", async () =
 		expect(compactionReply(completed)).toBe("Compaction result unavailable.");
 		await agent.close();
 
-		// #33 / ADR 0032 / ADR 0035: business-neutral workspace schedules, deadlines and the outbox.
+		// #33: business-neutral workspace schedules, deadlines and the outbox.
 		const scheduledDir = join(directory, "scheduled");
 		const fixture = join(scheduledDir, "extensions/fixture");
 		const hiddenFixture = join(scheduledDir, "extensions/.fixture");
@@ -301,7 +301,7 @@ module.exports = ({ config, defineDoc, defineTask, defineExtension, ScheduledOut
 			if (job) job.extension = "scheduling";
 		}, BACKGROUND_CONTEXT);
 
-		// #33 / ADR 0035: multi-task schedules reload, roll back and remove safely.
+		// #33: multi-task schedules reload, roll back and remove safely.
 		await writeFile(join(fixture, "config.json"), JSON.stringify({ time: "23:59", intervalMs: 100 }));
 		await agent.command({ chatGuid: "control", guid: "add-interval", text: "/reload" });
 		agent.harness.resume();

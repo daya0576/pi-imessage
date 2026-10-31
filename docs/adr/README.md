@@ -24,7 +24,6 @@ the code.
 
 ## Removed ADRs
 
-All other ADRs were removed on 2026-10-31. Their numbers still appear in code
-comments, tests and older docs; the files are kept at the annotated tag
-`archive/adr-pre-prune` (`git show archive/adr-pre-prune:docs/adr/<file>`).
-The last wording of 0056 is in commit 0471e18, and 0053 exists only on `main`.
+All other ADRs were removed on 2026-10-31, together with every reference to
+them. The files are kept at the annotated tag `archive/adr-pre-prune`
+(`git show archive/adr-pre-prune:docs/adr/<file>`).

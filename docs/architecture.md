@@ -45,19 +45,18 @@ extensions. Source and configuration reload without interrupting current calls.
 Failed reloads retain old definitions and schedule configuration. Removed task
 code stays in memory for calls that can still admit children; missing required
 code fails explicitly on restart. The assistant's `reload_extensions` tool uses
-the same service owner. See [workspace extensions](workspace-extensions.md),
-ADR 0035 and ADR 0036.
+the same service owner. See [workspace extensions](workspace-extensions.md).
 
 The built-in native `browser` extension wraps the pinned pi-browser CLI with
 host-derived conversation scopes. Browser children get private HOME/cache,
 profile/output and cwd; other coding tools are unchanged. The host owns scoped
 stop/reset/shutdown/restart cleanup, while Durable owns invocation state and
 unsafe replay policy. Read-only contexts do not offer the tool. This is not an
-OS sandbox; see [browser operations and retention](browser.md) and ADR 0017.
+OS sandbox; see [browser operations and retention](browser.md).
 
 The model is offered a fixed core of tools; every other built-in or workspace tool
 is deferred and loaded on demand with Durable's `tool_search`, the same in every
-conversation (ADR 0057).
+conversation.
 
 
 ### Native schedules
@@ -70,14 +69,12 @@ parallel UI log. The framework owns daily/interval cadence, non-overlap and reco
 defines no schedule of its own: chat context is bounded by Durable's thresholds
 against the window each model advertises (ADR 0054), and a chat whose last turn
 exceeded 60k tokens more than an hour ago starts fresh on its next message
-(ADR 0055, checked in `agent/chats.ts` on submission). Workspace tasks own business policy and
+(checked in `agent/chats.ts` on submission). Workspace tasks own business policy and
 documents, and can commit their state and the generic outgoing item atomically.
 The host delivery poll uses existing direct-send receipts and passive chat records.
 `web/schedules.ts` projects these native records, including latest-ten history.
 Daily slots and learning dates use the service machine's local timezone; the Web
-view uses the same timezone. Saved absolute deadlines survive restart. See
-ADR 0032 and
-ADR 0034.
+view uses the same timezone. Saved absolute deadlines survive restart.
 
 ## 2. Workflow
 

@@ -57,7 +57,7 @@ export function workspaceExtension(reload: () => Promise<unknown>) {
 	});
 }
 
-/** Scan only direct workspace extension directories; never skills or attachments (ADR 0035). */
+/** Scan only direct workspace extension directories; never skills or attachments. */
 export async function loadWorkspaceExtensions(workingDir: string) {
 	const extensions: WorkspaceExtension[] = [];
 	const root = join(workingDir, "extensions");

@@ -58,7 +58,7 @@ async function chatEntries(chatGuid = "chat") {
 	return JSON.stringify(await conversation?.entries({}, 100, undefined, BACKGROUND_CONTEXT));
 }
 
-// #33 / ADR 0013: a command row runs once by its GUID, without a model turn or a receipt state machine.
+// #33: a command row runs once by its GUID, without a model turn or a receipt state machine.
 it("runs each command once by source GUID and replies without the model", async () => {
 	const thinking = { chatGuid: "chat", guid: "thinking", text: "/thinking high" };
 	await agent.command(thinking);
@@ -68,7 +68,7 @@ it("runs each command once by source GUID and replies without the model", async 
 	await agent.command({ chatGuid: "chat", guid: "stop", text: "/stop" });
 	await agent.command({ chatGuid: "chat", guid: "busy-run", text: "/run soon" });
 	// /verbose reads the chat override before the global setting and validates its argument.
-	// ADR 0056: /interim is the same per-chat switch and defaults to on.
+	// /interim is the same per-chat switch and defaults to on.
 	for (const text of [
 		"/verbose",
 		"/verbose on",
@@ -173,7 +173,7 @@ it("runs in a fork of the chat, routes ordinary messages to it and records it in
 	expect(replies().at(-1)).toBe(replies().at(-2)); // Same report; the run line exists only during a run.
 	expect(faux.state.callCount).toBe(5);
 
-	// ADR 0055: a context over the token floor whose last turn is older than the idle limit starts fresh on the
+	// A context over the token floor whose last turn is older than the idle limit starts fresh on the
 	// next message; a fresh one of the same size, or an old small one, is kept.
 	const chat = (await agent.harness.snapshot(Chats, BACKGROUND_CONTEXT))?.items.find(
 		(item) => item.chatGuid === "chat",
@@ -226,7 +226,7 @@ it("runs in a fork of the chat, routes ordinary messages to it and records it in
 	expect(faux.state.callCount).toBe(7);
 });
 
-// #33 / ADR 0012, 0015: /stop ends a run with its queued messages, or ordinary work keeping later messages.
+// #33 / ADR 0012: /stop ends a run with its queued messages, or ordinary work keeping later messages.
 it("refuses a run while the chat is busy and stops runs and ordinary work", async () => {
 	const chatStarted = Promise.withResolvers<void>();
 	const finishChat = Promise.withResolvers<void>();

@@ -12,7 +12,7 @@ Never run old/new pipelines concurrently or use production data in tests.
 Implementation readiness and open decisions are tracked in GitHub #33.
 
 For ordinary updates, use [Routine deployment and restart](#routine-deployment-and-restart).
-The one-time legacy migration is archived at tag `archive/legacy-migration` (ADR 0043).
+The one-time legacy migration is archived at tag `archive/legacy-migration`.
 
 ## Prerequisites
 
@@ -193,7 +193,7 @@ the owner-selected unauthenticated bind `0.0.0.0:7750` (trusted networks only).
 A similarly named Pi web job does not control this service. Do not switch
 controllers, install launchd or upgrade Node during a routine restart.
 
-### 2. Record the baseline (ADR 0038)
+### 2. Record the baseline
 
 Restart at any time; no running work defers it. Before stopping, record the
 counts of `sending` / `unknown` receipts from `/chat/data` (counts only, no chat
@@ -203,7 +203,7 @@ text). Never reset cursors, delete state or replay uncertain sends. Do not use
 ### 3. Run one private controller
 
 From a chat, the assistant calls `restart_service` with the full commit hash of
-the prepared release directory (ADR 0052). The host writes the controller
+the prepared release directory. The host writes the controller
 directory below itself and opens the controller only after that tool call has
 settled; the call returns the directory and the next call verifies (step 4).
 The manual procedure below is for operators and for a cold start when no
@@ -233,7 +233,7 @@ from inside the service.
 
 A chat that writes its own controller through `bash` instead of
 `restart_service` must end that call right after `open`: no `sleep`, polling or
-verification in the same call. Tools are replay-safe by default (ADR 0041), so a
+verification in the same call. Tools are replay-safe by default, so a
 call still running when the controller stops the service reruns on every start,
 launches another controller and loops (#39). Verify in a later call.
 

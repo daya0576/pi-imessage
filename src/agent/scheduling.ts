@@ -276,7 +276,7 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 					state.items.push({ ...definition, conversationId: conversation.id, taskId });
 				}
 				const ids = new Set(definitions.map((definition) => definition.id));
-				// Workspace jobs stay disabled with their history (ADR 0035); framework jobs leave the view.
+				// Workspace jobs stay disabled with their history; framework jobs leave the view.
 				for (const item of state.items) if (!ids.has(item.id)) item.enabled = false;
 				for (const item of state.items.filter(
 					(item) => !ids.has(item.id) && item.extension === "scheduling",

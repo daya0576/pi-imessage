@@ -7,7 +7,7 @@ export type Settings = {
 	progressMessages: boolean;
 	/** Text the model writes next to a tool call is sent at once; on unless set to false. */
 	interimMessages: boolean;
-	/** Skill names left out of the prompt catalog (ADR 0057); their files stay readable. */
+	/** Skill names left out of the prompt catalog; their files stay readable. */
 	hiddenSkills: string[];
 	/** No fallback or priority tier is selected unless explicitly configured. */
 	modelPolicy: {

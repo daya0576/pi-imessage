@@ -94,7 +94,7 @@ export async function runCommand(options: {
 				BACKGROUND_CONTEXT,
 			);
 	};
-	// The /status report: user messages with context usage, then model with thinking (ADR 0013).
+	// The /status report: user messages with context usage, then model with thinking.
 	// A third line appears only while a /run is active. Cumulative token totals are deliberately omitted.
 	const status = async (withRun: boolean) => {
 		const agent = await conversation.agent(BACKGROUND_CONTEXT);
@@ -147,7 +147,7 @@ export async function runCommand(options: {
 				return { reply: "Stopped." };
 			}
 			// Abort the generation that owns the current inputs, not the conversation, so later queued
-			// messages stay in the inbox (ADR 0015). Retry while generation hands the same inputs over.
+			// Messages stay in the inbox. Retry while generation hands the same inputs over.
 			const live = async () => (await harness.snapshot(LiveDoc, conversation.id, BACKGROUND_CONTEXT))?.run;
 			const stopping = await live();
 			if (!stopping) {

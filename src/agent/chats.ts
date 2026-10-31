@@ -104,7 +104,7 @@ export async function chatConversation(harness: Harness, defaults: AgentDefaults
 	return conversation;
 }
 
-/** A chat whose last turn ended this long ago with at least this much context starts fresh (ADR 0055). */
+/** A chat whose last turn ended this long ago with at least this much context starts fresh. */
 export const IDLE_RESET_AFTER_MS = 3600000;
 export const IDLE_RESET_MIN_TOKENS = 60000;
 

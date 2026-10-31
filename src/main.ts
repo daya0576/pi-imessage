@@ -38,7 +38,7 @@ import type { MessageSender } from "./transport/send.ts";
 import { createWatcher } from "./transport/watch.ts";
 import { startWeb } from "./web/server.ts";
 
-/** ADR 0057: tools offered upfront; every other built-in or workspace tool waits for tool_search. */
+/** Tools offered upfront; every other built-in or workspace tool waits for tool_search. */
 const OFFERED_TOOLS = new Set([
 	"read",
 	"bash",
@@ -115,14 +115,14 @@ export async function startService(
 				: [
 						CodingTools,
 						ImageRead,
-						// ADR 0057: Durable's own tool_search loads the deferred tools.
+						// Durable's own tool_search loads the deferred tools.
 						createToolSearchExtension(),
 						await memoryExtension(options.workingDir),
 						webExtension(),
 						browser.extension,
 						Subagent,
 						workspaceExtension(reload),
-						// ADR 0052: the service runs from a release directory; the controller starts after the call settles.
+						// The service runs from a release directory; the controller starts after the call settles.
 						restartExtension({
 							workingDir: options.workingDir,
 							currentRelease: process.cwd(),
@@ -139,7 +139,7 @@ export async function startService(
 			if (names.has(extension.name)) throw new Error(`Duplicate extension name: ${extension.name}`);
 			names.add(extension.name);
 		}
-		// ADR 0039: an interrupted tool reruns on recovery unless it declares `unsafe`.
+		// An interrupted tool reruns on recovery unless it declares `unsafe`.
 		return extensions.map((extension) =>
 			extension.tools
 				? { ...extension, tools: extension.tools.map((tool) => ({ ...tool, replay: tool.replay ?? "safe" })) }

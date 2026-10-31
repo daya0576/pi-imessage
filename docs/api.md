@@ -47,8 +47,7 @@ requests; detail history and its older-page cursors are not reduced to 15
 messages. Existing `/chat/data` and conversation detail responses without these
 view parameters retain their native state shapes.
 
-Every request reads current state directly; there is no server-side read cache
-(ADR 0030 was rejected).
+Every request reads current state directly; there is no server-side read cache.
 
 Pages load once and refresh only through the Refresh button, memory filtering/
 pagination or explicit navigation. There is no browser SSE connection, periodic
@@ -69,10 +68,10 @@ that arbitrary user-written secrets can be identified.
 
 The agent sends files and extra messages with its immediate `send_message`
 tool. HTTP `/prompt` and `/send` remain retired. Legacy cron management,
-reminders and PT Automation routes remain removed and return 404 (ADR 0019).
+reminders and PT Automation routes remain removed and return 404.
 
 `GET /scheduled` and `GET /scheduled/data` expose configured native background
-jobs (ADR 0032), not the retained legacy cron files. The JSON view contains `jobs`
+jobs, not the retained legacy cron files. The JSON view contains `jobs`
 with cadence, enabled state, native scheduler task/conversation IDs, phase and
 `nextAt`, and each job's latest ten execution tasks. `recent` contains the latest
 ten executions across all jobs. Results separate native task outcome from the
@@ -82,7 +81,7 @@ run, pause or resend buttons. Scheduling configuration takes effect at startup.
 Daily slots and learning dates use the service machine's local timezone (or an
 explicit process `TZ`). Each job includes `timezone`; Web deadlines and history
 use it even when the browser is in another timezone. Saved absolute deadlines
-remain unchanged on restart (ADR 0034).
+remain unchanged on restart.
 
 | Endpoint | Description | Example |
 |---|---|---|
@@ -99,15 +98,15 @@ previews. Raw outputs, commands, prompts and document contents stay local.
 Known credential indicators are redacted; arbitrary user-authored secrets cannot
 be guaranteed detectable. Missing or false keeps final-only delivery. The setting
 is reread for each notice; old tasks and unknown sends are not replayed
-(ADR 0040). `/verbose on|off` in a chat
+. `/verbose on|off` in a chat
 overrides this default for that chat only and `/verbose default` removes the
-override (ADR 0049).
+override.
 
 Text the model writes next to a tool call is sent at once as an interim message
 in reply-enabled chats; subagent text stays private. `interimMessages: false` in
 `settings.json` turns this off by default, and `/interim on|off|default` sets it
-for one chat (ADR 0056).
+for one chat.
 
 `hiddenSkills` in `settings.json` is a list of skill names left out of the
 prompt's skill catalog; their files stay readable by path. It is read at startup
-and on `/reload` (ADR 0057).
+and on `/reload`.

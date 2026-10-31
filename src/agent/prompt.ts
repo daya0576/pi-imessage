@@ -32,7 +32,7 @@ You can create or update a trusted workspace extension in extensions/<name>/inde
 Reusable CLI tools for on-demand tasks go in ${workingDir}/skills/<name>/ with a SKILL.md: frontmatter name and description, then usage.`;
 }
 
-/** One line per skill, grouped by the directory that holds `<name>/SKILL.md` (ADR 0057). */
+/** One line per skill, grouped by the directory that holds `<name>/SKILL.md`. */
 function skillCatalog(skills: readonly Skill[]) {
 	const groups = new Map<string, string[]>();
 	for (const skill of skills) {

@@ -141,7 +141,7 @@ it("loads CLI environment without overriding explicit values and retains proxy c
 		expect(JSON.parse(response.stdout)).toEqual(["proxied", "direct"]);
 		expect(proxyRequests).toBe(1);
 		expect(directRequests).toBe(1);
-		// #33 / ADR 0016: exercise the late process-owned setup under the same daemon flags.
+		// #33: exercise the late process-owned setup under the same daemon flags.
 		const transport = await execute(
 			job.ProgramArguments[0],
 			[...job.ProgramArguments.slice(1, -2), resolve("test/fixtures/http-transport.ts")],

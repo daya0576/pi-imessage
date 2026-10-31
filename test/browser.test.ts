@@ -21,7 +21,7 @@ type Call = {
 	inheritedSecret?: string;
 };
 
-// #33 / ADR 0017: native registration, forced argv/env scope, owned lifecycle and explicit unsafe replay.
+// #33: native registration, forced argv/env scope, owned lifecycle and explicit unsafe replay.
 it("enforces conversation-owned browser operations and preserves only owned resources across stop and restart", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "imessage-browser-"));
 	const agentDir = join(directory, "agent");
@@ -58,7 +58,7 @@ it("enforces conversation-owned browser operations and preserves only owned reso
 		agent = await startService(options);
 		for (const chatGuid of ["first", "second"]) {
 			faux.setResponses([
-				// ADR 0057: browser is deferred until tool_search loads it.
+				// Browser is deferred until tool_search loads it.
 				fauxAssistantMessage(fauxToolCall("tool_search", { query: "browser" }), { stopReason: "toolUse" }),
 				fauxAssistantMessage(fauxToolCall("browser", { action: "open", url: "https://example.test" }), {
 					stopReason: "toolUse",

@@ -12,7 +12,7 @@ import { Schedules } from "../src/agent/scheduling.ts";
 import { startService } from "../src/main.ts";
 import { startWeb } from "../src/web/server.ts";
 
-// #33 / ADR 0019: retired scheduling surfaces are gone; immediate sends and read-only views remain.
+// #33: retired scheduling surfaces are gone; immediate sends and read-only views remain.
 it("records immediate tool sends in chat and serves state without scheduling entry points", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "imessage-http-"));
 	let agent: Awaited<ReturnType<typeof startService>> | undefined;
@@ -51,7 +51,7 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 			for (const method of ["GET", "POST", "DELETE"])
 				expect((await fetch(base + path, { method })).status, `${method} ${path}`).toBe(404);
 		}
-		// #33 / ADR 0032: reading native schedules does not start model work.
+		// #33: reading native schedules does not start model work.
 		// ADR 0054: the host defines no schedule of its own.
 		expect((await agent.harness.snapshot(Schedules, BACKGROUND_CONTEXT))?.items).toEqual([]);
 		const scheduled = await (await fetch(`${base}/scheduled/data`)).json();

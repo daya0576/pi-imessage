@@ -324,7 +324,7 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 			return fauxAssistantMessage("image read");
 		},
 	]);
-	// #33 / ADR 0020: all native calls are routed, including owned child conversations.
+	// #33: all native calls are routed, including owned child conversations.
 	const settingsPath = join(directory, "settings.json");
 	const settings = JSON.parse(await readFile(settingsPath, "utf8"));
 	await writeFile(settingsPath, JSON.stringify({ ...settings, progressMessages: true }));
@@ -339,7 +339,7 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 	);
 	const notices = textCalls();
 	expect(notices.every(([chat]) => chat === "iMessage;-;dm")).toBe(true);
-	// One more top-level call: tool_search loads subagent first (ADR 0057).
+	// One more top-level call: tool_search loads subagent first.
 	expect(notices.filter(([, text]) => text.startsWith("→ [tool] "))).toHaveLength(5);
 	expect(notices.filter(([, text]) => text.startsWith("→ [subagent/tool] "))).toHaveLength(3);
 	expect(notices.map(([, text]) => text).join("\n")).toContain(`path=${trap}`);
@@ -358,7 +358,7 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 	expect(progressText).toContain("apiKey=[redacted]");
 	expect(progressText).toContain("url=example．test");
 	expect(progressText).toContain("→ [tool] bash: printf 'progress fixture'");
-	// ADR 0056: the chat's own interim words come before that call's notice; a child's stay private.
+	// The chat's own interim words come before that call's notice; a child's stay private.
 	const texts = notices.map(([, text]) => text);
 	expect(texts.indexOf("Found the fixture.")).toBe(
 		texts.indexOf("→ [tool] bash: printf 'progress fixture'") - 1,
@@ -713,7 +713,7 @@ it("releases ownership on watcher failure and joins an in-flight automatic send 
 	}
 	await service.close();
 	service = undefined;
-	// #33 / ADR 0016: production wiring installs HTTP before auth, reloads it and cleans up failures.
+	// #33: production wiring installs HTTP before auth, reloads it and cleans up failures.
 	const previousDispatcher = getGlobalDispatcher();
 	for (const name of ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "NO_PROXY", "no_proxy"])
 		vi.stubEnv(name, "");
@@ -734,7 +734,7 @@ it("releases ownership on watcher failure and joins an in-flight automatic send 
 		expect(getGlobalDispatcher()).not.toBe(previousDispatcher);
 		throw new Error("isolated auth failure");
 	});
-	// #33 / ADR 0019: stale task configuration must not create workers or mutate stored state.
+	// #33: stale task configuration must not create workers or mutate stored state.
 	await mkdir(join(directory, "cron"));
 	await mkdir(join(directory, "automation"));
 	const retiredState = [

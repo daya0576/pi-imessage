@@ -1,6 +1,6 @@
 // Operator-only live smoke: never called by tests or the agent.
 // It makes one paid model health request; the operator sends one real message.
-// HTTP /prompt is retired (ADR 0018), so the full path is chat.db -> agent -> Messages.app.
+// HTTP /prompt is retired, so the full path is chat.db -> agent -> Messages.app.
 type Receipts = { answers?: Record<string, string> };
 
 const args = process.argv.slice(2);

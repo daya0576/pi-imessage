@@ -404,7 +404,7 @@ it("recovers an unsent saved answer, then preserves its sent receipt across reop
 	expect(faux.state.callCount).toBe(1);
 });
 
-// #39, ADR 0052: the restart tool starts its controller only after its own call has settled and never reruns.
+// #39: the restart tool starts its controller only after its own call has settled and never reruns.
 it("schedules a self-restart after the tool call settles and rejects an unprepared release", async () => {
 	await agent.close();
 	const releases = join(directory, "releases");
@@ -555,7 +555,7 @@ it("records direct text/file outcomes, rejects conflicting IDs and stops after u
 	expect(send).toHaveBeenCalledTimes(2);
 	expect(sendAttachment).toHaveBeenCalledTimes(2);
 	expect(faux.state.callCount).toBe(0);
-	// ADR 0018: the chat conversation records each attempted send once, without a model turn.
+	// The chat conversation records each attempted send once, without a model turn.
 	const chat = (await agent.harness.snapshot(Chats, BACKGROUND_CONTEXT))?.items.find(
 		(item) => item.chatGuid === "chat",
 	);
@@ -651,7 +651,7 @@ it("starts quietly and wires default coding/image tools, model defaults and work
 		"web_search",
 		"write",
 	]);
-	// ADR 0057: rarely used tools wait for tool_search, and the prompt names them.
+	// Rarely used tools wait for tool_search, and the prompt names them.
 	expect(resolved?.deferred.map((tool) => tool.name).sort()).toEqual([
 		"browser",
 		"get_search_results",
@@ -662,7 +662,7 @@ it("starts quietly and wires default coding/image tools, model defaults and work
 	expect(JSON.stringify(stream.mock.calls[0][1])).toContain(
 		"before calling it: browser, get_search_results, reload_extensions, restart_service, subagent.",
 	);
-	// ADR 0039: built-ins default to safe; browser mutations (ADR 0017) and self-restart (ADR 0052) opt out.
+	// Built-ins default to safe; browser mutations and self-restart opt out.
 	const unsafe = new Set(["browser", "restart_service"]);
 	expect(
 		[...(resolved?.tools ?? []), ...(resolved?.deferred ?? [])].every(

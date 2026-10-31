@@ -1,6 +1,6 @@
 # Conversation-owned browser
 
-The host's built-in native Durable `browser` extension implements ADR 0017. It is
+The host's built-in native Durable `browser` extension scopes browser work to its conversation. It is
 registered with the other built-in tools, not loaded as a personal workspace
 business extension. It invokes the installed `PI_CODING_AGENT_DIR/bin/pi-browser`
 wrapper and its pinned Playwright CLI by argv; there is no SDK shim, private CLI
