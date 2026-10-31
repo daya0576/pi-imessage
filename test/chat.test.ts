@@ -561,6 +561,7 @@ it("starts quietly and wires default coding/image tools, model defaults and work
 	expect(resolved?.model).toEqual(options.runtime.defaults.model);
 	expect(resolved?.tools.map((tool) => tool.name).sort()).toEqual([
 		"bash",
+		"codemode",
 		"edit",
 		"fetch_content",
 		"load_memory",
@@ -592,6 +593,9 @@ it("starts quietly and wires default coding/image tools, model defaults and work
 	expect(resolved?.tools.find((tool) => tool.name === "read")?.description).toContain(
 		"Images are kept as file references",
 	);
+	// Code mode lists the callable tools for scripts; `models.*` is off.
+	expect(JSON.stringify(stream.mock.calls[0][1])).toContain("Tools scripts can call");
+	expect(JSON.stringify(stream.mock.calls[0][1])).not.toContain("models.classify");
 	expect(stream.mock.calls[0][2]).toMatchObject({
 		transport: "sse",
 		timeoutMs: 300_000,

@@ -24,6 +24,7 @@ import { Runs, runRecord } from "./agent/run.ts";
 import { deliverScheduled, EXECUTION_KIND, Schedules, schedulingExtension } from "./agent/scheduling.ts";
 import { isReplyEnabled, readSettings } from "./config/settings.ts";
 import { createBrowser } from "./extensions/browser.ts";
+import { createCodemode } from "./extensions/codemode.ts";
 import { memoryExtension } from "./extensions/memory.ts";
 import { messageExtension } from "./extensions/message.ts";
 import { ImageRead } from "./extensions/read-image.ts";
@@ -50,6 +51,7 @@ const OFFERED_TOOLS = new Set([
 	"web_search",
 	"fetch_content",
 	"tool_search",
+	"codemode",
 ]);
 
 function deferRare<T extends Extension>(extension: T): T {
@@ -89,6 +91,11 @@ export async function startService(
 	}
 	const defaults = { ...runtime.defaults, model: { ...runtime.defaults.model } };
 	const browser = await createBrowser(options.workingDir, options.agentDir);
+	const codemode = createCodemode();
+	const closeResources = async () => {
+		await codemode.close();
+		await browser.close();
+	};
 	if (!runtime.models.getModel(defaults.model.provider, defaults.model.modelId))
 		throw new Error(`Model is unavailable: ${defaults.model.provider}/${defaults.model.modelId}`);
 	async function loadExtensions(): Promise<WorkspaceExtension[]> {
@@ -119,6 +126,7 @@ export async function startService(
 						await memoryExtension(options.workingDir),
 						webExtension(),
 						browser.extension,
+						codemode.extension,
 						Subagent,
 						workspaceExtension(reload),
 					].map(deferRare)),
@@ -185,7 +193,7 @@ export async function startService(
 			sendAttachment: options.sendAttachment,
 		});
 	} catch (error) {
-		await owner.close(browser.close);
+		await owner.close(closeResources);
 		throw error;
 	}
 
@@ -447,7 +455,7 @@ export async function startService(
 			closing ??= (async () => {
 				await Promise.allSettled([...operations]);
 				await progress.close();
-				await owner.close(browser.close);
+				await owner.close(closeResources);
 			})();
 			return closing;
 		},
