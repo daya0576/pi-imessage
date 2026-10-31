@@ -43,8 +43,8 @@ afterEach(async () => {
 	await rm(directory, { recursive: true, force: true });
 });
 
-// #33: parent result delivery, child context isolation and our read-only allowlist.
-it("delegates into a read-only child and returns only its final text to the parent", async () => {
+// #33: parent result delivery, child context isolation; the child has its parent's tools, codemode included.
+it("delegates into a child with the parent's tools and returns only its final text to the parent", async () => {
 	await writeFile(join(directory, "fixture.txt"), "child lookup");
 	faux.setResponses([
 		fauxAssistantMessage(fauxToolCall("tool_search", { query: "subagent" }), { stopReason: "toolUse" }),
@@ -56,13 +56,9 @@ it("delegates into a read-only child and returns only its final text to the pare
 			const tools = context.messages
 				.filter((message) => message.role === "system")
 				.flatMap((message) => message.toolsAdded ?? []);
-			expect(tools.map((tool) => tool.name).sort()).toEqual([
-				"fetch_content",
-				"load_memory",
-				"read",
-				"search_memory",
-				"web_search",
-			]);
+			const names = tools.map((tool) => tool.name);
+			expect(names).toEqual(expect.arrayContaining(["bash", "codemode", "read", "send_message", "tool_search"]));
+			expect(names).not.toContain("subagent");
 			return fauxAssistantMessage(fauxToolCall("read", { path: "fixture.txt" }), { stopReason: "toolUse" });
 		},
 		(context) => {
