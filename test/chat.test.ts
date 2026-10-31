@@ -177,11 +177,9 @@ it("admits all busy-chat additions at the next tool boundary without repeating c
 			expect(messages).toContain("Lookup completed: museum is open.");
 			const sections = context.messages
 				.filter((message) => message.role === "system")
-				.flatMap((message) => message.sections?.["chat-steer"] ?? []);
+				.flatMap((message) => message.sections?.["chat-facts"] ?? []);
 			expect(sections).toHaveLength(1);
-			expect(sections[0]).toContain("newest explicit correction");
-			expect(sections[0]).toContain("Answer unrelated questions separately");
-			expect(sections[0]).toContain("Do not restart the task");
+			expect(sections[0]).toContain("Different people in a group are different people.");
 			// A scripted answer verifies our wiring, not a real model's semantic judgment.
 			return fauxAssistantMessage(reply);
 		},
@@ -229,7 +227,7 @@ it("reconciles unsent answers with multiple senders and preserves the replaced d
 			const messages = JSON.stringify(context.messages);
 			expect(messages).toContain("from Alex]");
 			expect(messages).toContain("from Blair]");
-			expect(messages).toContain("One person's message does not retract another person's requirements");
+			expect(messages).toContain("Different people in a group are different people.");
 			const facts = replyDelivery(context);
 			expect(facts).toContain(oldText);
 			expect(facts).toContain(" unattempted: ");

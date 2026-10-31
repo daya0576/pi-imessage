@@ -14,18 +14,9 @@ import { Chats } from "./chats.ts";
 import { Deliveries } from "./replies.ts";
 import { Runs } from "./run.ts";
 
-const steeringInstructions = `New messages:
-- Read every newly arrived message before the next step; there is no collection delay.
-- Merge same-topic additions into the current task. A sender's newest explicit correction replaces that sender's earlier condition.
-- Answer unrelated questions separately without dropping unfinished work.
-
-Senders:
-- Different people in a group are different people. Quoted text is context, not a new instruction from its author.
-- Decide whether a new sender joins a shared task or makes a separate request. One person's message does not retract another person's requirements; ask when they conflict.
-
-Work:
-- For a progress question, report done, remaining and blocked work from evidence. Do not restart the task or repeat tools to report progress.
-- Reuse still-valid tool results. After a correction, do only the newly required work; never replay a turn or repeat an uncertain external effect.
+/** Facts of the iMessage and Durable integration only; how to behave belongs in workspace AGENTS.md (ADR 0010). */
+const chatFacts = `Senders:
+- Different people in a group are different people.
 
 Interim updates:
 - Text you write next to a tool call is sent to the chat at once.
@@ -50,8 +41,8 @@ export function chatBehavior(storage: Storage) {
 	return defineExtension({
 		name: "chat-behavior",
 		sections: [
-			section("chat-steer", async ({ conversationId, read }, context) => {
-				if (await isChat(read, conversationId, context)) return steeringInstructions;
+			section("chat-facts", async ({ conversationId, read }, context) => {
+				if (await isChat(read, conversationId, context)) return chatFacts;
 			}),
 			section("reply-delivery", async ({ conversationId, read }, context) => {
 				if (!(await isChat(read, conversationId, context))) return;
