@@ -13,6 +13,7 @@ These are the decisions in force. Accepted ADR files are never edited.
 | [0007](0007-reconcile-unsent-answers.md) | Reconcile unsent answers |
 | [0008](0008-run-in-owned-conversation.md) | `/run` in an owned conversation |
 | [0009](0009-native-background-schedules.md) | Native background schedules and read-only execution history |
+| [0010](0010-framework-and-workspace.md) | The framework integrates iMessage and Durable; the workspace owns behavior |
 
 ## Adding an ADR
 
