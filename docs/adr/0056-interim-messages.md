@@ -26,10 +26,11 @@ Found it: magpie returned 403 because the Copilot account does not allow Fable.
 - `settings.json` `interimMessages` sets the default; absent means on. A chat's
   `/interim on|off|default` choice lives in the `imessage.chats` record next to
   the `/verbose` choice (ADR 0049) and wins over the default.
-- The chat-steer prompt tells the model to write such text only for findings,
-  decisions or blockers, never announcements or unverified claims, and keeps
-  the final answer self-contained. The text is constant, so toggling does not
-  change the prompt.
+- The chat-steer prompt states only the delivery fact: text next to a tool call
+  reaches the chat at once. How often to write is left to the workspace
+  AGENTS.md and the model. The text is constant, so toggling does not change
+  the prompt. (Revised 2026-10-31, #49: the earlier "findings only" wording
+  left 3% of tool-calling messages with text.)
 - Final-answer delivery (ADR 0003, ADR 0011) is unchanged; interim messages are
   not final answers and do not appear in reply-delivery.
 
