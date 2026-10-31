@@ -57,7 +57,9 @@ it("delegates into a child with the parent's tools and returns only its final te
 				.filter((message) => message.role === "system")
 				.flatMap((message) => message.toolsAdded ?? []);
 			const names = tools.map((tool) => tool.name);
-			expect(names).toEqual(expect.arrayContaining(["bash", "codemode", "read", "send_message", "tool_search"]));
+			expect(names).toEqual(
+				expect.arrayContaining(["bash", "codemode", "read", "send_message", "tool_search"]),
+			);
 			expect(names).not.toContain("subagent");
 			return fauxAssistantMessage(fauxToolCall("read", { path: "fixture.txt" }), { stopReason: "toolUse" });
 		},
