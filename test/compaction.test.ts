@@ -15,7 +15,7 @@ import { RunRequests, ScheduledOutbox, Schedules } from "../src/agent/scheduling
 import { startService } from "../src/main.ts";
 import { readSchedules } from "../src/web/schedules.ts";
 
-// #33 / ADR 0054: the host reports native compaction and runs workspace schedules; it defines none of its own.
+// #33: the host reports native compaction and runs workspace schedules; it defines none of its own.
 it("reports manual compaction and runs workspace schedules natively", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "imessage-compact-"));
 	let agent: Awaited<ReturnType<typeof startService>> | undefined;
@@ -136,7 +136,7 @@ module.exports = ({ config, defineDoc, defineTask, defineExtension, ScheduledOut
 		const calls = faux.state.callCount;
 		agent = await startService(scheduledOptions);
 		const jobs = (await agent.harness.snapshot(Schedules, BACKGROUND_CONTEXT))?.items;
-		expect(jobs).toHaveLength(1); // ADR 0054: no framework job of its own.
+		expect(jobs).toHaveLength(1); // No framework job of its own.
 		const daily = jobs?.find((job) => job.id === "fixture-daily");
 		if (!daily) throw new Error("Missing native job");
 		expect(daily.timezone).toBe(new Intl.DateTimeFormat().resolvedOptions().timeZone);
@@ -295,7 +295,7 @@ module.exports = ({ config, defineDoc, defineTask, defineExtension, ScheduledOut
 		expect(view.recent).toHaveLength(10);
 		expect(view.recent.map((run) => run.id)).toEqual(view.recent.map((run) => run.id).sort((a, b) => b - a));
 		expect(send).toHaveBeenCalledTimes(1); // Maintenance remains quiet.
-		// ADR 0054: a framework-owned job without a definition leaves the view and its timer is aborted.
+		// A framework-owned job without a definition leaves the view and its timer is aborted.
 		await agent.harness.commit(async (tx) => {
 			const job = (await tx.doc(Schedules)).items.find((item) => item.id === "fixture-maintenance");
 			if (job) job.extension = "scheduling";

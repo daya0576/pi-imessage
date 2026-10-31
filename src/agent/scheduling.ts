@@ -136,7 +136,7 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 				if (!admissionReady) return runtime.sleepUntil(runtime.now() + 100, task.state.checkpoint, context);
 				await runtime.commit(async (tx) => {
 					const schedule = (await tx.doc(Schedules)).items.find((item) => item.id === task.input.jobId);
-					// A removed framework job (ADR 0054) ends its timer instead of faulting.
+					// A removed framework job ends its timer instead of faulting.
 					if (!schedule) return { status: "terminal", outcome: { status: "completed", result: null } };
 					if (
 						task.input.requestId &&
@@ -231,7 +231,7 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 		async initialize(extensions: readonly WorkspaceExtension[], transaction?: Tx, publish?: () => void) {
 			validateSchedules(extensions);
 			const timezone = new Intl.DateTimeFormat().resolvedOptions().timeZone;
-			// Framework-owned jobs without a definition (the retired six-hour compaction, ADR 0054) are removed.
+			// Framework-owned jobs without a definition (the retired six-hour compaction) are removed.
 			const removed: TaskId[] = [];
 			const initialize = async (tx: Tx) => {
 				const state = await tx.doc(Schedules);

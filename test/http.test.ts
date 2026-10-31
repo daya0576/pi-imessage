@@ -52,7 +52,7 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 				expect((await fetch(base + path, { method })).status, `${method} ${path}`).toBe(404);
 		}
 		// #33: reading native schedules does not start model work.
-		// ADR 0054: the host defines no schedule of its own.
+		// The host defines no schedule of its own.
 		expect((await agent.harness.snapshot(Schedules, BACKGROUND_CONTEXT))?.items).toEqual([]);
 		const scheduled = await (await fetch(`${base}/scheduled/data`)).json();
 		expect(scheduled.jobs).toEqual([]);

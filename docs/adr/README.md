@@ -12,7 +12,7 @@ These are the decisions in force. Accepted ADR files are never edited.
 | [0010](0010-test-budget.md) | About 40 tests |
 | [0011](0011-reconcile-unsent-answers.md) | Reconcile unsent answers |
 | [0012](0012-run-in-owned-conversation.md) | `/run` in an owned conversation |
-| [0054](0054-window-thresholds-replace-timer.md) | The advertised model window bounds chat context; no compaction timer |
+| [0032](0032-native-background-schedules.md) | Native background schedules and read-only execution history |
 
 ## Adding an ADR
 

@@ -174,7 +174,7 @@ it("automatically routes DM, group and SMS, archives attachments and logs disabl
 	expect((await service.harness.snapshot(WatchCursor, BACKGROUND_CONTEXT))?.rowid).toBe(last);
 	expect(onError).not.toHaveBeenCalled();
 	expect(intervals.mock.calls.some(([, duration]) => duration === 6 * 60 * 60 * 1000)).toBe(false);
-	// ADR 0054: the host defines no schedule of its own.
+	// The host defines no schedule of its own.
 	expect((await service.harness.snapshot(Schedules, BACKGROUND_CONTEXT))?.items).toEqual([]);
 	await service.close();
 });
