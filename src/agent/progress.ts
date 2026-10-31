@@ -4,10 +4,18 @@ import { basename, dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { JsonValue } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Harness, TaskRecord, ToolTaskInput, ToolTaskResult } from "@earendil-works/pi-durable";
+import {
+	AssistantEntry,
+	type EntryRecord,
+	type Harness,
+	type TaskRecord,
+	type ToolTaskInput,
+	type ToolTaskResult,
+} from "@earendil-works/pi-durable";
 import { isReplyEnabled, readSettings } from "../config/settings.ts";
+import { interimText } from "../extensions/final-text.ts";
 import type { MessageSender } from "../transport/send.ts";
-import { Chats, progressEnabled } from "./chats.ts";
+import { Chats, interimEnabled, progressEnabled } from "./chats.ts";
 import { deliverDirect } from "./direct-send.ts";
 import { argumentSummary, commandPreview, formatProgress, type ProgressEvent } from "./progress-format.ts";
 import { Runs } from "./run.ts";
@@ -104,6 +112,26 @@ export async function startProgress(harness: Harness, workingDir: string, sender
 		);
 		if (receipt.textStatus === "unknown") console.warn("Progress delivery unknown", task.id, chatGuid);
 	}
+	/** The model's own words between tool calls, sent before that call's notices (ADR 0056). */
+	async function interim(entry: EntryRecord) {
+		const text = AssistantEntry.is(entry) ? interimText(entry.model?.[0]) : undefined;
+		if (!text) return;
+		const settings = await readSettings(workingDir);
+		const chats = (await harness.snapshot(Chats, BACKGROUND_CONTEXT))?.items ?? [];
+		const runs = (await harness.snapshot(Runs, BACKGROUND_CONTEXT))?.items ?? [];
+		// Only the chat's own or /run conversation speaks; subagent children stay private.
+		const chatGuid = [...chats, ...runs].find(
+			(item) => item.conversationId === entry.conversationId,
+		)?.chatGuid;
+		if (!chatGuid || !isReplyEnabled(settings, chatGuid) || !interimEnabled(settings, chats, chatGuid))
+			return;
+		const receipt = await deliverDirect(
+			harness,
+			{ chatGuid, requestId: `interim:${entry.id}`, text },
+			sender,
+		);
+		if (receipt.textStatus === "unknown") console.warn("Interim delivery unknown", entry.id, chatGuid);
+	}
 	async function settled(task: TaskRecord<JsonValue, JsonValue, JsonValue>, notice: Notice, elapsed: number) {
 		if (!notice.chatGuid || !notice.request || task.state.status !== "terminal") return;
 		const settings = await readSettings(workingDir);
@@ -140,6 +168,16 @@ export async function startProgress(harness: Harness, workingDir: string, sender
 			console.warn("Progress completion delivery unknown", task.id, notice.chatGuid);
 	}
 	const unsubscribe = harness.subscribeCommits(({ changes }) => {
+		// Change order is unspecified; queue the model's words before the notices of the calls it made.
+		for (const change of changes) {
+			if (change.type !== "entry") continue;
+			const entry = change.value;
+			pending = pending
+				.then(() => interim(entry))
+				.catch((error: unknown) => {
+					console.warn("Interim delivery failed", entry.id, error);
+				});
+		}
 		for (const change of changes) {
 			if (change.type !== "task" || change.value.kind === "pi.generation") continue;
 			const task = change.value;

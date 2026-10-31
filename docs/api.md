@@ -7,7 +7,7 @@ The server has no authentication; do not expose it to untrusted networks.
 
 The pages `/`, `/chat`, `/chats`, `/tasks`, `/scheduled`, `/settings`, `/memory` and `/logs` are read-only.
 The Chats tab (`/chats`, `/chats/data`) lists groups and direct chats, one row
-each: reply eligibility, the `/verbose` choice with its effective value, the
+each: reply eligibility, the `/verbose` and `/interim` choices with their effective values, the
 conversation's model and thinking level, and last activity. Chats that do not
 reply are dimmed. It never shows message text. The message history page in the
 navigation is labelled Messages.
@@ -102,3 +102,8 @@ is reread for each notice; old tasks and unknown sends are not replayed
 ([ADR 0040](adr/0040-chat-progress-notices.md)). `/verbose on|off` in a chat
 overrides this default for that chat only and `/verbose default` removes the
 override ([ADR 0049](adr/0049-per-chat-progress-notices.md)).
+
+Text the model writes next to a tool call is sent at once as an interim message
+in reply-enabled chats; subagent text stays private. `interimMessages: false` in
+`settings.json` turns this off by default, and `/interim on|off|default` sets it
+for one chat ([ADR 0056](adr/0056-interim-messages.md)).

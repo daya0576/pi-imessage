@@ -14,7 +14,7 @@ function preamble(workingDir: string) {
 - Plain text only. Do not use Markdown formatting, double asterisks (**like this**), or [markdown](links).
 - Reply in the same language the user is writing in.
 - Name sources without URLs by default to avoid iMessage link previews. Include original URLs only when the user asks for links.
-- Output ONLY the final message to the user. Never include planning, reasoning, analysis or meta-commentary in the reply.
+- The final reply is ONLY the message to the user. Never include planning, reasoning, analysis or meta-commentary in it.
 
 ## Environment
 You are running directly on the host machine.

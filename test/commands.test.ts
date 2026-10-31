@@ -68,7 +68,15 @@ it("runs each command once by source GUID and replies without the model", async 
 	await agent.command({ chatGuid: "chat", guid: "stop", text: "/stop" });
 	await agent.command({ chatGuid: "chat", guid: "busy-run", text: "/run soon" });
 	// /verbose reads the chat override before the global setting and validates its argument.
-	for (const text of ["/verbose", "/verbose on", "/verbose default", "/verbose loud"])
+	// ADR 0056: /interim is the same per-chat switch and defaults to on.
+	for (const text of [
+		"/verbose",
+		"/verbose on",
+		"/verbose default",
+		"/verbose loud",
+		"/interim off",
+		"/interim",
+	])
 		await agent.command({ chatGuid: "chat", guid: text, text });
 	const reset = { chatGuid: "chat", guid: "reset", text: "/new" };
 	await agent.command(reset);
@@ -84,6 +92,8 @@ it("runs each command once by source GUID and replies without the model", async 
 		"Verbose: on (this chat only)",
 		"Verbose: off (default)",
 		"Usage: /verbose [on|off|default]",
+		"Interim: off (this chat only)",
+		"Interim: off (this chat only)",
 		"0 msgs · ~0.0% / 128k\nfaux/faux-1 · high", // Estimated: nothing was sent to the model yet.
 		"0 msgs · ~0.0% / 128k\nfaux/faux-1 · high", // /reload replies like /status.
 	]);
@@ -91,7 +101,7 @@ it("runs each command once by source GUID and replies without the model", async 
 	expect(replies()[2]).not.toContain("/run-stop");
 	await writeFile(join(directory, "settings.json"), "{}");
 	await agent.command({ chatGuid: "disabled", guid: "logged", text: "/new" });
-	expect(send).toHaveBeenCalledTimes(11);
+	expect(send).toHaveBeenCalledTimes(13);
 	expect(await chatEntries("disabled")).toContain("/new");
 	expect(faux.state.callCount).toBe(0);
 });

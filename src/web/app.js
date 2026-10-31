@@ -427,15 +427,18 @@ function renderSettings() {
 
 function renderChatSettings() {
 	const chats = data.chats || [];
-	const overrides = chats.filter((chat) => chat.verbose.chat !== undefined).length;
+	const overrides = chats.filter(
+		(chat) => chat.verbose.chat !== undefined || chat.interim.chat !== undefined,
+	).length;
 	view.replaceChildren(
 		element(
 			"p",
 			[
 				`${chats.length} chats`,
 				`default verbose ${data.defaults?.progressMessages ? "on" : "off"}`,
+				`default interim ${data.defaults?.interimMessages ? "on" : "off"}`,
 				`${overrides} ${overrides === 1 ? "override" : "overrides"}`,
-				"read-only: /verbose and /thinking change a chat, settings.json the default",
+				"read-only: /verbose, /interim and /thinking change a chat, settings.json the default",
 			].join(" · "),
 			"muted",
 		),
@@ -455,7 +458,7 @@ function renderChatSettings() {
 		card.append(header);
 		const table = element("table", undefined, "chat-table");
 		const heading = table.createTHead().insertRow();
-		for (const label of ["Chat", "Replies", "Verbose", "Model", "Thinking", "Last activity"])
+		for (const label of ["Chat", "Replies", "Verbose", "Interim", "Model", "Thinking", "Last activity"])
 			heading.append(element("th", label));
 		const body = table.createTBody();
 		for (const chat of rows) {
@@ -475,6 +478,10 @@ function renderChatSettings() {
 				stacked(
 					chat.verbose.effective ? "on" : "off",
 					chat.verbose.chat === undefined ? "default" : "this chat",
+				),
+				stacked(
+					chat.interim.effective ? "on" : "off",
+					chat.interim.chat === undefined ? "default" : "this chat",
 				),
 				stacked(modelId.join("/") || "-", chat.model ? provider : undefined),
 				stacked(chat.thinking || "-"),

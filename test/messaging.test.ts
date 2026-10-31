@@ -19,6 +19,7 @@ import {
 	type FauxProviderHandle,
 	fauxAssistantMessage,
 	fauxProvider,
+	fauxText,
 	fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -285,22 +286,26 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 		},
 		() =>
 			fauxAssistantMessage(
-				fauxToolCall("read", {
-					path: trap,
-					offset: 1,
-					query: "上海浦东 私立医院",
-					apiKey: "secret-notice-marker",
-					command: "secret-command-marker",
-					url: "https://user:secret-url-marker@example.test/path?token=secret-query-marker",
-					nested: { token: "secret-object-marker" },
-				}),
+				[
+					fauxText("child interim marker"),
+					fauxToolCall("read", {
+						path: trap,
+						offset: 1,
+						query: "上海浦东 私立医院",
+						apiKey: "secret-notice-marker",
+						command: "secret-command-marker",
+						url: "https://user:secret-url-marker@example.test/path?token=secret-query-marker",
+						nested: { token: "secret-object-marker" },
+					}),
+				],
 				{ stopReason: "toolUse" },
 			),
 		() => fauxAssistantMessage("private child result"),
 		() =>
-			fauxAssistantMessage(fauxToolCall("bash", { command: "printf 'progress fixture'" }), {
-				stopReason: "toolUse",
-			}),
+			fauxAssistantMessage(
+				[fauxText("Found the fixture."), fauxToolCall("bash", { command: "printf 'progress fixture'" })],
+				{ stopReason: "toolUse" },
+			),
 		(context) => {
 			const result = context.messages.findLast((message) => message.role === "toolResult");
 			expect(result?.toolName).toBe("bash");
@@ -348,6 +353,12 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 	expect(progressText).toContain("apiKey=[redacted]");
 	expect(progressText).toContain("url=example．test");
 	expect(progressText).toContain("→ [tool] bash: printf 'progress fixture'");
+	// ADR 0056: the chat's own interim words come before that call's notice; a child's stay private.
+	const texts = notices.map(([, text]) => text);
+	expect(texts.indexOf("Found the fixture.")).toBe(
+		texts.indexOf("→ [tool] bash: printf 'progress fixture'") - 1,
+	);
+	expect(progressText).not.toContain("child interim marker");
 	expect(notices.filter(([, text]) => text.startsWith("✓ "))).toHaveLength(6);
 	expect(notices.filter(([, text]) => text.startsWith("× "))).toEqual([
 		["iMessage;-;dm", expect.stringMatching(/^× \[tool\] bash \(\d+\.\ds\)$/)],
@@ -454,17 +465,17 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 	await service.close();
 	service = await startMessaging(options);
 	await service.poll();
-	expect(send).toHaveBeenCalledTimes(15); // No historical or uncertain notice replay.
+	expect(send).toHaveBeenCalledTimes(16); // No historical or uncertain notice replay.
 	faux.setResponses([fauxAssistantMessage("healthy"), fauxAssistantMessage("quiet answer")]);
 	await service.health();
 	await service.poll();
-	expect(send).toHaveBeenCalledTimes(15); // Tool-less health remains private.
+	expect(send).toHaveBeenCalledTimes(16); // Tool-less health remains private.
 	await writeFile(settingsPath, JSON.stringify({ ...settings, progressMessages: false }));
 	insert("quiet", "Another question");
 	await service.poll();
 	await vi.waitFor(async () => {
 		await service?.poll();
-		expect(send).toHaveBeenCalledTimes(16);
+		expect(send).toHaveBeenCalledTimes(17);
 	});
 	expect(textCalls().at(-1)).toEqual(["iMessage;-;dm", "quiet answer"]);
 	// /verbose overrides the global setting for one chat in both directions.
@@ -480,7 +491,7 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 		await service?.poll();
 		expect(textCalls().at(-1)).toEqual(["iMessage;-;dm", "verbose answer"]);
 	});
-	expect(textCalls().slice(16)).toEqual([
+	expect(textCalls().slice(17)).toEqual([
 		["iMessage;-;dm", "Verbose: on (this chat only)"],
 		["iMessage;-;dm", "→ [tool] bash: printf 'verbose fixture'"],
 		["iMessage;-;dm", expect.stringMatching(/^✓ \[tool\] bash \(\d+\.\ds\)$/)],
@@ -495,7 +506,7 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 		await service?.poll();
 		expect(textCalls().at(-1)).toEqual(["iMessage;-;dm", "silent answer"]);
 	});
-	expect(textCalls().slice(20)).toEqual([
+	expect(textCalls().slice(21)).toEqual([
 		["iMessage;-;dm", "Verbose: off (this chat only)"],
 		["iMessage;-;dm", "silent answer"],
 	]);

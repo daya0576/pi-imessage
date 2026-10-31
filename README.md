@@ -33,7 +33,7 @@ For installation and service operations, see [ops/README.md](ops/README.md).
 ## Commands
 
 Send `/help` in a chat to list commands: `/new`, `/status`, `/thinking`,
-`/verbose`, `/compact`, `/run`, `/stop` and `/reload`.
+`/verbose`, `/interim`, `/compact`, `/run`, `/stop` and `/reload`.
 
 ## Configuration
 

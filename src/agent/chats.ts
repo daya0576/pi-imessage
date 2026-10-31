@@ -13,8 +13,13 @@ import {
 import type { Settings } from "../config/settings.ts";
 import { activeRun, Runs } from "./run.ts";
 
-/** `progress` is the chat's /verbose choice; absent means follow `settings.json`. */
-export type ChatRecord = { chatGuid: string; conversationId: ConversationId; progress?: boolean };
+/** `progress` and `interim` are the chat's /verbose and /interim choices; absent means follow `settings.json`. */
+export type ChatRecord = {
+	chatGuid: string;
+	conversationId: ConversationId;
+	progress?: boolean;
+	interim?: boolean;
+};
 
 export const Chats = defineDoc<{ items: ChatRecord[] }>({
 	kind: "imessage.chats",
@@ -38,19 +43,24 @@ export function progressEnabled(settings: Settings, chats: ChatRecord[], chatGui
 	return chats.find((chat) => chat.chatGuid === chatGuid)?.progress ?? settings.progressMessages;
 }
 
-/** Stores the chat's /verbose choice; `undefined` returns the chat to the global setting. */
-export async function setChatProgress(harness: Harness, chatGuid: string, progress: boolean | undefined) {
+export function interimEnabled(settings: Settings, chats: ChatRecord[], chatGuid: string) {
+	return chats.find((chat) => chat.chatGuid === chatGuid)?.interim ?? settings.interimMessages;
+}
+
+/** Stores a chat's /verbose or /interim choice; `undefined` returns the chat to the global setting. */
+export async function setChatSwitch(
+	harness: Harness,
+	chatGuid: string,
+	name: "progress" | "interim",
+	value: boolean | undefined,
+) {
 	await harness.commit(async (tx) => {
 		const chats = await tx.doc(Chats);
 		const index = chats.items.findIndex((item) => item.chatGuid === chatGuid);
 		if (index < 0) throw new Error("Chat conversation is missing");
-		const { conversationId } = chats.items[index];
+		const { [name]: _previous, ...rest } = chats.items[index];
 		// Replace the record so the stored delta never carries an undefined value.
-		chats.items.splice(index, 1, {
-			chatGuid,
-			conversationId,
-			...(progress === undefined ? {} : { progress }),
-		});
+		chats.items.splice(index, 1, value === undefined ? rest : { ...rest, [name]: value });
 	}, BACKGROUND_CONTEXT);
 }
 

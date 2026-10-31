@@ -12,7 +12,7 @@ import {
 	LiveDoc,
 	type TaskId,
 } from "@earendil-works/pi-durable";
-import { Chats, progressEnabled } from "../agent/chats.ts";
+import { Chats, interimEnabled, progressEnabled } from "../agent/chats.ts";
 import { DirectSends } from "../agent/direct-send.ts";
 import { Sessions } from "../agent/health.ts";
 import { Deliveries } from "../agent/replies.ts";
@@ -142,7 +142,7 @@ export async function startWeb(options: {
 			settings: { chatAllowlist: configuration.chatAllowlist },
 		};
 	}
-	/** One row per chat: reply eligibility, the /verbose choice and the conversation's agent settings. */
+	/** One row per chat: reply eligibility, the /verbose and /interim choices and the conversation's agent settings. */
 	async function chatSettings() {
 		const [chats, configuration] = await Promise.all([
 			options.agent.harness.snapshot(Chats, BACKGROUND_CONTEXT),
@@ -165,6 +165,7 @@ export async function startWeb(options: {
 					updatedAt: entries ? historyActivity(entries) : undefined,
 					replies: isReplyEnabled(configuration, chat.chatGuid),
 					verbose: { chat: chat.progress, effective: progressEnabled(configuration, records, chat.chatGuid) },
+					interim: { chat: chat.interim, effective: interimEnabled(configuration, records, chat.chatGuid) },
 					model: agent?.model ? `${agent.model.provider}/${agent.model.modelId}` : undefined,
 					thinking: agent?.thinkingLevel,
 				};
@@ -176,7 +177,10 @@ export async function startWeb(options: {
 		);
 		return {
 			chats: rows,
-			defaults: { progressMessages: configuration.progressMessages },
+			defaults: {
+				progressMessages: configuration.progressMessages,
+				interimMessages: configuration.interimMessages,
+			},
 			revision: viewRevision(),
 		};
 	}

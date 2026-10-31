@@ -5,6 +5,8 @@ export type Settings = {
 	chatAllowlist: { whitelist: string[]; blacklist: string[] };
 	richText: { enabled: boolean; markdown: boolean };
 	progressMessages: boolean;
+	/** Text the model writes next to a tool call is sent at once; on unless set to false. */
+	interimMessages: boolean;
 	/** No fallback or priority tier is selected unless explicitly configured. */
 	modelPolicy: {
 		fallback?: { provider: string; modelId: string };
@@ -47,6 +49,7 @@ export async function readSettings(workingDir: string): Promise<Settings> {
 		...raw,
 		modelPolicy,
 		progressMessages: raw.progressMessages === true,
+		interimMessages: raw.interimMessages !== false,
 		chatAllowlist: {
 			whitelist: Array.isArray(allowlist?.whitelist)
 				? allowlist.whitelist.filter((v) => typeof v === "string")
