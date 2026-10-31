@@ -9,9 +9,8 @@ import {
 	fauxProvider,
 	fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
-import { AssistantEntry } from "@earendil-works/pi-durable";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { Chats, IDLE_RESET_AFTER_MS, IDLE_RESET_MIN_TOKENS } from "../src/agent/chats.ts";
+import { Chats } from "../src/agent/chats.ts";
 import type { SendText } from "../src/agent/deliver.ts";
 import { Runs } from "../src/agent/run.ts";
 import { startService } from "../src/main.ts";
@@ -172,58 +171,6 @@ it("runs in a fork of the chat, routes ordinary messages to it and records it in
 	await agent.command({ chatGuid: "chat", guid: "after-reset", text: "/status" });
 	expect(replies().at(-1)).toBe(replies().at(-2)); // Same report; the run line exists only during a run.
 	expect(faux.state.callCount).toBe(5);
-
-	// A context over the token floor whose last turn is older than the idle limit starts fresh on the
-	// next message; a fresh one of the same size, or an old small one, is kept.
-	const chat = (await agent.harness.snapshot(Chats, BACKGROUND_CONTEXT))?.items.find(
-		(item) => item.chatGuid === "chat",
-	);
-	const conversation = chat && (await agent.harness.conversation(chat.conversationId, BACKGROUND_CONTEXT));
-	if (!conversation) throw new Error("Missing chat conversation");
-	const lastTurn = async (totalTokens: number, age: number) => {
-		const message = fauxAssistantMessage(`turn of ${totalTokens} tokens`, { timestamp: Date.now() - age });
-		await (
-			await conversation.submit(
-				{
-					type: "write",
-					entry: {
-						kind: AssistantEntry.kind,
-						model: [{ ...message, usage: { ...message.usage, totalTokens } }],
-					},
-				},
-				BACKGROUND_CONTEXT,
-			)
-		).wait(BACKGROUND_CONTEXT);
-	};
-	const seen: string[] = [];
-	faux.setResponses([
-		(context) => {
-			seen.push(JSON.stringify(context.messages));
-			return fauxAssistantMessage("kept");
-		},
-		(context) => {
-			seen.push(JSON.stringify(context.messages));
-			return fauxAssistantMessage("fresh start");
-		},
-	]);
-	await lastTurn(IDLE_RESET_MIN_TOKENS + 1, 1000);
-	await lastTurn(IDLE_RESET_MIN_TOKENS, IDLE_RESET_AFTER_MS + 1000);
-	await (await agent.submit({ chatGuid: "chat", guid: "soon", text: "Still here." })).wait(
-		BACKGROUND_CONTEXT,
-	);
-	expect(seen[0]).toContain(`turn of ${IDLE_RESET_MIN_TOKENS} tokens`);
-	await agent.deliver();
-	expect(replies().at(-1)).toBe("kept");
-	await lastTurn(IDLE_RESET_MIN_TOKENS + 1, IDLE_RESET_AFTER_MS + 1000);
-	await (await agent.submit({ chatGuid: "chat", guid: "much-later", text: "New topic." })).wait(
-		BACKGROUND_CONTEXT,
-	);
-	expect(seen[1]).not.toContain("Still here.");
-	expect(seen[1]).not.toContain("turn of");
-	expect(seen[1]).toContain("New topic.");
-	await agent.deliver();
-	expect(replies().at(-1)).toBe("fresh start");
-	expect(faux.state.callCount).toBe(7);
 });
 
 // #33 / ADR 0008: /stop ends a run with its queued messages, or ordinary work keeping later messages.

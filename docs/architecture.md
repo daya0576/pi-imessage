@@ -67,9 +67,7 @@ the next deadline. Each occurrence is a child execution task delegating to an
 extension's native business task; terminal receipts supply Web history, not a
 parallel UI log. The framework owns daily/interval cadence, non-overlap and recovery, and
 defines no schedule of its own: chat context is bounded by Durable's thresholds
-against the window each model advertises, and a chat whose last turn
-exceeded 60k tokens more than an hour ago starts fresh on its next message
-(checked in `agent/chats.ts` on submission). Workspace tasks own business policy and
+against the window each model advertises. Workspace tasks own business policy and
 documents, and can commit their state and the generic outgoing item atomically.
 The host delivery poll uses existing direct-send receipts and passive chat records.
 `web/schedules.ts` projects these native records, including latest-ten history.
