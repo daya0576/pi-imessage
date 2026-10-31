@@ -2,6 +2,7 @@ import { readdir, readFile, realpath } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, sep } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
+import * as durable from "@earendil-works/pi-durable";
 import {
 	configure,
 	defineDoc,
@@ -36,6 +37,8 @@ export type WorkspaceExtensionContext = {
 	/** Generation hooks, for example a per-request trailer on user messages. */
 	hook: typeof hook;
 	GenerationTask: typeof GenerationTask;
+	/** The whole pinned Durable SDK: a workspace extension is a plain Durable extension (ADR 0010). */
+	durable: typeof durable;
 };
 
 /** A chat assistant can apply its own workspace changes through the existing host owner. */
@@ -103,6 +106,7 @@ export async function loadWorkspaceExtensions(workingDir: string) {
 			section,
 			hook,
 			GenerationTask,
+			durable,
 		} satisfies WorkspaceExtensionContext);
 		if (
 			!extension ||

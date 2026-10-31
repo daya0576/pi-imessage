@@ -51,8 +51,10 @@ module.exports = ({ config, defineExtension, defineTask }) => {
 The factory receives `workingDir`, parsed `config`, `Type`, `defineExtension`,
 `defineTool`, `defineDoc`, `defineTask`, `configure`, `section`, `hook` with
 `GenerationTask` (generation hooks such as a per-request `beforeRequest` message
-rewrite), and the generic `ScheduledOutbox` document token. All primitives are
-the host's pinned versions.
+rewrite), the generic `ScheduledOutbox` document token, and `durable`, the whole
+Durable SDK, for anything else a plain Durable extension uses (for example
+`durable.LiveDoc` or `durable.ResetEntry`). All primitives are the host's pinned
+versions.
 Return a native extension with optional `schedules`; tools and multiple tasks
 work without any schedules. Startup and `/reload` scan direct, non-hidden child
 directories only, never skills or attachments. `reload_extensions` lets the chat
