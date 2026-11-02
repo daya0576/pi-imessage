@@ -6,6 +6,16 @@ business extension. It invokes the installed `PI_CODING_AGENT_DIR/bin/pi-browser
 wrapper and its pinned Playwright CLI by argv; there is no SDK shim, private CLI
 import or second browser driver.
 
+## Owner's Chrome
+
+When the owner's everyday Chrome has remote debugging on
+(`chrome://inspect/#remote-debugging`, which writes
+`~/Library/Application Support/Google/Chrome/DevToolsActivePort`), `open` attaches
+to it over CDP instead of launching a profile, and opens the URL in a new tab. The
+agent then shares that Chrome's cookies and logins; no storage checkpoint is taken,
+and `close` only disconnects (the owner's Chrome keeps running). Without that file
+the conversation-owned profile below is used.
+
 ## Operations
 
 `browser` takes `action` and only the arguments needed by that action:

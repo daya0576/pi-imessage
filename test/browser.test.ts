@@ -35,6 +35,7 @@ it("enforces conversation-owned browser operations and preserves only owned reso
 	vi.stubEnv("PLAYWRIGHT_MCP_CDP_ENDPOINT", "http://outside-fixture.invalid");
 	vi.stubEnv("PWTEST_DAEMON_SESSION_DIR", "/outside-fixture");
 	vi.stubEnv("BROWSER_FIXTURE_SECRET", "fixture-private-env");
+	vi.stubEnv("HOME", directory);
 	const faux = fauxProvider();
 	const models = createModels();
 	models.setProvider(faux.provider);
@@ -168,6 +169,19 @@ it("enforces conversation-owned browser operations and preserves only owned reso
 		expect(
 			(await calls(first.conversationId)).filter((row) => row.argv.includes("fixture-wait")),
 		).toHaveLength(1);
+		// With the owner's Chrome debuggable, open attaches to it in a new tab and never checkpoints its cookies.
+		const chrome = join(directory, "Library", "Application Support", "Google", "Chrome");
+		await mkdir(chrome, { recursive: true });
+		await writeFile(join(chrome, "DevToolsActivePort"), "9222\n/devtools/browser/fixture\n");
+		const before = (await calls(first.conversationId)).length;
+		await browser.run(first.conversationId, { action: "open", url: "https://example.test" });
+		await browser.run(first.conversationId, { action: "snapshot" });
+		await browser.close([first.conversationId]);
+		const shared = (await calls(first.conversationId)).slice(before).map((row) => row.argv.slice(1));
+		expect(shared).toContainEqual(["attach", "--cdp=ws://127.0.0.1:9222/devtools/browser/fixture", "--"]);
+		expect(shared).toContainEqual(["tab-new", "--", "https://example.test"]);
+		expect(shared.some(([action]) => action === "open" || action === "state-save")).toBe(false);
+		expect(shared.at(-1)?.[0]).toBe("close");
 		// Explicitly blocked actions never cross the subprocess boundary.
 		for (const action of ["attach", "list", "close-all", "kill-all", "state-load", "delete-data"]) {
 			await expect(
