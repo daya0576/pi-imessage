@@ -2,7 +2,7 @@ import { defineDoc, type EntryId } from "@earendil-works/pi-durable";
 
 export type DeliveryStatus = "sending" | "sent" | "unknown";
 export type DraftDisposition =
-	| { status: "held"; reason: "newer_input" }
+	| { status: "held"; reason: "newer_input" | "withheld" }
 	| { status: "superseded"; replacement: EntryId }
 	| { status: "cancelled" };
 

@@ -4,8 +4,10 @@ import {
 	type ConversationId,
 	type Cursor,
 	type EntryId,
+	type EntryRecord,
 	type Harness,
 	type Storage,
+	UserEntry,
 } from "@earendil-works/pi-durable";
 import { finalReplyText } from "../extensions/final-text.ts";
 import type { MessageSender } from "../transport/send.ts";
@@ -15,6 +17,19 @@ import { Deliveries, type DeliveryStatus } from "./replies.ts";
 import { RUN_RECORD, Runs, runRecord } from "./run.ts";
 
 export type SendText = MessageSender["sendMessage"];
+
+/**
+ * An `onYield` continuation starting with this marker withholds the final answer it follows: the answer is held,
+ * not sent, and the continued run writes its replacement. Durable commits both in one transaction.
+ */
+export const WITHHELD = "[withheld]";
+
+function withholds(entry: EntryRecord | undefined) {
+	if (!entry || !UserEntry.is(entry)) return false;
+	const content = entry.model?.[0]?.content;
+	const text = typeof content === "string" ? content : content?.find((part) => part.type === "text")?.text;
+	return text?.startsWith(WITHHELD) ?? false;
+}
 
 /**
  * A conversation whose final answers go to a chat. Runs also record sent replies in the chat
@@ -73,6 +88,7 @@ async function deliverAnswer(
 	storage: Storage,
 	target: Target,
 	answerId: EntryId,
+	withheld: boolean,
 	send: SendText,
 ) {
 	const { conversationId } = target;
@@ -86,6 +102,11 @@ async function deliverAnswer(
 			return true;
 		};
 		if (!text || deliveries.answers[key] || deliveries.drafts?.[key]) return { decided: decided() };
+		if (withheld) {
+			deliveries.drafts ??= {};
+			deliveries.drafts[key] = { status: "held", reason: "withheld" };
+			return { decided: decided() };
+		}
 
 		// The owning Session serializes admission with this claim. Read committed native submissions,
 		// not arbitrary user entries: passive logs and /run continuation text are not new human input.
@@ -154,8 +175,9 @@ export async function deliverReplies(
 	for (const target of await targets(harness)) {
 		if (!enabled(target.chatGuid)) continue;
 		const scanned = (await harness.snapshot(Deliveries, target.conversationId, BACKGROUND_CONTEXT))?.scanned;
-		const answers: EntryId[] = [];
+		const answers: { id: EntryId; withheld: boolean }[] = [];
 		let cursor: Cursor | undefined;
+		let newer: EntryRecord | undefined; // Newest first: the entry after the one being read.
 		do {
 			const page = await storage.scanEntries(
 				{ conversationId: target.conversationId, ...(scanned === undefined ? {} : { minEntryId: scanned }) },
@@ -163,11 +185,14 @@ export async function deliverReplies(
 				cursor,
 				BACKGROUND_CONTEXT,
 			);
-			for (const entry of page.items)
-				if (AssistantEntry.is(entry) && finalReplyText(entry.model?.[0])) answers.push(entry.id);
+			for (const entry of page.items) {
+				if (AssistantEntry.is(entry) && finalReplyText(entry.model?.[0]))
+					answers.push({ id: entry.id, withheld: withholds(newer) });
+				newer = entry;
+			}
 			cursor = page.next;
 		} while (cursor);
-		for (const answerId of answers.reverse())
-			if (!(await deliverAnswer(harness, storage, target, answerId, send))) break;
+		for (const { id, withheld } of answers.reverse())
+			if (!(await deliverAnswer(harness, storage, target, id, withheld, send))) break;
 	}
 }

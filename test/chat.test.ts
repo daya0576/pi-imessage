@@ -11,10 +11,18 @@ import {
 	fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { defineExtension, defineTool, Harness, type Submission, UserEntry } from "@earendil-works/pi-durable";
+import {
+	defineExtension,
+	defineTool,
+	GenerationTask,
+	Harness,
+	hook,
+	type Submission,
+	UserEntry,
+} from "@earendil-works/pi-durable";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Chats } from "../src/agent/chats.ts";
-import type { SendText } from "../src/agent/deliver.ts";
+import { type SendText, WITHHELD } from "../src/agent/deliver.ts";
 import { DirectSends } from "../src/agent/direct-send.ts";
 import * as modelConfig from "../src/agent/models.ts";
 import { Deliveries } from "../src/agent/replies.ts";
@@ -360,6 +368,34 @@ it("keeps an already claimed reply and sends the subsequent answer only after it
 		finish.resolve();
 		await sending;
 	}
+});
+
+// A workspace hook withholds a final answer (for example one in the wrong language) and the run rewrites it.
+it("holds a final answer withheld by an onYield continuation and sends only its replacement", async () => {
+	await agent.close();
+	const guard = defineExtension({
+		name: "fixture-guard",
+		hooks: [
+			hook(GenerationTask, {
+				onYield: (answer) =>
+					answer.content.some((part) => part.type === "text" && part.text === "English draft")
+						? { continue: `${WITHHELD} Write it again in Chinese.` }
+						: undefined,
+			}),
+		],
+	});
+	agent = await startService({ ...options, extensions: () => [guard] });
+	faux.setResponses([fauxAssistantMessage("English draft"), fauxAssistantMessage("中文回复")]);
+	const record = await answered(
+		await agent.submit({ chatGuid: "chat", guid: "zh", text: "机器需要重启吗？" }),
+	);
+	await agent.deliver();
+	expect(textCalls()).toEqual([["chat", "中文回复"]]);
+	const receipts = await agent.harness.snapshot(Deliveries, record.conversationId, BACKGROUND_CONTEXT);
+	expect(receipts?.answers[String(record.answer)]).toBe("sent");
+	expect(Object.values(receipts?.drafts ?? {})).toEqual([
+		{ status: "superseded", replacement: record.answer },
+	]);
 });
 
 it("rejects commands, empty source IDs and disabled chats before model admission", async () => {

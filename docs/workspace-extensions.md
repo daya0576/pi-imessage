@@ -55,6 +55,9 @@ rewrite), the generic `ScheduledOutbox` document token, and `durable`, the whole
 Durable SDK, for anything else a plain Durable extension uses (for example
 `durable.LiveDoc` or `durable.ResetEntry`). All primitives are the host's pinned
 versions.
+An `onYield` hook in a chat can withhold the final answer it sees: return a
+`continue` text starting with `[withheld]`. The answer is then held, not sent,
+and the continued run writes the reply that replaces it.
 Return a native extension with optional `schedules`; tools and multiple tasks
 work without any schedules. Startup and `/reload` scan direct, non-hidden child
 directories only, never skills or attachments. `reload_extensions` lets the chat
