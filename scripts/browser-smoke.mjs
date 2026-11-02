@@ -10,10 +10,7 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { createBrowser } from "../src/extensions/browser.ts";
 
 const directory = await mkdtemp(join(tmpdir(), "pi-browser-smoke-"));
-const agentDir = getAgentDir();
-// A temporary HOME hides the owner's debuggable Chrome, so the smoke never attaches to it.
-process.env.HOME = directory;
-const browser = await createBrowser(directory, agentDir);
+const browser = await createBrowser(directory, getAgentDir());
 let rotationResponse;
 let confirmRotation;
 const rotated = new Promise((resolve) => { confirmRotation = resolve; });
@@ -57,7 +54,7 @@ try {
 		assert.equal(config.browser.launchOptions.headless, false);
 		assert.equal((await stat(scope)).mode & 0o777, 0o700);
 		assert.equal((await stat(join(scope, "state", "auth.json"))).mode & 0o777, 0o600);
-		const { stdout } = await promisify(execFile)(join(agentDir, "bin", "pi-browser"), ["list", "--all"], {
+		const { stdout } = await promisify(execFile)(join(getAgentDir(), "bin", "pi-browser"), ["list", "--all"], {
 			cwd: join(scope, "cwd"),
 			env: { HOME: join(scope, "home"), PI_BROWSER_HOME: join(scope, "state"), PATH: process.env.PATH },
 			timeout: 10000,
@@ -71,7 +68,7 @@ try {
 	await rotated;
 	await browser.close([1]);
 	assert((await browser.run(2, { action: "snapshot" })).includes("storage: none"));
-	const restarted = await createBrowser(directory, agentDir);
+	const restarted = await createBrowser(directory, getAgentDir());
 	await restarted.close();
 	await assert.rejects(restarted.run(2, { action: "snapshot" }));
 	await restarted.run(1, { action: "open", url: `${url}/` });

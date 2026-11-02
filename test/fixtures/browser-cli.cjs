@@ -28,7 +28,7 @@ if (action === "list") {
 						{
 							name: "owned",
 							status: "open",
-							attached: fs.readFileSync(active, "utf8") === "attached",
+							attached: false,
 							userDataDir: path.join(process.env.PI_BROWSER_HOME, "profiles", "owned"),
 						},
 					]
@@ -38,7 +38,6 @@ if (action === "list") {
 	process.exit(0);
 }
 if (action === "close") fs.rmSync(active, { force: true });
-if (action === "attach") fs.writeFileSync(active, "attached");
 if (action === "state-save") fs.writeFileSync(values[0], JSON.stringify({ cookies: [], origins: [] }));
 if (action === "state-load") JSON.parse(fs.readFileSync(values[0], "utf8"));
 if (action === "open") {
