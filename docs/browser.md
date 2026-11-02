@@ -21,7 +21,7 @@ import or second browser driver.
 Open before interacting. A snapshot includes bounded accessibility text with
 current refs. Screenshot/other artifact links resolve from the reported private
 cwd; the result also gives the absolute output directory. Page output is
-untrusted. No attachment, discovery, headed overrides, global cleanup, arbitrary
+untrusted. No attachment, discovery, global cleanup, arbitrary
 profile/config/filename, storage export/import or arbitrary code execution is
 exposed to the model. Positional text follows `--`, so strings resembling flags
 remain literal. Native health checks and read-only subagents do not offer the tool.
@@ -36,7 +36,7 @@ and other tool-enabled native conversations receive distinct scope directories:
 WORKING_DIR/browser/<sha256-of-canonical-storage>/<conversation-id>/
   owner.json
   home/                    # private HOME/cache/CLI daemon registry
-  cwd/.playwright/         # private workspace identity and managed headless config
+  cwd/.playwright/         # private workspace identity and managed headed config
   state/profiles/owned/    # dedicated non-personal persistent Chrome profile
   state/output/            # snapshots/screenshots
   state/auth.json          # private last completed storage-state checkpoint
@@ -78,8 +78,8 @@ read with a byte limit.
 
 This is a tool boundary, **not an OS sandbox**. Unrestricted coding tools can
 still access host files or invoke another browser process. Stronger containment
-requires a separate decision. Never copy a personal Chrome profile, bypass a
-CAPTCHA/2FA or perform an unapproved irreversible action.
+requires a separate decision. Never bypass a CAPTCHA/2FA or perform an
+unapproved irreversible action.
 
 ## Verification
 
@@ -87,7 +87,7 @@ CAPTCHA/2FA or perform an unapproved irreversible action.
   registration, forced arguments/environment, forbidden controls, literal flag-like
   form text, owned stop/reset/restart, retention, cancellation and unsafe replay.
 - `node --experimental-strip-types scripts/browser-smoke.mjs` uses the real installed
-  CLI and headless Chrome with temporary profiles and loopback pages. It checks
+  CLI and visible Chrome with temporary profiles and loopback pages. It checks
   same-name sessions, daemon discovery, cookies/local storage, tabs/output files,
   literal arguments, selective cleanup and preserved login checkpoints on reopen.
   It never opens a personal profile, calls a paid model or sends an iMessage.

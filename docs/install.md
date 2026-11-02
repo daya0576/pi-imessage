@@ -27,7 +27,7 @@ node --experimental-strip-types src/cli.ts --help
 ```
 
 For changes to the built-in browser, also run
-`node --experimental-strip-types scripts/browser-smoke.mjs`. This uses real headless
+`node --experimental-strip-types scripts/browser-smoke.mjs`. This uses real visible
 Chrome and the installed pinned CLI with temporary HOME/profiles, loopback pages
 and synthetic login state; it never opens a personal profile or sends a message.
 See [browser isolation and retention](browser.md).
