@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Existing package version to publish from main
+        description: Existing release tag version to publish
         required: true
         type: string
 
@@ -17,12 +17,14 @@ concurrency:
 
 jobs:
   validate:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 15
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.version && format('v{0}', inputs.version) || github.ref }}
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
@@ -39,6 +41,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.version && format('v{0}', inputs.version) || github.ref }}
 
       - uses: actions/setup-node@v6
         with:
@@ -56,7 +60,6 @@ jobs:
           const manifest = JSON.parse(readFileSync("package.json", "utf8"));
           assert.notEqual(manifest.private, true);
           if (process.env.EVENT_NAME === "workflow_dispatch") {
-            assert.equal(process.env.REF_NAME, "main");
             assert.equal(process.env.REQUESTED_VERSION, manifest.version);
           } else {
             assert.equal(process.env.REF_NAME, `v${manifest.version}`);
