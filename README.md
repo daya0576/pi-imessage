@@ -28,12 +28,12 @@ pi-imessage install     # write a launchd job; loading it is a separate operator
 ```
 
 Enable replies for your chats by adding their GUIDs to the [settings allowlist](#settings).
-For installation and service operations, see [ops/README.md](ops/README.md).
+For installation, see [docs/install.md](docs/install.md).
 
 ## Commands
 
 Send `/help` in a chat to list commands: `/new`, `/status`, `/thinking`,
-`/verbose`, `/compact`, `/run`, `/stop` and `/reload`.
+`/verbose`, `/interim`, `/compact`, `/run`, `/stop` and `/reload`.
 
 ## Configuration
 
@@ -101,9 +101,7 @@ six hours and near the model's limit.
 
 This repository is the framework; `WORKING_DIR` is one deployment's data and code.
 Startup, `/reload` and the assistant's `reload_extensions` load the extensions.
-See [workspace extensions](docs/workspace-extensions.md),
-[ADR 0036](docs/adr/0036-workspace-policy-and-neutral-service-id.md) and
-[ADR 0042](docs/adr/0042-background-schedules-and-workspace-extensions.md).
+See [workspace extensions](docs/workspace-extensions.md).
 
 ```text
 pi-imessage/                      framework, shared by every deployment
@@ -116,7 +114,7 @@ pi-imessage/                      framework, shared by every deployment
 │   └── config/                   settings, environment, chat allowlist
 ├── docs/                         architecture and ADRs (the design ground truth)
 ├── examples/workspace-extensions/ reference extensions to copy into a workspace
-├── ops/                          deployment, preflight and smoke scripts
+├── scripts/                      package, browser and live smoke scripts
 └── test/
 
 WORKING_DIR/  (default ~/.pi/imessage)   one deployment, back it up yourself

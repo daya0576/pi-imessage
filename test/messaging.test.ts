@@ -19,6 +19,7 @@ import {
 	type FauxProviderHandle,
 	fauxAssistantMessage,
 	fauxProvider,
+	fauxText,
 	fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -28,7 +29,6 @@ import sharp from "sharp";
 import { getGlobalDispatcher } from "undici";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Chats, WatchCursor } from "../src/agent/chats.ts";
-import { compactChats } from "../src/agent/compaction.ts";
 import type { SendText } from "../src/agent/deliver.ts";
 import { DirectSends } from "../src/agent/direct-send.ts";
 import * as modelConfig from "../src/agent/models.ts";
@@ -128,6 +128,11 @@ it("automatically routes DM, group and SMS, archives attachments and logs disabl
 	database.prepare("UPDATE message SET thread_originator_guid='dm' WHERE ROWID=?").run(group);
 	database.prepare("INSERT INTO attachment VALUES (?)").run(source);
 	database.prepare("INSERT INTO message_attachment_join VALUES (?,1)").run(group);
+	// A deleted link-preview payload is skipped instead of holding the row.
+	database
+		.prepare("INSERT INTO attachment VALUES (?)")
+		.run(join(directory, "preview.pluginPayloadAttachment"));
+	database.prepare("INSERT INTO message_attachment_join VALUES (?,2)").run(group);
 	const sms = insert("sms", null, 3);
 	// Small attributedBody fixture for the legacy NSString decoder.
 	database
@@ -155,7 +160,10 @@ it("automatically routes DM, group and SMS, archives attachments and logs disabl
 	expect(prompts).toContain("[SMS from sender] third");
 	expect(prompts).not.toContain("logged only");
 	expect(prompts).not.toContain(source);
-	expect(prompts).toContain(join(directory, "attachments", encodeURIComponent("iMessage;+;group")));
+	const archive = join(directory, "attachments", encodeURIComponent("iMessage;+;group"));
+	expect(prompts).toContain(archive);
+	expect(await readdir(archive)).toHaveLength(1);
+	expect(onError).not.toHaveBeenCalled();
 	const chats = await service.harness.snapshot(Chats, BACKGROUND_CONTEXT);
 	const disabled = chats?.items.find((chat) => chat.chatGuid === "disabled");
 	if (!disabled) throw new Error("Missing logged chat");
@@ -166,13 +174,8 @@ it("automatically routes DM, group and SMS, archives attachments and logs disabl
 	expect((await service.harness.snapshot(WatchCursor, BACKGROUND_CONTEXT))?.rowid).toBe(last);
 	expect(onError).not.toHaveBeenCalled();
 	expect(intervals.mock.calls.some(([, duration]) => duration === 6 * 60 * 60 * 1000)).toBe(false);
-	const schedules = (await service.harness.snapshot(Schedules, BACKGROUND_CONTEXT))?.items;
-	expect(schedules).toHaveLength(1);
-	if (!schedules?.[0]) throw new Error("Missing scheduled compaction");
-	expect(await service.harness.getTask(schedules[0].taskId, BACKGROUND_CONTEXT)).toMatchObject({
-		kind: "imessage.schedule",
-		background: true,
-	});
+	// The host defines no schedule of its own.
+	expect((await service.harness.snapshot(Schedules, BACKGROUND_CONTEXT))?.items).toEqual([]);
 	await service.close();
 });
 
@@ -247,10 +250,14 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 			expect(result?.isError).toBe(false);
 			expect(result?.content.some((part) => part.type === "image")).toBe(false);
 			expect(JSON.stringify(result)).toContain("/tmp/unrelated-image.jpg");
-			return fauxAssistantMessage(fauxToolCall("subagent", { task: "Read the reference file privately" }), {
+			return fauxAssistantMessage(fauxToolCall("tool_search", { query: "subagent" }), {
 				stopReason: "toolUse",
 			});
 		},
+		() =>
+			fauxAssistantMessage(fauxToolCall("subagent", { task: "Read the reference file privately" }), {
+				stopReason: "toolUse",
+			}),
 		() =>
 			fauxAssistantMessage(
 				fauxToolCall("read", { path: join(workspaceAlias, relative(directory, archivedPath)) }),
@@ -283,22 +290,26 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 		},
 		() =>
 			fauxAssistantMessage(
-				fauxToolCall("read", {
-					path: trap,
-					offset: 1,
-					query: "上海浦东 私立医院",
-					apiKey: "secret-notice-marker",
-					command: "secret-command-marker",
-					url: "https://user:secret-url-marker@example.test/path?token=secret-query-marker",
-					nested: { token: "secret-object-marker" },
-				}),
+				[
+					fauxText("child interim marker"),
+					fauxToolCall("read", {
+						path: trap,
+						offset: 1,
+						query: "上海浦东 私立医院",
+						apiKey: "secret-notice-marker",
+						command: "secret-command-marker",
+						url: "https://user:secret-url-marker@example.test/path?token=secret-query-marker",
+						nested: { token: "secret-object-marker" },
+					}),
+				],
 				{ stopReason: "toolUse" },
 			),
 		() => fauxAssistantMessage("private child result"),
 		() =>
-			fauxAssistantMessage(fauxToolCall("bash", { command: "printf 'progress fixture'" }), {
-				stopReason: "toolUse",
-			}),
+			fauxAssistantMessage(
+				[fauxText("Found the fixture."), fauxToolCall("bash", { command: "printf 'progress fixture'" })],
+				{ stopReason: "toolUse" },
+			),
 		(context) => {
 			const result = context.messages.findLast((message) => message.role === "toolResult");
 			expect(result?.toolName).toBe("bash");
@@ -313,7 +324,7 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 			return fauxAssistantMessage("image read");
 		},
 	]);
-	// #33 / ADR 0020: all native calls are routed, including owned child conversations.
+	// #33: all native calls are routed, including owned child conversations.
 	const settingsPath = join(directory, "settings.json");
 	const settings = JSON.parse(await readFile(settingsPath, "utf8"));
 	await writeFile(settingsPath, JSON.stringify({ ...settings, progressMessages: true }));
@@ -328,7 +339,8 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 	);
 	const notices = textCalls();
 	expect(notices.every(([chat]) => chat === "iMessage;-;dm")).toBe(true);
-	expect(notices.filter(([, text]) => text.startsWith("→ [tool] "))).toHaveLength(4);
+	// One more top-level call: tool_search loads subagent first.
+	expect(notices.filter(([, text]) => text.startsWith("→ [tool] "))).toHaveLength(5);
 	expect(notices.filter(([, text]) => text.startsWith("→ [subagent/tool] "))).toHaveLength(3);
 	expect(notices.map(([, text]) => text).join("\n")).toContain(`path=${trap}`);
 	const progressText = notices.map(([, text]) => text).join("\n");
@@ -346,7 +358,13 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 	expect(progressText).toContain("apiKey=[redacted]");
 	expect(progressText).toContain("url=example．test");
 	expect(progressText).toContain("→ [tool] bash: printf 'progress fixture'");
-	expect(notices.filter(([, text]) => text.startsWith("✓ "))).toHaveLength(6);
+	// The chat's own interim words come before that call's notice; a child's stay private.
+	const texts = notices.map(([, text]) => text);
+	expect(texts.indexOf("Found the fixture.")).toBe(
+		texts.indexOf("→ [tool] bash: printf 'progress fixture'") - 1,
+	);
+	expect(progressText).not.toContain("child interim marker");
+	expect(notices.filter(([, text]) => text.startsWith("✓ "))).toHaveLength(7);
 	expect(notices.filter(([, text]) => text.startsWith("× "))).toEqual([
 		["iMessage;-;dm", expect.stringMatching(/^× \[tool\] bash \(\d+\.\ds\)$/)],
 	]);
@@ -434,7 +452,7 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 	expect(argumentSummary({ query: "来源 https://example.test/private" })).not.toContain("https://");
 	expect(notices.at(-1)).toEqual(["iMessage;-;dm", "image read"]);
 	const receipts = (await service.harness.snapshot(DirectSends, BACKGROUND_CONTEXT))?.requests ?? [];
-	expect(receipts.filter((receipt) => receipt.requestId.startsWith("progress:"))).toHaveLength(14);
+	expect(receipts.filter((receipt) => receipt.requestId.startsWith("progress:"))).toHaveLength(16);
 	expect(receipts.filter((receipt) => receipt.textStatus === "unknown")).toHaveLength(1);
 	expect(await sharp(archivedPath).metadata()).toMatchObject({ format: "jpeg", width: 16, height: 12 });
 	expect(await readdir(archive)).toHaveLength(1);
@@ -452,17 +470,17 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 	await service.close();
 	service = await startMessaging(options);
 	await service.poll();
-	expect(send).toHaveBeenCalledTimes(15); // No historical or uncertain notice replay.
+	expect(send).toHaveBeenCalledTimes(18); // No historical or uncertain notice replay.
 	faux.setResponses([fauxAssistantMessage("healthy"), fauxAssistantMessage("quiet answer")]);
 	await service.health();
 	await service.poll();
-	expect(send).toHaveBeenCalledTimes(15); // Tool-less health remains private.
+	expect(send).toHaveBeenCalledTimes(18); // Tool-less health remains private.
 	await writeFile(settingsPath, JSON.stringify({ ...settings, progressMessages: false }));
 	insert("quiet", "Another question");
 	await service.poll();
 	await vi.waitFor(async () => {
 		await service?.poll();
-		expect(send).toHaveBeenCalledTimes(16);
+		expect(send).toHaveBeenCalledTimes(19);
 	});
 	expect(textCalls().at(-1)).toEqual(["iMessage;-;dm", "quiet answer"]);
 	// /verbose overrides the global setting for one chat in both directions.
@@ -478,7 +496,7 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 		await service?.poll();
 		expect(textCalls().at(-1)).toEqual(["iMessage;-;dm", "verbose answer"]);
 	});
-	expect(textCalls().slice(16)).toEqual([
+	expect(textCalls().slice(19)).toEqual([
 		["iMessage;-;dm", "Verbose: on (this chat only)"],
 		["iMessage;-;dm", "→ [tool] bash: printf 'verbose fixture'"],
 		["iMessage;-;dm", expect.stringMatching(/^✓ \[tool\] bash \(\d+\.\ds\)$/)],
@@ -493,14 +511,14 @@ it("retries a broken HEIC, archives JPEG and reads the image only in the model r
 		await service?.poll();
 		expect(textCalls().at(-1)).toEqual(["iMessage;-;dm", "silent answer"]);
 	});
-	expect(textCalls().slice(20)).toEqual([
+	expect(textCalls().slice(23)).toEqual([
 		["iMessage;-;dm", "Verbose: off (this chat only)"],
 		["iMessage;-;dm", "silent answer"],
 	]);
 });
 
 // #33 Phase 3: command rows must settle without becoming model input or blocking following source rows.
-it("routes commands and hides only six-hour compaction progress", async () => {
+it("routes commands and reports compaction progress", async () => {
 	await writeFile(
 		join(directory, "settings.json"),
 		JSON.stringify({ chatAllowlist: { whitelist: ["*"], blacklist: [] }, progressMessages: true }),
@@ -520,15 +538,6 @@ it("routes commands and hides only six-hour compaction progress", async () => {
 	]);
 	expect(faux.state.callCount).toBe(1);
 	expect((await service.harness.snapshot(WatchCursor, BACKGROUND_CONTEXT))?.rowid).toBe(last);
-	// Scheduled native compactions emit neither admission nor settlement notices.
-	const tasks = await compactChats(service.harness);
-	expect(tasks).toHaveLength(1);
-	for (const task of tasks) await service.harness.waitForTask(task, BACKGROUND_CONTEXT);
-	await service.poll();
-	expect(send).toHaveBeenCalledTimes(4);
-	expect((await service.harness.snapshot(DirectSends, BACKGROUND_CONTEXT))?.requests ?? []).not.toEqual(
-		expect.arrayContaining([expect.objectContaining({ requestId: expect.stringMatching(/^progress:/) })]),
-	);
 	// Explicit /compact retains both progress phases and its command result.
 	insert("manual-compact", "/compact");
 	await vi.waitFor(async () => {
@@ -704,7 +713,7 @@ it("releases ownership on watcher failure and joins an in-flight automatic send 
 	}
 	await service.close();
 	service = undefined;
-	// #33 / ADR 0016: production wiring installs HTTP before auth, reloads it and cleans up failures.
+	// #33: production wiring installs HTTP before auth, reloads it and cleans up failures.
 	const previousDispatcher = getGlobalDispatcher();
 	for (const name of ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "NO_PROXY", "no_proxy"])
 		vi.stubEnv(name, "");
@@ -725,7 +734,7 @@ it("releases ownership on watcher failure and joins an in-flight automatic send 
 		expect(getGlobalDispatcher()).not.toBe(previousDispatcher);
 		throw new Error("isolated auth failure");
 	});
-	// #33 / ADR 0019: stale task configuration must not create workers or mutate stored state.
+	// #33: stale task configuration must not create workers or mutate stored state.
 	await mkdir(join(directory, "cron"));
 	await mkdir(join(directory, "automation"));
 	const retiredState = [

@@ -1,4 +1,4 @@
-# 0004. Native Durable extensions, not an SDK adapter
+# 0003. Native Durable extensions, not an SDK adapter
 
 Status: accepted (2026-10-04; owner accepted 2026-10-05)
 

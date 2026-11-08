@@ -12,7 +12,7 @@ import { Schedules } from "../src/agent/scheduling.ts";
 import { startService } from "../src/main.ts";
 import { startWeb } from "../src/web/server.ts";
 
-// #33 / ADR 0019: retired scheduling surfaces are gone; immediate sends and read-only views remain.
+// #33: retired scheduling surfaces are gone; immediate sends and read-only views remain.
 it("records immediate tool sends in chat and serves state without scheduling entry points", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "imessage-http-"));
 	let agent: Awaited<ReturnType<typeof startService>> | undefined;
@@ -51,17 +51,11 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 			for (const method of ["GET", "POST", "DELETE"])
 				expect((await fetch(base + path, { method })).status, `${method} ${path}`).toBe(404);
 		}
-		// #33 / ADR 0032: reading native schedules does not start model work.
-		expect((await agent.harness.snapshot(Schedules, BACKGROUND_CONTEXT))?.items).toHaveLength(1);
+		// #33: reading native schedules does not start model work.
+		// The host defines no schedule of its own.
+		expect((await agent.harness.snapshot(Schedules, BACKGROUND_CONTEXT))?.items).toEqual([]);
 		const scheduled = await (await fetch(`${base}/scheduled/data`)).json();
-		expect(scheduled.jobs).toHaveLength(1);
-		expect(scheduled.jobs[0]).toMatchObject({
-			id: "compact-chats",
-			intervalMs: 21600000,
-			timezone: new Intl.DateTimeFormat().resolvedOptions().timeZone,
-			phase: "sleep",
-			runs: [],
-		});
+		expect(scheduled.jobs).toEqual([]);
 		expect(scheduled.recent).toEqual([]);
 		expect((await fetch(`${base}/scheduled`)).status).toBe(200);
 		for (const method of ["POST", "DELETE"])
@@ -451,6 +445,7 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 		const childStarted = Promise.withResolvers<void>();
 		const releaseChild = Promise.withResolvers<void>();
 		faux.setResponses([
+			fauxAssistantMessage(fauxToolCall("tool_search", { query: "subagent" }), { stopReason: "toolUse" }),
 			fauxAssistantMessage(
 				fauxToolCall("subagent", { task: "Tree probe <script> sk-fixturecheckpointkey" }),
 				{ stopReason: "toolUse" },
@@ -482,24 +477,7 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 			expect(tree.tasks).toContainEqual(
 				expect.objectContaining({ conversationId: child.id, kind: "pi.generation" }),
 			);
-			// Entries are listed with a one-line summary; secrets stay redacted and tool arguments stay out.
-			const treeText = JSON.stringify(tree);
-			expect(treeText).not.toContain("sk-fixturecheckpointkey");
-			expect(tree.entries).toContainEqual(
-				expect.objectContaining({ conversationId, kind: "pi.user", text: "Delegate a tree probe" }),
-			);
-			expect(tree.entries).toContainEqual(
-				expect.objectContaining({
-					conversationId,
-					kind: "pi.assistant",
-					byTaskId: subagent.owner,
-					text: "[toolCall subagent]",
-				}),
-			);
-			const call = tree.entries.find((entry: { byTaskId?: number }) => entry.byTaskId === subagent.owner);
-			const entryResponse = await fetch(`${base}/tasks/entry/data?entryId=${call.id}`);
-			expect((await entryResponse.json()).id).toBe(call.id);
-			expect((await fetch(`${base}/tasks/entry/data?entryId=999999999`)).status).toBe(404);
+			expect(JSON.stringify(tree)).not.toContain("Tree probe");
 			const taskResponse = await fetch(`${base}/tasks/task/data?taskId=${subagent.id}`);
 			const taskText = await taskResponse.text();
 			expect(JSON.parse(taskText).state.checkpoint).toMatchObject({ phase: "execute" });
@@ -507,6 +485,7 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 			expect(taskText).not.toContain("sk-fixturecheckpointkey");
 			const treePage = await (await fetch(`${base}/tasks?conversationId=${conversationId}`)).text();
 			expect(treePage).toContain('href="/tasks" class="active"');
+			expect(treePage).not.toContain("Tree probe");
 			expect((await fetch(`${base}/tasks/task/data?taskId=not-a-number`)).status).toBe(400);
 			expect((await fetch(`${base}/tasks/task/data?taskId=999999999`)).status).toBe(404);
 			expect((await fetch(`${base}/tasks`, { method: "POST" })).status).toBe(404);
@@ -520,10 +499,6 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 			expect(updatedTree.revision).not.toBe(tree.revision);
 			expect(updatedTree.tasks).toContainEqual(
 				expect.objectContaining({ id: subagent.id, status: "terminal" }),
-			);
-			// The child's answer is the subagent tool's result entry.
-			expect(updatedTree.entries).toContainEqual(
-				expect.objectContaining({ conversationId, kind: "pi.tool-result", byTaskId: subagent.id }),
 			);
 		} finally {
 			releaseChild.resolve();

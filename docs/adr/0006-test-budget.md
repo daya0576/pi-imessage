@@ -1,4 +1,4 @@
-# 0010. About 40 tests, only for our code
+# 0006. About 40 tests, only for our code
 
 Status: accepted (2026-10-04; owner accepted 2026-10-05)
 

@@ -1,6 +1,6 @@
-import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { type TranscriptContext, Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
@@ -11,21 +11,13 @@ import {
 	fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
-import {
-	defineExtension,
-	defineTool,
-	Harness,
-	type Submission,
-	type TaskId,
-	UserEntry,
-} from "@earendil-works/pi-durable";
+import { defineExtension, defineTool, Harness, type Submission, UserEntry } from "@earendil-works/pi-durable";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Chats } from "../src/agent/chats.ts";
 import type { SendText } from "../src/agent/deliver.ts";
 import { DirectSends } from "../src/agent/direct-send.ts";
 import * as modelConfig from "../src/agent/models.ts";
 import { Deliveries } from "../src/agent/replies.ts";
-import { restartExtension } from "../src/extensions/restart.ts";
 import { startService } from "../src/main.ts";
 import type { MessageSender } from "../src/transport/send.ts";
 
@@ -52,7 +44,6 @@ beforeEach(async () => {
 	send.mockReset().mockResolvedValue(undefined);
 	sendAttachment.mockReset().mockResolvedValue(undefined);
 	vi.spyOn(console, "warn").mockImplementation(() => {});
-	vi.spyOn(console, "error").mockImplementation(() => {});
 	options = {
 		workingDir: directory,
 		agentDir: join(directory, "agent"),
@@ -113,7 +104,7 @@ it("maps chats separately, passes source GUIDs, and sends only final text", asyn
 			if (message.role === "system") expect(message.toolsAdded ?? []).toHaveLength(0);
 		}
 	}
-	// #33 / ADR 0011: a passive user entry is not an intervening ordinary input.
+	// #33 / ADR 0007: a passive user entry is not an intervening ordinary input.
 	const conversation = await agent.harness.conversation(records[0].conversationId, BACKGROUND_CONTEXT);
 	if (!conversation) throw new Error("Missing conversation");
 	await (
@@ -178,11 +169,9 @@ it("admits all busy-chat additions at the next tool boundary without repeating c
 			expect(messages).toContain("Lookup completed: museum is open.");
 			const sections = context.messages
 				.filter((message) => message.role === "system")
-				.flatMap((message) => message.sections?.["chat-steer"] ?? []);
+				.flatMap((message) => message.sections?.["chat-facts"] ?? []);
 			expect(sections).toHaveLength(1);
-			expect(sections[0]).toContain("newest explicit correction");
-			expect(sections[0]).toContain("Answer unrelated questions separately");
-			expect(sections[0]).toContain("Do not restart the task");
+			expect(sections[0]).toContain("Different people in a group are different people.");
 			// A scripted answer verifies our wiring, not a real model's semantic judgment.
 			return fauxAssistantMessage(reply);
 		},
@@ -212,7 +201,7 @@ it("admits all busy-chat additions at the next tool boundary without repeating c
 	}
 });
 
-// #33 / ADR 0011: late input from another sender holds an unattempted draft until reconciliation.
+// #33 / ADR 0007: late input from another sender holds an unattempted draft until reconciliation.
 it("reconciles unsent answers with multiple senders and preserves the replaced draft", async () => {
 	const firstStarted = Promise.withResolvers<void>();
 	const finishFirst = Promise.withResolvers<void>();
@@ -230,7 +219,7 @@ it("reconciles unsent answers with multiple senders and preserves the replaced d
 			const messages = JSON.stringify(context.messages);
 			expect(messages).toContain("from Alex]");
 			expect(messages).toContain("from Blair]");
-			expect(messages).toContain("One person's message does not retract another person's requirements");
+			expect(messages).toContain("Different people in a group are different people.");
 			const facts = replyDelivery(context);
 			expect(facts).toContain(oldText);
 			expect(facts).toContain(" unattempted: ");
@@ -293,7 +282,7 @@ it("reconciles unsent answers with multiple senders and preserves the replaced d
 	}
 });
 
-// #33 / ADR 0011: reconciliation failure is not permission to release the obsolete draft.
+// #33 / ADR 0007: reconciliation failure is not permission to release the obsolete draft.
 it("retains a held draft after reconciliation fails and the service reopens", async () => {
 	faux.setResponses([fauxAssistantMessage("obsolete draft")]);
 	const first = await answered(await agent.submit({ chatGuid: "chat", guid: "old", text: "Old condition." }));
@@ -317,17 +306,6 @@ it("retains a held draft after reconciliation fails and the service reopens", as
 		expect(send).not.toHaveBeenCalled();
 		finish.resolve();
 		expect(await second.wait(BACKGROUND_CONTEXT)).toMatchObject({ status: "unanswered" });
-		// ADR 0053: the model error reaches the service log with its provider and model.
-		expect(console.error).toHaveBeenCalledWith(
-			expect.any(String),
-			"Model call failed",
-			expect.objectContaining({
-				conversation: first.conversationId,
-				provider: faux.getModel().provider,
-				model: faux.getModel().id,
-				reason: "invalid input",
-			}),
-		);
 		await agent.close();
 		agent = await startService(options);
 		await agent.deliver();
@@ -342,7 +320,7 @@ it("retains a held draft after reconciliation fails and the service reopens", as
 	}
 });
 
-// #33 / ADR 0011: input after a transport claim cannot retract that send or overtake it.
+// #33 / ADR 0007: input after a transport claim cannot retract that send or overtake it.
 it("keeps an already claimed reply and sends the subsequent answer only after it settles", async () => {
 	faux.setResponses([
 		fauxAssistantMessage("claimed answer"),
@@ -414,72 +392,6 @@ it("recovers an unsent saved answer, then preserves its sent receipt across reop
 	await agent.deliver();
 	expect(send).toHaveBeenCalledTimes(1);
 	expect(faux.state.callCount).toBe(1);
-});
-
-// #39, ADR 0052: the restart tool starts its controller only after its own call has settled and never reruns.
-it("schedules a self-restart after the tool call settles and rejects an unprepared release", async () => {
-	await agent.close();
-	const releases = join(directory, "releases");
-	const target = join(releases, "b".repeat(40));
-	for (const entry of ["src", "node_modules", "ops"]) await mkdir(join(target, entry), { recursive: true });
-	await writeFile(join(target, "src", "cli.ts"), "");
-	await writeFile(join(target, "ops", "restart.command"), "#!/bin/bash\n");
-	let restartTask: TaskId | undefined;
-	const launched = Promise.withResolvers<string>();
-	const launch = vi.fn(async (controller: string) => {
-		const task = (await agent.harness.inspect(BACKGROUND_CONTEXT)).tasks.find(
-			({ record }) => record.id === restartTask,
-		);
-		expect(task?.state.kind).not.toBe("running");
-		launched.resolve(controller);
-	});
-	options.extensions = () => [
-		restartExtension({
-			workingDir: directory,
-			currentRelease: join(releases, "a".repeat(40)),
-			deployRoot: directory,
-			settled(taskId) {
-				restartTask = taskId;
-				return agent.harness.waitForTask(taskId, BACKGROUND_CONTEXT);
-			},
-			launch,
-		}),
-	];
-	agent = await startService(options);
-	const results: string[] = [];
-	const lastToolResult = (context: TranscriptContext) =>
-		JSON.stringify(context.messages.findLast((message) => message.role === "toolResult"));
-	const call = (release: string) =>
-		fauxAssistantMessage(fauxToolCall("restart_service", { release }), { stopReason: "toolUse" });
-	faux.setResponses([
-		call("c".repeat(40)),
-		(context) => {
-			results.push(lastToolResult(context));
-			return call("b".repeat(40));
-		},
-		(context) => {
-			results.push(lastToolResult(context));
-			return call("b".repeat(40));
-		},
-		(context) => {
-			results.push(lastToolResult(context));
-			return fauxAssistantMessage("restart scheduled");
-		},
-	]);
-	const record = await answered(await agent.submit({ chatGuid: "chat", guid: "restart", text: "deploy" }));
-	expect(results[0]).toContain("not prepared");
-	expect(results[1]).toContain("is scheduled");
-	expect(results[2]).toContain("already scheduled");
-	const controller = await launched.promise;
-	expect(launch).toHaveBeenCalledTimes(1);
-	expect(controller.startsWith(join(directory, "pi-imessage-restart."))).toBe(true);
-	const control = await readFile(join(dirname(controller), "control.sh"), "utf8");
-	expect(control).toContain(`OLD_PID='${process.pid}'`);
-	expect(control).toContain(`REPO='${target}'`);
-	expect((await stat(join(dirname(controller), "environment.sh"))).mode & 0o777).toBe(0o600);
-	const conversation = await agent.harness.conversation(record.conversationId, BACKGROUND_CONTEXT);
-	const resolved = await conversation?.agent(BACKGROUND_CONTEXT);
-	expect(resolved?.tools.find((tool) => tool.name === "restart_service")?.replay).toBe("unsafe");
 });
 
 // #33 Phase 2: reread delivery settings without retrying a possibly completed rich send.
@@ -564,7 +476,7 @@ it("records direct text/file outcomes, rejects conflicting IDs and stops after u
 	expect(send).toHaveBeenCalledTimes(2);
 	expect(sendAttachment).toHaveBeenCalledTimes(2);
 	expect(faux.state.callCount).toBe(0);
-	// ADR 0018: the chat conversation records each attempted send once, without a model turn.
+	// The chat conversation records each attempted send once, without a model turn.
 	const chat = (await agent.harness.snapshot(Chats, BACKGROUND_CONTEXT))?.items.find(
 		(item) => item.chatGuid === "chat",
 	);
@@ -649,29 +561,41 @@ it("starts quietly and wires default coding/image tools, model defaults and work
 	expect(resolved?.model).toEqual(options.runtime.defaults.model);
 	expect(resolved?.tools.map((tool) => tool.name).sort()).toEqual([
 		"bash",
-		"browser",
+		"codemode",
 		"edit",
 		"fetch_content",
-		"get_search_results",
 		"load_memory",
 		"read",
-		"reload_extensions",
-		"restart_service",
 		"save_memory",
 		"search_memory",
 		"send_message",
-		"subagent",
+		"tool_search",
 		"web_search",
 		"write",
 	]);
-	// ADR 0039: built-ins default to safe; browser mutations (ADR 0017) and self-restart (ADR 0052) opt out.
-	const unsafe = new Set(["browser", "restart_service"]);
-	expect(resolved?.tools.every((tool) => tool.replay === (unsafe.has(tool.name) ? "unsafe" : "safe"))).toBe(
-		true,
+	// Rarely used tools wait for tool_search, and the prompt names them.
+	expect(resolved?.deferred.map((tool) => tool.name).sort()).toEqual([
+		"browser",
+		"get_search_results",
+		"reload_extensions",
+		"subagent",
+	]);
+	expect(JSON.stringify(stream.mock.calls[0][1])).toContain(
+		"before calling it: browser, get_search_results, reload_extensions, subagent.",
 	);
+	// Built-ins default to safe; browser mutations opt out.
+	const unsafe = new Set(["browser"]);
+	expect(
+		[...(resolved?.tools ?? []), ...(resolved?.deferred ?? [])].every(
+			(tool) => tool.replay === (unsafe.has(tool.name) ? "unsafe" : "safe"),
+		),
+	).toBe(true);
 	expect(resolved?.tools.find((tool) => tool.name === "read")?.description).toContain(
 		"Images are kept as file references",
 	);
+	// Code mode lists the callable tools for scripts; `models.*` is off.
+	expect(JSON.stringify(stream.mock.calls[0][1])).toContain("Tools scripts can call");
+	expect(JSON.stringify(stream.mock.calls[0][1])).not.toContain("models.classify");
 	expect(stream.mock.calls[0][2]).toMatchObject({
 		transport: "sse",
 		timeoutMs: 300_000,

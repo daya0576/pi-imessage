@@ -1,4 +1,4 @@
-# 0006. One JSONL storage, backed up by hand
+# 0004. One JSONL storage, backed up by hand
 
 Status: accepted (2026-10-04; owner accepted 2026-10-05)
 

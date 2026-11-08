@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { dailyTime, localDate, nextDaily } from "../../src/agent/time.ts";
 
-// #33 / ADR 0034: isolated process timezone, no Harness, installed auth or external effects.
+// #33: isolated process timezone, no Harness, installed auth or external effects.
 assert.equal(new Intl.DateTimeFormat().resolvedOptions().timeZone, process.env.TZ);
 if (process.env.TZ === "UTC") {
 	assert.equal(localDate(Date.parse("2026-10-07T02:00:00Z")), "2026-10-07");

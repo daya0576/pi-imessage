@@ -8,12 +8,11 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import {
 	type ConversationId,
 	type Cursor,
-	type EntryId,
 	type Harness,
 	LiveDoc,
 	type TaskId,
 } from "@earendil-works/pi-durable";
-import { Chats, progressEnabled } from "../agent/chats.ts";
+import { Chats, interimEnabled, progressEnabled } from "../agent/chats.ts";
 import { DirectSends } from "../agent/direct-send.ts";
 import { Sessions } from "../agent/health.ts";
 import { Deliveries } from "../agent/replies.ts";
@@ -143,7 +142,7 @@ export async function startWeb(options: {
 			settings: { chatAllowlist: configuration.chatAllowlist },
 		};
 	}
-	/** One row per chat: reply eligibility, the /verbose choice and the conversation's agent settings. */
+	/** One row per chat: reply eligibility, the /verbose and /interim choices and the conversation's agent settings. */
 	async function chatSettings() {
 		const [chats, configuration] = await Promise.all([
 			options.agent.harness.snapshot(Chats, BACKGROUND_CONTEXT),
@@ -166,6 +165,7 @@ export async function startWeb(options: {
 					updatedAt: entries ? historyActivity(entries) : undefined,
 					replies: isReplyEnabled(configuration, chat.chatGuid),
 					verbose: { chat: chat.progress, effective: progressEnabled(configuration, records, chat.chatGuid) },
+					interim: { chat: chat.interim, effective: interimEnabled(configuration, records, chat.chatGuid) },
 					model: agent?.model ? `${agent.model.provider}/${agent.model.modelId}` : undefined,
 					thinking: agent?.thinkingLevel,
 				};
@@ -177,7 +177,10 @@ export async function startWeb(options: {
 		);
 		return {
 			chats: rows,
-			defaults: { progressMessages: configuration.progressMessages },
+			defaults: {
+				progressMessages: configuration.progressMessages,
+				interimMessages: configuration.interimMessages,
+			},
 			revision: viewRevision(),
 		};
 	}
@@ -321,18 +324,9 @@ export async function startWeb(options: {
 				schedules: await options.agent.harness.snapshot(Schedules, BACKGROUND_CONTEXT),
 				chats: await options.agent.harness.snapshot(Chats, BACKGROUND_CONTEXT),
 				sessions: await options.agent.harness.snapshot(Sessions, BACKGROUND_CONTEXT),
-				session: join(options.workingDir, "durable"),
 				revision: viewRevision(),
 			};
 			compact = true;
-		} else if (url.pathname === "/tasks/entry/data") {
-			const id = url.searchParams.get("entryId");
-			if (!id || !/^\d+$/.test(id) || !Number.isSafeInteger(Number(id))) throw new Error("Invalid entry ID");
-			value = await options.agent.harness.commit((tx) => tx.entry(Number(id) as EntryId), BACKGROUND_CONTEXT);
-			if (!value) {
-				await json(response, 404, { error: "Entry not found" });
-				return;
-			}
 		} else if (url.pathname === "/tasks/task/data") {
 			const id = url.searchParams.get("taskId");
 			if (!id || !/^\d+$/.test(id) || !Number.isSafeInteger(Number(id))) throw new Error("Invalid task ID");

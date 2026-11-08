@@ -2,6 +2,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { type Cursor, createRegistry, type Extension } from "@earendil-works/pi-durable";
+import { createToolSearchExtension } from "@earendil-works/pi-durable/tool-search";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import {
 	type AgentDefaults,
@@ -12,10 +13,8 @@ import {
 	WatchCursor,
 } from "./agent/chats.ts";
 import { compactionReply, isCommand, runCommand } from "./agent/commands.ts";
-import { compactChats } from "./agent/compaction.ts";
 import { deliverReplies, recoverSending, type SendText } from "./agent/deliver.ts";
 import { type DirectSendInput, deliverDirect } from "./agent/direct-send.ts";
-import { logErrors } from "./agent/error-log.ts";
 import { openHarness } from "./agent/harness.ts";
 import { submitHealth } from "./agent/health.ts";
 import { openModels, readDefaults, requestSettings, withModelPolicy } from "./agent/models.ts";
@@ -25,10 +24,10 @@ import { Runs, runRecord } from "./agent/run.ts";
 import { deliverScheduled, EXECUTION_KIND, Schedules, schedulingExtension } from "./agent/scheduling.ts";
 import { isReplyEnabled, readSettings } from "./config/settings.ts";
 import { createBrowser } from "./extensions/browser.ts";
+import { createCodemode } from "./extensions/codemode.ts";
 import { memoryExtension } from "./extensions/memory.ts";
 import { messageExtension } from "./extensions/message.ts";
 import { ImageRead } from "./extensions/read-image.ts";
-import { launchInTerminal, restartExtension } from "./extensions/restart.ts";
 import { validateSchedules, type WorkspaceExtension } from "./extensions/schedules.ts";
 import { Subagent } from "./extensions/subagent.ts";
 import { webExtension } from "./extensions/web.ts";
@@ -38,6 +37,32 @@ import { openHttpTransport } from "./transport/http.ts";
 import type { MessageSender } from "./transport/send.ts";
 import { createWatcher } from "./transport/watch.ts";
 import { startWeb } from "./web/server.ts";
+
+/** Tools offered upfront; every other built-in or workspace tool waits for tool_search. */
+const OFFERED_TOOLS = new Set([
+	"read",
+	"bash",
+	"edit",
+	"write",
+	"send_message",
+	"search_memory",
+	"load_memory",
+	"save_memory",
+	"web_search",
+	"fetch_content",
+	"tool_search",
+	"codemode",
+]);
+
+function deferRare<T extends Extension>(extension: T): T {
+	if (!extension.tools) return extension;
+	return {
+		...extension,
+		tools: extension.tools.map((tool) =>
+			OFFERED_TOOLS.has(tool.name) ? tool : { ...tool, deferred: true as const },
+		),
+	};
+}
 
 /** Explicit startup; pass an isolated runtime in tests instead of opening installed auth. */
 export async function startService(
@@ -66,6 +91,11 @@ export async function startService(
 	}
 	const defaults = { ...runtime.defaults, model: { ...runtime.defaults.model } };
 	const browser = await createBrowser(options.workingDir, options.agentDir);
+	const codemode = createCodemode();
+	const closeResources = async () => {
+		await codemode.close();
+		await browser.close();
+	};
 	if (!runtime.models.getModel(defaults.model.provider, defaults.model.modelId))
 		throw new Error(`Model is unavailable: ${defaults.model.provider}/${defaults.model.modelId}`);
 	async function loadExtensions(): Promise<WorkspaceExtension[]> {
@@ -91,21 +121,16 @@ export async function startService(
 				: [
 						CodingTools,
 						ImageRead,
+						// Durable's own tool_search loads the deferred tools.
+						createToolSearchExtension(),
 						await memoryExtension(options.workingDir),
 						webExtension(),
 						browser.extension,
+						codemode.extension,
 						Subagent,
 						workspaceExtension(reload),
-						// ADR 0052: the service runs from a release directory; the controller starts after the call settles.
-						restartExtension({
-							workingDir: options.workingDir,
-							currentRelease: process.cwd(),
-							deployRoot: "/tmp",
-							settled: (taskId) => harness.waitForTask(taskId, BACKGROUND_CONTEXT),
-							launch: launchInTerminal,
-						}),
-					]),
-			...(await loadWorkspaceExtensions(options.workingDir)),
+					].map(deferRare)),
+			...(await loadWorkspaceExtensions(options.workingDir)).map(deferRare),
 		];
 		validateSchedules(extensions);
 		const names = new Set<string>();
@@ -113,7 +138,7 @@ export async function startService(
 			if (names.has(extension.name)) throw new Error(`Duplicate extension name: ${extension.name}`);
 			names.add(extension.name);
 		}
-		// ADR 0039: an interrupted tool reruns on recovery unless it declares `unsafe`.
+		// An interrupted tool reruns on recovery unless it declares `unsafe`.
 		return extensions.map((extension) =>
 			extension.tools
 				? { ...extension, tools: extension.tools.map((tool) => ({ ...tool, replay: tool.replay ?? "safe" })) }
@@ -131,7 +156,6 @@ export async function startService(
 	const { harness, storage } = owner;
 	const scheduling = schedulingExtension(harness, defaults);
 	let progress: Awaited<ReturnType<typeof startProgress>>;
-	const stopErrorLog = logErrors(harness);
 	try {
 		// The native owner lock is acquired before cleaning up browsers left by a previous process.
 		await browser.close();
@@ -156,7 +180,6 @@ export async function startService(
 			const saved = savedSchedules?.items.find((schedule) => schedule.id === jobId);
 			if (
 				saved &&
-				saved.id !== "compact-chats" &&
 				!activeExtensions.some((extension) =>
 					extension.schedules?.some((schedule) => schedule.id === saved.id),
 				)
@@ -170,7 +193,7 @@ export async function startService(
 			sendAttachment: options.sendAttachment,
 		});
 	} catch (error) {
-		await owner.close(browser.close);
+		await owner.close(closeResources);
 		throw error;
 	}
 
@@ -407,23 +430,6 @@ export async function startService(
 				return receipt;
 			});
 		},
-		/** Admit quiet native compactions; observing their results must not hold shutdown open. */
-		compact() {
-			return track(async () => {
-				const tasks = await compactChats(harness);
-				for (const task of tasks)
-					void harness
-						.waitForTask(task, BACKGROUND_CONTEXT)
-						.then((settled) => {
-							if (settled.state.outcome.status !== "completed")
-								console.warn("Scheduled compaction ended", task, settled.state.outcome);
-						})
-						.catch((error) => {
-							if (!closed) console.warn("Scheduled compaction observation failed", task, error);
-						});
-				return tasks;
-			});
-		},
 		// Explicit host boundary; no model loop, timer or transport runs on import.
 		deliver() {
 			return track(async () => {
@@ -449,8 +455,7 @@ export async function startService(
 			closing ??= (async () => {
 				await Promise.allSettled([...operations]);
 				await progress.close();
-				stopErrorLog();
-				await owner.close(browser.close);
+				await owner.close(closeResources);
 			})();
 			return closing;
 		},
@@ -513,25 +518,19 @@ export async function startMessaging(
 	let closing: Promise<void> | undefined;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let started = false;
-	/** Rows committed before the call are read even when a poll is already in flight. */
 	function poll() {
 		if (closed) return Promise.reject(new Error("Messaging is closed"));
-		const previous = pending?.catch(() => undefined) ?? Promise.resolve();
-		const current: Promise<void> = previous
-			.then(async () => {
-				if (closed) return;
-				try {
-					await watcher.poll();
-				} finally {
-					// An unreadable attachment must not strand another chat's completed reply.
-					if (!closed) await service.deliver();
-				}
-			})
-			.finally(() => {
-				if (pending === current) pending = undefined;
-			});
-		pending = current;
-		return current;
+		pending ??= (async () => {
+			try {
+				await watcher.poll();
+			} finally {
+				// An unreadable attachment must not strand another chat's completed reply.
+				if (!closed) await service.deliver();
+			}
+		})().finally(() => {
+			pending = undefined;
+		});
+		return pending;
 	}
 	function tick() {
 		void poll()

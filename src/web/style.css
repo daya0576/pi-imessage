@@ -439,12 +439,6 @@ body.page-logs .native-state {
 	padding: 8px 0 8px 16px;
 }
 
-/* Entries are history records, not work: all grey, no marker of their own. */
-.task-tree li.entry > details > summary {
-	opacity: 0.6;
-	list-style: none;
-}
-
 .schedule-row {
 	background: var(--surface);
 	margin-bottom: 6px;

@@ -12,7 +12,7 @@
 
 - Read `docs/architecture.md` and `docs/adr/` before changing what they cover.
 - Keep the layering; `test/architecture.test.ts` is the rule.
-- A new or reversed decision starts as a new ADR with status `proposed`; the user accepts it. Never edit an accepted ADR; supersede it with a new one.
+- Never add an ADR on your own initiative. A new ADR, including one that reverses an accepted one, is written only during a grilling session (the `grilling` skill) to record what the user settled there. Otherwise record the change in the GitHub issue, `docs/architecture.md` or the code. Never edit an accepted ADR.
 - Feature scope and progress live in the GitHub issue, not in docs.
 - Keep data users rely on compatible: `settings.json`, memory JSONL, `cron/jobs.json`, reminders, HTTP endpoints. Internal code keeps no backward compatibility.
 
@@ -63,19 +63,14 @@ with the dependency version pinned in this project before adopting their APIs.
 
 ## Git
 
-- One conversation, one worktree and branch. Create or reuse it before editing,
-  including after restart. Never edit the main checkout or automatically delete
-  a dirty worktree.
-- After the branch is merged and pushed, remove its clean worktree with
-  `git worktree remove` (no `--force`) and the branch with `git branch -d`.
-- Merge and deploy serially; never run two real message pipelines concurrently.
-- After each completed project change, run required checks, deploy and verify
-  as needed, then commit and push to the tracking remote. These actions are
-  pre-authorized; do not ask again.
+- Branch flow, pull requests and deployment are the deploying operator's rules,
+  kept in its workspace: `WORKING_DIR/AGENTS.md` (on claw
+  `~/.pi/imessage-next/AGENTS.md`). Read them before editing, committing or
+  deploying.
 - Commit only intended changes; exclude unrelated drafts, temporary files and
   credentials. Stage explicit paths, never `git add -A` or `git add .`.
 - Never use `git reset --hard`, `git checkout .`, `git clean -fd`, `git stash`,
-  `--no-verify`, or force push. Stop and report any rejected push.
+  or `--no-verify`. Stop and report any rejected push.
 - Commit messages: `type(scope): summary`.
   Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`.
 
@@ -83,13 +78,6 @@ with the dependency version pinned in this project before adopting their APIs.
 
 - Post issues and comments with `gh ... --body-file`, never a multi-line `--body`.
 - Close issues from commits with `closes #n`, one keyword per issue.
-
-## Deploy
-
-- Deploy and verify each completed change without asking again for routine deployment approval. Follow the routine deployment/restart section in `ops/README.md`; documentation-only edits need no runtime restart.
-- Run the service from a fixed release directory, never the main checkout: [Release directories](ops/README.md#release-directories).
-- Never run old and new message pipelines concurrently.
-- Routine commits and pushes are separately authorized under Git above. Deployment authorization does not include paid model probes, real test messages, unrelated service changes or data cleanup. Do not require the user to execute authorized commands personally. Stop for new material safety or data-integrity risks.
 
 ## User Override
 

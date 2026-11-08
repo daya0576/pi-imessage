@@ -13,7 +13,6 @@ import {
 } from "@earendil-works/pi-durable";
 import { ScheduledOutbox, validateSchedules, type WorkspaceExtension } from "../extensions/schedules.ts";
 import type { AgentDefaults } from "./chats.ts";
-import { compactChats } from "./compaction.ts";
 import type { DirectSendInput, DirectSendReceipt } from "./direct-send.ts";
 import { dailyTime, localDate, nextDaily } from "./time.ts";
 
@@ -77,10 +76,7 @@ type ExecutionInput = {
 	requestId?: string;
 };
 type ExecutionResult = { summary: string; requestId?: string; finishedAt: number };
-type ExecutionState =
-	| { phase: "start" }
-	| { phase: "compact"; tasks: TaskId[]; admissionFailures: number }
-	| { phase: "execute"; execution: TaskId<ExecutionResult> };
+type ExecutionState = { phase: "start" } | { phase: "execute"; execution: TaskId<ExecutionResult> };
 type ScheduleState =
 	| { phase: "sleep"; at: number }
 	| { phase: "advance"; at: number; execution: TaskId<ExecutionResult> }
@@ -99,15 +95,6 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 					(item) => item.id === task.input.jobId,
 				);
 				if (!schedule) throw new Error("Scheduled job is missing");
-				if (schedule.id === "compact-chats") {
-					let admissionFailures = 0;
-					const tasks = await compactChats(harness, () => admissionFailures++);
-					await runtime.commit(
-						() => ({ status: "running", checkpoint: { phase: "compact", tasks, admissionFailures } }),
-						context,
-					);
-					return;
-				}
 				const definition = schedule.execution && runtime.registry.task(schedule.execution);
 				if (!definition) throw new Error(`Missing scheduled task definition: ${schedule.execution}`);
 				await runtime.commit(async (tx) => {
@@ -127,29 +114,6 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 			async execute(task, runtime, context) {
 				const receipt = await runtime.waitForTask(task.state.checkpoint.execution, context);
 				await runtime.commit(() => ({ status: "terminal", outcome: receipt.state.outcome }), context);
-			},
-			async compact(task, runtime, context) {
-				const receipts = await Promise.all(
-					task.state.checkpoint.tasks.map((id) => runtime.waitForTask(id, context)),
-				);
-				const failed =
-					task.state.checkpoint.admissionFailures +
-					receipts.filter((receipt) => receipt.state.outcome.status !== "completed").length;
-				await runtime.commit(
-					() => ({
-						status: "terminal",
-						outcome: failed
-							? { status: "failed", error: { message: `${failed} scheduled compaction(s) failed` } }
-							: {
-									status: "completed",
-									result: {
-										summary: `${receipts.length} native compaction(s) completed; includes no-ops`,
-										finishedAt: runtime.now(),
-									},
-								},
-					}),
-					context,
-				);
 			},
 		},
 		async abort(_task, runtime, context) {
@@ -172,7 +136,8 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 				if (!admissionReady) return runtime.sleepUntil(runtime.now() + 100, task.state.checkpoint, context);
 				await runtime.commit(async (tx) => {
 					const schedule = (await tx.doc(Schedules)).items.find((item) => item.id === task.input.jobId);
-					if (!schedule) throw new Error("Scheduled job is missing");
+					// A removed framework job ends its timer instead of faulting.
+					if (!schedule) return { status: "terminal", outcome: { status: "completed", result: null } };
 					if (
 						task.input.requestId &&
 						!(await tx.doc(RunRequests)).items.find((item) => item.id === task.input.requestId)?.enabled
@@ -266,20 +231,13 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 		async initialize(extensions: readonly WorkspaceExtension[], transaction?: Tx, publish?: () => void) {
 			validateSchedules(extensions);
 			const timezone = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+			// Framework-owned jobs without a definition (the retired six-hour compaction) are removed.
+			const removed: TaskId[] = [];
 			const initialize = async (tx: Tx) => {
 				const state = await tx.doc(Schedules);
 				const definitions: (Omit<Schedule, "conversationId" | "taskId"> & {
 					initialize?: (tx: Tx, conversationId: ConversationId) => Promise<void>;
 				})[] = [
-					{
-						id: "compact-chats",
-						name: "Chat compaction",
-						kind: "compaction",
-						enabled: true,
-						intervalMs: SIX_HOURS,
-						timezone,
-						extension: "scheduling",
-					},
 					...extensions.flatMap((extension) =>
 						(extension.schedules ?? []).map(({ task, initialize, ...schedule }) => ({
 							...schedule,
@@ -318,7 +276,14 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 					state.items.push({ ...definition, conversationId: conversation.id, taskId });
 				}
 				const ids = new Set(definitions.map((definition) => definition.id));
+				// Workspace jobs stay disabled with their history; framework jobs leave the view.
 				for (const item of state.items) if (!ids.has(item.id)) item.enabled = false;
+				for (const item of state.items.filter(
+					(item) => !ids.has(item.id) && item.extension === "scheduling",
+				)) {
+					state.items.splice(state.items.indexOf(item), 1);
+					removed.push(item.taskId);
+				}
 				const requests = await tx.doc(RunRequests);
 				for (const extension of extensions)
 					for (const request of extension.runRequests ?? []) {
@@ -365,6 +330,7 @@ export function schedulingExtension(harness: Harness, defaults: AgentDefaults) {
 			} finally {
 				admissionReady = true;
 			}
+			for (const taskId of removed) await harness.abortTask(taskId, BACKGROUND_CONTEXT);
 		},
 	};
 }

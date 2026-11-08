@@ -141,7 +141,7 @@ it("loads CLI environment without overriding explicit values and retains proxy c
 		expect(JSON.parse(response.stdout)).toEqual(["proxied", "direct"]);
 		expect(proxyRequests).toBe(1);
 		expect(directRequests).toBe(1);
-		// #33 / ADR 0016: exercise the late process-owned setup under the same daemon flags.
+		// #33: exercise the late process-owned setup under the same daemon flags.
 		const transport = await execute(
 			job.ProgramArguments[0],
 			[...job.ProgramArguments.slice(1, -2), resolve("test/fixtures/http-transport.ts")],
@@ -254,7 +254,7 @@ NO_PROXY="127.0.0.1,localhost"
 			};
 			const preflight = await execute(
 				process.execPath,
-				["--experimental-strip-types", resolve("ops/preflight.mjs")],
+				["--experimental-strip-types", resolve("src/cli.ts"), "preflight"],
 				{ env: preflightEnvironment, timeout: 10_000 },
 			);
 			expect(preflight.stdout).toContain("browser CLI runtime");
@@ -263,7 +263,7 @@ NO_PROXY="127.0.0.1,localhost"
 			await expect(access(temporaryBrowserState)).rejects.toMatchObject({ code: "ENOENT" });
 			await writeFile(browserCli, '#!/bin/sh\nprintf "runtime missing\\n" >&2\nexit 1\n');
 			await expect(
-				execute(process.execPath, ["--experimental-strip-types", resolve("ops/preflight.mjs")], {
+				execute(process.execPath, ["--experimental-strip-types", resolve("src/cli.ts"), "preflight"], {
 					env: preflightEnvironment,
 					timeout: 10_000,
 				}),

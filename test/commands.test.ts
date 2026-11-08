@@ -57,7 +57,7 @@ async function chatEntries(chatGuid = "chat") {
 	return JSON.stringify(await conversation?.entries({}, 100, undefined, BACKGROUND_CONTEXT));
 }
 
-// #33 / ADR 0013: a command row runs once by its GUID, without a model turn or a receipt state machine.
+// #33: a command row runs once by its GUID, without a model turn or a receipt state machine.
 it("runs each command once by source GUID and replies without the model", async () => {
 	const thinking = { chatGuid: "chat", guid: "thinking", text: "/thinking high" };
 	await agent.command(thinking);
@@ -67,7 +67,15 @@ it("runs each command once by source GUID and replies without the model", async 
 	await agent.command({ chatGuid: "chat", guid: "stop", text: "/stop" });
 	await agent.command({ chatGuid: "chat", guid: "busy-run", text: "/run soon" });
 	// /verbose reads the chat override before the global setting and validates its argument.
-	for (const text of ["/verbose", "/verbose on", "/verbose default", "/verbose loud"])
+	// /interim is the same per-chat switch and defaults to on.
+	for (const text of [
+		"/verbose",
+		"/verbose on",
+		"/verbose default",
+		"/verbose loud",
+		"/interim off",
+		"/interim",
+	])
 		await agent.command({ chatGuid: "chat", guid: text, text });
 	const reset = { chatGuid: "chat", guid: "reset", text: "/new" };
 	await agent.command(reset);
@@ -83,6 +91,8 @@ it("runs each command once by source GUID and replies without the model", async 
 		"Verbose: on (this chat only)",
 		"Verbose: off (default)",
 		"Usage: /verbose [on|off|default]",
+		"Interim: off (this chat only)",
+		"Interim: off (this chat only)",
 		"0 msgs · ~0.0% / 128k\nfaux/faux-1 · high", // Estimated: nothing was sent to the model yet.
 		"0 msgs · ~0.0% / 128k\nfaux/faux-1 · high", // /reload replies like /status.
 	]);
@@ -90,12 +100,12 @@ it("runs each command once by source GUID and replies without the model", async 
 	expect(replies()[2]).not.toContain("/run-stop");
 	await writeFile(join(directory, "settings.json"), "{}");
 	await agent.command({ chatGuid: "disabled", guid: "logged", text: "/new" });
-	expect(send).toHaveBeenCalledTimes(11);
+	expect(send).toHaveBeenCalledTimes(13);
 	expect(await chatEntries("disabled")).toContain("/new");
 	expect(faux.state.callCount).toBe(0);
 });
 
-// #33 / ADR 0012: a run works in a fork, takes the chat's messages and delivers every answer as it is written.
+// #33 / ADR 0008: a run works in a fork, takes the chat's messages and delivers every answer as it is written.
 it("runs in a fork of the chat, routes ordinary messages to it and records it in the chat", async () => {
 	faux.setResponses([fauxAssistantMessage("noted")]);
 	await (await agent.submit({ chatGuid: "chat", guid: "context", text: "The trip is in Kyoto." })).wait(
@@ -163,7 +173,7 @@ it("runs in a fork of the chat, routes ordinary messages to it and records it in
 	expect(faux.state.callCount).toBe(5);
 });
 
-// #33 / ADR 0012, 0015: /stop ends a run with its queued messages, or ordinary work keeping later messages.
+// #33 / ADR 0008: /stop ends a run with its queued messages, or ordinary work keeping later messages.
 it("refuses a run while the chat is busy and stops runs and ordinary work", async () => {
 	const chatStarted = Promise.withResolvers<void>();
 	const finishChat = Promise.withResolvers<void>();

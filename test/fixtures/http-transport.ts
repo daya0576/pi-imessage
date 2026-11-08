@@ -5,7 +5,7 @@ import { gzipSync } from "node:zlib";
 import { Agent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
 import { openHttpTransport } from "../../src/transport/http.ts";
 
-// #33 / ADR 0016: a separate process owns only loopback HTTP fixtures, never installed auth or models.
+// #33: a separate process owns only loopback HTTP fixtures, never installed auth or models.
 const previousFetch = globalThis.fetch;
 const previousDispatcher = getGlobalDispatcher();
 const previousRequest = globalThis.Request;

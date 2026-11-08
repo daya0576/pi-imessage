@@ -1,6 +1,6 @@
 // Operator-only live smoke: never called by tests or the agent.
 // It makes one paid model health request; the operator sends one real message.
-// HTTP /prompt is retired (ADR 0018), so the full path is chat.db -> agent -> Messages.app.
+// HTTP /prompt is retired, so the full path is chat.db -> agent -> Messages.app.
 type Receipts = { answers?: Record<string, string> };
 
 const args = process.argv.slice(2);
@@ -8,7 +8,7 @@ const option = (name: string) => (args.includes(name) ? args[args.indexOf(name) 
 const chatGuid = option("--chat");
 if (!args.includes("--live") || !chatGuid) {
 	console.log(
-		"Operator only: node --experimental-strip-types ops/smoke.ts --live --chat CHAT_GUID [--url http://localhost:7750] [--timeout 300]",
+		"Operator only: node --experimental-strip-types scripts/smoke.ts --live --chat CHAT_GUID [--url http://localhost:7750] [--timeout 300]",
 	);
 } else {
 	const base = option("--url") ?? "http://localhost:7750";

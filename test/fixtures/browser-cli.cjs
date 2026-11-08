@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// A fake subprocess boundary, not a browser driver. Real CLI/Chrome isolation is tested by ops/browser-smoke.mjs.
+// A fake subprocess boundary, not a browser driver. Real CLI/Chrome isolation is tested by scripts/browser-smoke.mjs.
 const fs = require("node:fs");
 const path = require("node:path");
 const argv = process.argv.slice(2);

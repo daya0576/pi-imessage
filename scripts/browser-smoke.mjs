@@ -51,7 +51,7 @@ try {
 	assert(!(await readdir(join(scopes[1], "state", "output"))).some((file) => file.endsWith(".png")));
 	for (const scope of scopes) {
 		const config = JSON.parse(await readFile(join(scope, "cwd", ".playwright", "cli.config.json"), "utf8"));
-		assert.equal(config.browser.launchOptions.headless, true);
+		assert.equal(config.browser.launchOptions.headless, false);
 		assert.equal((await stat(scope)).mode & 0o777, 0o700);
 		assert.equal((await stat(join(scope, "state", "auth.json"))).mode & 0o777, 0o600);
 		const { stdout } = await promisify(execFile)(join(getAgentDir(), "bin", "pi-browser"), ["list", "--all"], {

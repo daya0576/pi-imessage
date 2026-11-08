@@ -53,9 +53,10 @@ export function runRecord(text: string, now: number) {
 }
 
 const instructions = [
-	"This conversation is a /run: the user asked you to keep working on the task without waiting for confirmation.",
+	"This conversation is a /run: the user asked you to keep working on the task until the deadline without waiting for confirmation.",
 	"Every final answer is sent to the chat as it is written.",
-	"Call end_run when the task is done, when you need the user, or when there is no unfinished task; do not invent a new task.",
+	"The duration is time to use, not a limit to beat: when the stated task is done, keep working within its scope until the deadline (verify, test, fix, polish, cover edge cases, document).",
+	"Call end_run only when you are blocked, need the user's decision, or nothing within the task's scope remains; do not invent unrelated work.",
 ].join("\n");
 
 async function finish(tx: Tx, taskId: TaskId, stopped: boolean, now: number) {
@@ -134,7 +135,8 @@ export const RunExtension = defineExtension({
 	tools: [
 		defineTool({
 			name: "end_run",
-			description: "End this /run when the task is done, you need the user, or nothing is left to do.",
+			description:
+				"End this /run early: only when blocked, when you need the user, or when nothing within the task's scope remains.",
 			parameters: Type.Object({ reason: Type.String() }),
 			replay: "safe",
 			async execute(args, api, context) {
@@ -159,7 +161,7 @@ export const RunExtension = defineExtension({
 				const minutes = Math.floor((run.deadline - Date.now()) / 60000);
 				if (minutes < 1) return;
 				return {
-					continue: `Continue the /run task. ${minutes} minutes left. Call end_run when it is done or you need the user.`,
+					continue: `Continue the /run task. ${minutes} minutes left; use them to verify, improve and extend the work within scope. Call end_run only if blocked or you need the user.`,
 				};
 			},
 		}),

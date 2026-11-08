@@ -45,15 +45,27 @@ extensions. Source and configuration reload without interrupting current calls.
 Failed reloads retain old definitions and schedule configuration. Removed task
 code stays in memory for calls that can still admit children; missing required
 code fails explicitly on restart. The assistant's `reload_extensions` tool uses
-the same service owner. See [workspace extensions](workspace-extensions.md),
-ADR 0035 and ADR 0036.
+the same service owner. See [workspace extensions](workspace-extensions.md).
 
 The built-in native `browser` extension wraps the pinned pi-browser CLI with
 host-derived conversation scopes. Browser children get private HOME/cache,
 profile/output and cwd; other coding tools are unchanged. The host owns scoped
 stop/reset/shutdown/restart cleanup, while Durable owns invocation state and
 unsafe replay policy. Read-only contexts do not offer the tool. This is not an
-OS sandbox; see [browser operations and retention](browser.md) and ADR 0017.
+OS sandbox; see [browser operations and retention](browser.md).
+
+The model is offered a fixed core of tools; every other built-in or workspace tool
+is deferred and loaded on demand with Durable's `tool_search`, the same in every
+conversation. The core includes Durable's `codemode` (`extensions/codemode.ts`):
+the model writes a script that calls the conversation's tools in a QuickJS
+sandbox and only the script's output enters the context; `models.*` is off, so
+scripts cannot start model calls, and the prompt section lists callable tools
+within a small token budget.
+
+`/run <duration>` (ADR 0008) treats the duration as time to use: after the
+stated task is done the run keeps verifying and improving within its scope
+until the deadline, and `end_run` ends it early only when blocked, when the
+user is needed or when nothing in scope remains.
 
 
 ### Native schedules
@@ -62,15 +74,14 @@ OS sandbox; see [browser operations and retention](browser.md) and ADR 0017.
 job's dedicated conversation owns a background scheduler, whose checkpoint saves
 the next deadline. Each occurrence is a child execution task delegating to an
 extension's native business task; terminal receipts supply Web history, not a
-parallel UI log. The framework owns daily/interval cadence, non-overlap, recovery
-and quiet six-hour native compaction. Workspace tasks own business policy and
+parallel UI log. The framework owns daily/interval cadence, non-overlap and recovery, and
+defines no schedule of its own: chat context is bounded by Durable's thresholds
+against the window each model advertises. Workspace tasks own business policy and
 documents, and can commit their state and the generic outgoing item atomically.
 The host delivery poll uses existing direct-send receipts and passive chat records.
 `web/schedules.ts` projects these native records, including latest-ten history.
 Daily slots and learning dates use the service machine's local timezone; the Web
-view uses the same timezone. Saved absolute deadlines survive restart. See
-[ADR 0032](adr/0032-native-background-schedules.md) and
-[ADR 0034](adr/0034-machine-local-schedule-time.md).
+view uses the same timezone. Saved absolute deadlines survive restart.
 
 ## 2. Workflow
 

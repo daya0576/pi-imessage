@@ -14,7 +14,14 @@ import {
 	UserEntry,
 } from "@earendil-works/pi-durable";
 import { readSettings } from "../config/settings.ts";
-import { type AgentDefaults, Chats, chatConversation, progressEnabled, setChatProgress } from "./chats.ts";
+import {
+	type AgentDefaults,
+	Chats,
+	chatConversation,
+	interimEnabled,
+	progressEnabled,
+	setChatSwitch,
+} from "./chats.ts";
 import { activeRun, Runs, startRun } from "./run.ts";
 
 const help = [
@@ -24,8 +31,9 @@ const help = [
 	"/compact [instructions] - compress context",
 	"/thinking <level|default> - set thinking for this chat",
 	"/verbose [on|off|default] - show or set tool progress notices for this chat",
+	"/interim [on|off|default] - show or set the model's messages between tool calls for this chat",
 	"/reload - reload models, instructions and skills; apply the default model to this chat and show /status",
-	"/run <duration> [task] - keep working until done, blocked or the deadline, e.g. /run 1h",
+	"/run <duration> [task] - keep working on the task for the whole duration, e.g. /run 1h; ends early only when blocked",
 	"/stop - stop the current work or /run",
 ].join("\n");
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
@@ -86,7 +94,7 @@ export async function runCommand(options: {
 				BACKGROUND_CONTEXT,
 			);
 	};
-	// The /status report: user messages with context usage, then model with thinking (ADR 0013).
+	// The /status report: user messages with context usage, then model with thinking.
 	// A third line appears only while a /run is active. Cumulative token totals are deliberately omitted.
 	const status = async (withRun: boolean) => {
 		const agent = await conversation.agent(BACKGROUND_CONTEXT);
@@ -139,7 +147,7 @@ export async function runCommand(options: {
 				return { reply: "Stopped." };
 			}
 			// Abort the generation that owns the current inputs, not the conversation, so later queued
-			// messages stay in the inbox (ADR 0015). Retry while generation hands the same inputs over.
+			// Messages stay in the inbox. Retry while generation hands the same inputs over.
 			const live = async () => (await harness.snapshot(LiveDoc, conversation.id, BACKGROUND_CONTEXT))?.run;
 			const stopping = await live();
 			if (!stopping) {
@@ -189,17 +197,21 @@ export async function runCommand(options: {
 				return { reply: `Usage: /thinking <${thinkingLevels.join("|")}|default>` };
 			await configure({ thinkingLevel: argument as ModelThinkingLevel });
 			return { reply: `Thinking: ${argument} (this chat only)` };
-		case "/verbose": {
+		case "/verbose":
+		case "/interim": {
+			const field = name === "/verbose" ? "progress" : "interim";
+			const label = name === "/verbose" ? "Verbose" : "Interim";
 			if (argument && argument !== "on" && argument !== "off" && argument !== "default")
-				return { reply: "Usage: /verbose [on|off|default]" };
+				return { reply: `Usage: ${name} [on|off|default]` };
 			if (argument)
-				await setChatProgress(harness, chatGuid, argument === "default" ? undefined : argument === "on");
+				await setChatSwitch(harness, chatGuid, field, argument === "default" ? undefined : argument === "on");
 			const chats = (await harness.snapshot(Chats, BACKGROUND_CONTEXT))?.items ?? [];
 			const chat = chats.find((item) => item.chatGuid === chatGuid);
 			const settings = await readSettings(options.workingDir);
-			const state = progressEnabled(settings, chats, chatGuid) ? "on" : "off";
-			if (chat?.progress === undefined) return { reply: `Verbose: ${state} (default)` };
-			return { reply: `Verbose: ${state} (this chat only)` };
+			const enabled = field === "progress" ? progressEnabled : interimEnabled;
+			const state = enabled(settings, chats, chatGuid) ? "on" : "off";
+			if (chat?.[field] === undefined) return { reply: `${label}: ${state} (default)` };
+			return { reply: `${label}: ${state} (this chat only)` };
 		}
 		case "/reload": {
 			const current = await options.reload();

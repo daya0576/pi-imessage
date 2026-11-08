@@ -1,6 +1,6 @@
 {
 	"name": "@kingcrab/pi-imessage",
-	"version": "1.1.1",
+	"version": "1.2.0",
 	"description": "A minimal, self-managing iMessage bot powered by Pi Durable",
 	"license": "MIT",
 	"repository": {
@@ -10,9 +10,7 @@
 	"files": [
 		"dist",
 		"docs",
-		"examples",
-		"ops/README.md",
-		"ops/preflight.mjs"
+		"examples"
 	],
 	"publishConfig": {
 		"access": "public",
@@ -28,7 +26,7 @@
 	"scripts": {
 		"build": "tsc -p tsconfig.build.json && cp src/web/app.js src/web/style.css dist/web/",
 		"prepack": "npm run build",
-		"test:package": "npm run build && node ops/package-smoke.mjs",
+		"test:package": "npm run build && node scripts/package-smoke.mjs",
 		"start": "node --use-env-proxy --experimental-strip-types src/cli.ts serve",
 		"check": "tsc --noEmit && biome check .",
 		"test": "vitest run"
@@ -36,6 +34,7 @@
 	"dependencies": {
 		"@earendil-works/chord": "1.4.0",
 		"@earendil-works/pi-ai": "1.4.0",
+		"@earendil-works/pi-codemode": "1.4.0",
 		"@earendil-works/pi-coding-agent": "1.4.0",
 		"@earendil-works/pi-durable": "1.4.0",
 		"better-sqlite3": "13.0.3",

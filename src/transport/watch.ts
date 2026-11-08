@@ -93,7 +93,14 @@ export function createWatcher(options: {
 						.prepare(`SELECT a.filename FROM attachment a
 					JOIN message_attachment_join j ON j.attachment_id=a.ROWID WHERE j.message_id=?`)
 						.all(row.rowid) as { filename: string | null }[]
-				).flatMap(({ filename }) => (filename ? [filename.replace(/^~(?=\/)/, homedir())] : []));
+				).flatMap(({ filename }) =>
+					// Link-preview and iMessage app payload plists carry nothing a model can read; the text already
+					// holds the URL. Messages may record one in a transient transcoder directory and delete the
+					// file, so archiving it would hold this row forever.
+					filename && !filename.endsWith(".pluginPayloadAttachment")
+						? [filename.replace(/^~(?=\/)/, homedir())]
+						: [],
+				);
 				const reply = row.replyGuid
 					? (db.prepare("SELECT text,attributedBody FROM message WHERE guid=?").get(row.replyGuid) as
 							| Row
