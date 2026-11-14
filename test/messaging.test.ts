@@ -684,6 +684,47 @@ it("automatically sends a saved unattempted answer and leaves an interrupted sen
 	expect(console.warn).toHaveBeenCalledWith("Reply delivery unknown", expect.anything(), expect.any(String));
 });
 
+// daya0576/dotfile#15: an answer already sent beside a tool call is not sent again as the final reply.
+it("sends a final reply once when the same text already went out as interim", async () => {
+	faux.setResponses([
+		fauxAssistantMessage([fauxToolCall("bash", { command: "true" }), fauxText("the whole answer")], {
+			stopReason: "toolUse",
+		}),
+		fauxAssistantMessage("the whole answer"),
+		fauxAssistantMessage("the whole answer"),
+	]);
+	service = await startMessaging(options);
+	insert("dm", "first");
+	const receipts = async () => {
+		const chat = (await service?.harness.snapshot(Chats, BACKGROUND_CONTEXT))?.items[0];
+		if (!chat) return [];
+		const deliveries = await service?.harness.snapshot(Deliveries, chat.conversationId, BACKGROUND_CONTEXT);
+		return Object.values(deliveries?.answers ?? {});
+	};
+	await vi.waitFor(
+		async () => {
+			await service?.poll();
+			expect(await receipts()).toEqual(["sent"]);
+		},
+		{ timeout: 5000 },
+	);
+	expect(send).toHaveBeenCalledTimes(1);
+	// A later turn repeating an earlier turn's words is still sent.
+	insert("dm-2", "second");
+	await vi.waitFor(
+		async () => {
+			await service?.poll();
+			expect(textCalls()).toEqual([
+				["iMessage;-;dm", "the whole answer"],
+				["iMessage;-;dm", "the whole answer"],
+			]);
+		},
+		{ timeout: 5000 },
+	);
+	expect(faux.state.callCount).toBe(3);
+	await vi.waitFor(async () => expect(await receipts()).toEqual(["sent", "sent"]));
+});
+
 // #33 Phase 2: DB bootstrap failure and shutdown must not leak the storage owner or polling work.
 it("releases ownership on watcher failure and joins an in-flight automatic send on close", async () => {
 	await expect(startMessaging({ ...options, dbPath: join(directory, "missing.db") })).rejects.toThrow();
