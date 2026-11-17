@@ -6,8 +6,9 @@ import {
 	type EntryId,
 	type Harness,
 	type Storage,
+	UserEntry,
 } from "@earendil-works/pi-durable";
-import { finalReplyText } from "../extensions/final-text.ts";
+import { finalReplyText, interimText } from "../extensions/final-text.ts";
 import type { MessageSender } from "../transport/send.ts";
 import { Chats } from "./chats.ts";
 import { DirectSends } from "./direct-send.ts";
@@ -108,27 +109,53 @@ async function deliverAnswer(
 		// Do not overtake an earlier in-flight send in this chat.
 		if (Object.values(deliveries.answers).includes("sending")) return { decided: false };
 
+		// The same text already went out beside a tool call in this turn: the user has seen it.
+		const sends = (await tx.doc(DirectSends)).requests;
+		let echoed: "sent" | "sending" | undefined;
+		let turnCursor: Cursor | undefined;
+		do {
+			const page = await tx.scanEntries({ conversationId, maxEntryId: answerId }, 100, turnCursor);
+			for (const entry of page.items) {
+				if (UserEntry.is(entry)) {
+					turnCursor = undefined;
+					break;
+				}
+				if (!AssistantEntry.is(entry) || interimText(entry.model?.[0]) !== text) continue;
+				const status = sends.find(
+					(send) => send.chatGuid === target.chatGuid && send.requestId === `interim:${entry.id}`,
+				)?.textStatus;
+				if (status === "sent" || status === "sending") echoed = status;
+				if (echoed) break;
+			}
+			turnCursor = echoed ? undefined : page.next;
+		} while (turnCursor);
+		// Wait for that send to settle instead of racing it.
+		if (echoed === "sending") return { decided: false };
+
 		// Finals are claimed in order, so the only earlier unsent ones are held drafts; this answer replaces them.
 		const drafts = deliveries.drafts ?? {};
 		for (const [previous, draft] of Object.entries(drafts))
 			if (draft.status === "held" && Number(previous) < answerId)
 				drafts[previous] = { status: "superseded", replacement: answerId };
-		deliveries.answers[key] = "sending";
-		return { decided: decided(), text };
+		deliveries.answers[key] = echoed ?? "sending";
+		return { decided: decided(), text, echoed: echoed === "sent" };
 	}, BACKGROUND_CONTEXT);
 	if (!claim.text) return claim.decided;
 
 	let status: DeliveryStatus = "sent";
-	try {
-		await send(target.chatGuid, claim.text);
-	} catch {
-		// A throwing transport may already have sent. Never retry it automatically.
-		status = "unknown";
+	if (claim.echoed) console.log("Reply already sent as interim", conversationId, String(answerId));
+	else {
+		try {
+			await send(target.chatGuid, claim.text);
+		} catch {
+			// A throwing transport may already have sent. Never retry it automatically.
+			status = "unknown";
+		}
+		await harness.commit(async (tx) => {
+			(await tx.doc(Deliveries, conversationId)).answers[String(answerId)] = status;
+		}, BACKGROUND_CONTEXT);
+		if (status === "unknown") console.warn("Reply delivery unknown", conversationId, String(answerId));
 	}
-	await harness.commit(async (tx) => {
-		(await tx.doc(Deliveries, conversationId)).answers[String(answerId)] = status;
-	}, BACKGROUND_CONTEXT);
-	if (status === "unknown") console.warn("Reply delivery unknown", conversationId, String(answerId));
 	if (target.chat !== undefined) {
 		// A queued write never splits a turn that is running in the chat conversation.
 		const chat = await harness.conversation(target.chat, BACKGROUND_CONTEXT);
