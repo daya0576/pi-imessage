@@ -1,4 +1,4 @@
-import type { JsonValue } from "@earendil-works/chord";
+import type { JsonValue } from "@earendil-works/chord/json";
 import { type ConversationId, defineDoc, type Extension, type Tx } from "@earendil-works/pi-durable";
 
 /** A workspace extension declares cadence; the host owns admission and delivery. */

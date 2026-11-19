@@ -24,6 +24,7 @@ export const ImageRead = defineExtension({
 				const path = getOrThrow(await api.env.canonicalPath(args.path, context));
 				return {
 					output: [{ type: "text", text: imagePrefix + JSON.stringify(path) }],
+					structuredOutput: imagePrefix + JSON.stringify(path),
 					details: { imagePath: path },
 				};
 			},

@@ -1,5 +1,5 @@
-import { Type } from "@earendil-works/pi-ai";
 import { configure, defineExtension, defineTool } from "@earendil-works/pi-durable";
+import { Type } from "typebox";
 import { finalReplyText } from "./final-text.ts";
 
 export const Subagent = defineExtension({

@@ -2,8 +2,8 @@ import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { JsonValue } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import type { JsonValue } from "@earendil-works/chord/json";
 import {
 	AssistantEntry,
 	type EntryRecord,
@@ -167,50 +167,53 @@ export async function startProgress(harness: Harness, workingDir: string, sender
 		if (receipt.textStatus === "unknown")
 			console.warn("Progress completion delivery unknown", task.id, notice.chatGuid);
 	}
-	const unsubscribe = harness.subscribeCommits(({ changes }) => {
-		// Change order is unspecified; queue the model's words before the notices of the calls it made.
-		for (const change of changes) {
-			if (change.type !== "entry") continue;
-			const entry = change.value;
-			pending = pending
-				.then(() => interim(entry))
-				.catch((error: unknown) => {
-					console.warn("Interim delivery failed", entry.id, error);
-				});
-		}
-		for (const change of changes) {
-			if (change.type !== "task" || change.value.kind === "pi.generation") continue;
-			const task = change.value;
-			if (task.state.status === "terminal") {
-				seen.delete(task.id);
-				const notice = active.get(task.id);
-				active.delete(task.id);
-				if (notice) {
-					const elapsed = performance.now() - notice.admittedAt;
-					pending = pending
-						.then(() => settled(task, notice, elapsed))
-						.catch((error: unknown) => {
-							console.warn("Progress completion notification failed", task.id, error);
-						});
-				}
-				continue;
+	const observation = harness.observeCommits({
+		advance({ changes }) {
+			// Change order is unspecified; queue the model's words before the notices of the calls it made.
+			for (const change of changes) {
+				if (change.type !== "entry") continue;
+				const entry = change.value;
+				pending = pending
+					.then(() => interim(entry))
+					.catch((error: unknown) => {
+						console.warn("Interim delivery failed", entry.id, error);
+					});
 			}
-			if (task.state.status !== "pending" || seen.has(task.id)) continue;
-			seen.add(task.id);
-			const notice: Notice = { admittedAt: performance.now() };
-			active.set(task.id, notice);
-			// The synchronous observer must not call Session APIs or block adoption.
-			pending = pending
-				.then(() => notify(task, notice))
-				.catch((error: unknown) => {
-					console.warn("Progress notification failed", task.id, error);
-				});
-		}
+			for (const change of changes) {
+				if (change.type !== "task" || change.value.kind === "pi.generation") continue;
+				const task = change.value;
+				if (task.state.status === "terminal") {
+					seen.delete(task.id);
+					const notice = active.get(task.id);
+					active.delete(task.id);
+					if (notice) {
+						const elapsed = performance.now() - notice.admittedAt;
+						pending = pending
+							.then(() => settled(task, notice, elapsed))
+							.catch((error: unknown) => {
+								console.warn("Progress completion notification failed", task.id, error);
+							});
+					}
+					continue;
+				}
+				if (task.state.status !== "pending" || seen.has(task.id)) continue;
+				seen.add(task.id);
+				const notice: Notice = { admittedAt: performance.now() };
+				active.set(task.id, notice);
+				// The synchronous observer must not call Session APIs or block adoption.
+				pending = pending
+					.then(() => notify(task, notice))
+					.catch((error: unknown) => {
+						console.warn("Progress notification failed", task.id, error);
+					});
+			}
+		},
+		end() {},
 	});
 	return {
 		flush: () => pending,
 		async close() {
-			unsubscribe();
+			observation.detach();
 			await pending;
 		},
 	};

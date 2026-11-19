@@ -1,5 +1,4 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
 import {
 	AssistantEntry,
 	type Conversation,
@@ -17,6 +16,7 @@ import {
 	type TaskId,
 	type Tx,
 } from "@earendil-works/pi-durable";
+import { Type } from "typebox";
 import { finalReplyText } from "../extensions/final-text.ts";
 import { Deliveries } from "./replies.ts";
 

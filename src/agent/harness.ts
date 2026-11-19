@@ -41,8 +41,8 @@ export async function openHarness(
 					env: () => env,
 					// Consume all admitted corrections at the next native boundary, not one per turn.
 					// Durable's own failure channel: faulted, parked and outdated tasks reach the service log with their type.
-					onReport(error, info) {
-						console.error(new Date().toISOString(), "Durable report", info, error);
+					onReport(report) {
+						console.error(new Date().toISOString(), "Durable report", report);
 					},
 					settings: {
 						// A failed run leaves no inputs stranded until the next message.
