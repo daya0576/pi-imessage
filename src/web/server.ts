@@ -326,7 +326,17 @@ export async function startWeb(options: {
 			compact = true;
 		} else if (page === "/tasks") {
 			value = {
-				...(await readTaskTree(options.agent.harness)),
+				...(await readTaskTree(
+					options.agent.harness,
+					url.searchParams.has("conversationId")
+						? (() => {
+								const id = url.searchParams.get("conversationId") ?? "";
+								if (!/^\d+$/.test(id) || !Number.isSafeInteger(Number(id)))
+									throw new Error("Invalid conversation ID");
+								return Number(id) as ConversationId;
+							})()
+						: undefined,
+				)),
 				schedules: await options.agent.harness.snapshot(Schedules, BACKGROUND_CONTEXT),
 				chats: await options.agent.harness.snapshot(Chats, BACKGROUND_CONTEXT),
 				sessions: await options.agent.harness.snapshot(Sessions, BACKGROUND_CONTEXT),
