@@ -97,6 +97,11 @@ temporary HOME/workspace without models or Messages.
 `.github/workflows/publish.yml` uses the existing npm trusted publisher with
 GitHub OIDC, Node 24 and `id-token: write`; no local npm login or token is needed.
 It runs the full checks, tests and package smoke before publishing with provenance.
+After `npm publish` succeeds, a separate `release` job with `contents: write`
+creates the GitHub Release as `github-actions[bot]` if it does not already exist,
+using the annotated tag message when present (create annotated tags with
+`--cleanup=verbatim` so Markdown headings are preserved) or GitHub's generated
+notes otherwise.
 Future releases push a matching `v<package-version>` tag. To publish an existing
 version after fixing packaging, dispatch the workflow on main with that exact
 version; never move an already published GitHub tag.
