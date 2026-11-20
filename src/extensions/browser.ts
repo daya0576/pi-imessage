@@ -2,8 +2,8 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { Type } from "@earendil-works/pi-ai";
 import { type ConversationId, defineExtension, defineTool, section } from "@earendil-works/pi-durable";
+import { Type } from "typebox";
 
 const actions = [
 	"open",

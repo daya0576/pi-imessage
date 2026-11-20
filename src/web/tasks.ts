@@ -1,5 +1,6 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type {
+	ConversationId,
 	ConversationRecord,
 	Cursor,
 	EntryId,
@@ -8,6 +9,7 @@ import type {
 	TaskId,
 	TaskRecord,
 } from "@earendil-works/pi-durable";
+import { Chats } from "../agent/chats.ts";
 import { displayHistory, historyActivity } from "./history.ts";
 
 /** Newest tasks listed per conversation; older finished ones are only flagged. */
@@ -15,57 +17,73 @@ export const RECENT_TASKS_PER_CONVERSATION = 20;
 
 type Summary = TaskRecord<unknown, unknown, unknown>;
 
-/**
- * Read one consistent tree, newest first: all conversations, every unfinished task, every task that owns a
- * conversation, their parent chains and the newest tasks of each conversation. Descending scans stop at the
- * window instead of reading the whole task history (earendil-works/pi#10546).
- */
-export function readTaskTree(harness: Harness) {
+/** Read only the five most recently active chats, or one explicitly selected conversation. */
+export function readTaskTree(harness: Harness, conversationId?: ConversationId) {
 	return harness.commit(async (tx) => {
 		const conversations: (ConversationRecord & { updatedAt: number; groupName?: string })[] = [];
 		const kept = new Map<TaskId, Summary>();
 		const more: Record<string, true> = {};
-		let cursor: Cursor | undefined;
-		do {
-			const page = await tx.scanConversations({}, 100, cursor);
-			for (const conversation of page.items) {
-				const history = await tx.scanEntries({ conversationId: conversation.id }, 100);
-				const { groupName } = displayHistory(history, 1);
-				conversations.push({
-					...conversation,
-					updatedAt: historyActivity(history),
-					groupName: typeof groupName === "string" ? groupName : undefined,
-				});
-				const newest = await tx.scanTasks(
-					{ conversationId: conversation.id, order: "descending" },
-					RECENT_TASKS_PER_CONVERSATION + 1,
-				);
-				for (const task of newest.items.slice(0, RECENT_TASKS_PER_CONVERSATION)) kept.set(task.id, task);
-				if (newest.items.length > RECENT_TASKS_PER_CONVERSATION) more[conversation.id] = true;
-				if (conversation.owner && !kept.has(conversation.owner.taskId)) {
-					const owner = await tx.task(conversation.owner.taskId);
-					if (owner) kept.set(owner.id, owner);
+		const chats = await tx.doc(Chats);
+		const candidates = [];
+		for (const id of conversationId === undefined
+			? chats.items.map((chat) => chat.conversationId)
+			: [conversationId]) {
+			const conversation = await tx.conversation(id);
+			if (!conversation) continue;
+			const history = await tx.scanEntries({ conversationId: id }, 100);
+			const { groupName } = displayHistory(history, 1);
+			candidates.push({
+				...conversation,
+				updatedAt: historyActivity(history),
+				groupName: typeof groupName === "string" ? groupName : undefined,
+			});
+		}
+		const selected = candidates
+			.sort((a, b) => b.updatedAt - a.updatedAt || Number(b.id) - Number(a.id))
+			.slice(0, 5);
+		const queued = new Set(selected.map((conversation) => conversation.id));
+		// Expand only children owned by tasks in this window, not every historical subagent.
+		for (const conversation of selected) {
+			conversations.push(conversation);
+			const newest = await tx.scanTasks(
+				{ conversationId: conversation.id, order: "descending" },
+				RECENT_TASKS_PER_CONVERSATION + 1,
+			);
+			const local = new Map<TaskId, Summary>(
+				newest.items.slice(0, RECENT_TASKS_PER_CONVERSATION).map((task) => [task.id, task]),
+			);
+			if (newest.items.length > RECENT_TASKS_PER_CONVERSATION) more[conversation.id] = true;
+			for (const status of ["pending", "running", "waiting", "sleeping", "completing"] as const) {
+				let cursor: Cursor | undefined;
+				do {
+					const page = await tx.scanTasks({ conversationId: conversation.id, status }, 100, cursor);
+					for (const task of page.items) local.set(task.id, task);
+					cursor = page.next;
+				} while (cursor);
+			}
+			for (const task of local.values()) {
+				for (let owner = task.owner; owner !== undefined && !local.has(owner) && !kept.has(owner); ) {
+					const parent = await tx.task(owner);
+					if (!parent) break;
+					local.set(parent.id, parent);
+					owner = parent.owner;
 				}
 			}
-			cursor = page.next;
-		} while (cursor);
-		// Unfinished tasks can be old (sleeping schedulers); status scans are small.
-		for (const status of ["pending", "running", "waiting", "sleeping"] as const) {
-			cursor = undefined;
-			do {
-				const page = await tx.scanTasks({ status, order: "descending" }, 100, cursor);
-				for (const task of page.items) kept.set(task.id, task);
-				cursor = page.next;
-			} while (cursor);
-		}
-		// A kept child needs its parent chain so the tree can place it.
-		for (const task of [...kept.values()]) {
-			for (let owner = task.owner; owner !== undefined && !kept.has(owner); owner = kept.get(owner)?.owner) {
-				const parent = await tx.task(owner);
-				if (!parent) break;
-				kept.set(parent.id, parent);
+			for (const task of local.values()) {
+				kept.set(task.id, task);
+				let cursor: Cursor | undefined;
+				do {
+					const page = await tx.scanConversations({ ownerTaskId: task.id }, 100, cursor);
+					for (const child of page.items) {
+						if (queued.has(child.id)) continue;
+						queued.add(child.id);
+						selected.push({ ...child, updatedAt: conversation.updatedAt, groupName: undefined });
+					}
+					cursor = page.next;
+				} while (cursor);
 			}
 		}
+
 		const assistants = new Map<EntryId, EntryRecord | undefined>();
 		const tasks = [];
 		for (const task of [...kept.values()].sort((a, b) => Number(b.id) - Number(a.id))) {

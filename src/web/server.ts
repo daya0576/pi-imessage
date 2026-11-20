@@ -226,12 +226,18 @@ export async function startWeb(options: {
 		if (url.pathname === "/events") {
 			response.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store" });
 			response.write(`event: ready\ndata: ${JSON.stringify({ revision: viewRevision() })}\n\n`);
-			const unsubscribe = options.agent.harness.subscribeCommits(() => {
-				if (!response.write('data: {"updated":true}\n\n')) {
-					unsubscribe();
-					response.destroy();
-				}
+			const observation = options.agent.harness.observeCommits({
+				advance() {
+					if (!response.write('data: {"updated":true}\n\n')) {
+						observation.detach();
+						response.destroy();
+					}
+				},
+				end() {
+					response.end();
+				},
 			});
+			const unsubscribe = () => observation.detach();
 			streams.set(response, unsubscribe);
 			response.on("error", () => {
 				unsubscribe();
@@ -320,7 +326,17 @@ export async function startWeb(options: {
 			compact = true;
 		} else if (page === "/tasks") {
 			value = {
-				...(await readTaskTree(options.agent.harness)),
+				...(await readTaskTree(
+					options.agent.harness,
+					url.searchParams.has("conversationId")
+						? (() => {
+								const id = url.searchParams.get("conversationId") ?? "";
+								if (!/^\d+$/.test(id) || !Number.isSafeInteger(Number(id)))
+									throw new Error("Invalid conversation ID");
+								return Number(id) as ConversationId;
+							})()
+						: undefined,
+				)),
 				schedules: await options.agent.harness.snapshot(Schedules, BACKGROUND_CONTEXT),
 				chats: await options.agent.harness.snapshot(Chats, BACKGROUND_CONTEXT),
 				sessions: await options.agent.harness.snapshot(Sessions, BACKGROUND_CONTEXT),
@@ -396,9 +412,13 @@ export async function startWeb(options: {
 			renderPage(page, redact(value, compact, page !== "/memory")),
 		);
 	}
-	const unsubscribeRevision = options.agent.harness.subscribeCommits((publication) => {
-		if (publication.changes.length) revision++;
+	const revisionObservation = options.agent.harness.observeCommits({
+		advance(publication) {
+			if (publication.changes.length) revision++;
+		},
+		end() {},
 	});
+	const unsubscribeRevision = () => revisionObservation.detach();
 	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
 		server.listen(options.port ?? 7750, options.host ?? "localhost", () => {

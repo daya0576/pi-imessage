@@ -1,5 +1,5 @@
-import { Type } from "@earendil-works/pi-ai";
 import { type ConversationId, defineExtension, defineTool, section } from "@earendil-works/pi-durable";
+import { Type } from "typebox";
 
 export function messageExtension(messaging: {
 	owner(id: ConversationId): Promise<string>;

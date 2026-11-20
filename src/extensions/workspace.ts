@@ -1,7 +1,6 @@
 import { readdir, readFile, realpath } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, sep } from "node:path";
-import { Type } from "@earendil-works/pi-ai";
 import * as durable from "@earendil-works/pi-durable";
 import {
 	configure,
@@ -13,6 +12,7 @@ import {
 	hook,
 	section,
 } from "@earendil-works/pi-durable";
+import { Type } from "typebox";
 import {
 	ScheduledOutbox,
 	validateSchedules,

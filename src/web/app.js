@@ -622,6 +622,14 @@ function renderScheduled() {
 
 function renderTasks() {
 	view.replaceChildren();
+	if (!conversationId)
+		view.append(
+			element(
+				"p",
+				"5 most recently active chats. Open a chat's Task tree link to view an older conversation.",
+				"meta",
+			),
+		);
 	const children = new Map();
 	const conversations = new Map(data.conversations.map((conversation) => [conversation.id, conversation]));
 	const chatNames = new Map(
@@ -727,7 +735,7 @@ function setupToolbar() {
 	if (page === "/chat" || page === "/tasks") {
 		if (conversationId) {
 			toolbar.className = "toolbar";
-			toolbar.append(page === "/chat" ? link("< Messages", "/") : link("< All conversations", "/tasks"));
+			toolbar.append(page === "/chat" ? link("< Messages", "/") : link("< Recent conversations", "/tasks"));
 		}
 	} else if (page === "/memory") {
 		const records = Array.isArray(data) ? memoryRows() : data.records;

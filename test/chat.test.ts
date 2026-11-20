@@ -2,7 +2,7 @@ import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { type TranscriptContext, Type } from "@earendil-works/pi-ai";
+import type { TranscriptContext } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
 	type FauxProviderHandle,
@@ -12,6 +12,7 @@ import {
 } from "@earendil-works/pi-ai/providers/faux";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { defineExtension, defineTool, Harness, type Submission, UserEntry } from "@earendil-works/pi-durable";
+import { Type } from "typebox";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Chats } from "../src/agent/chats.ts";
 import type { SendText } from "../src/agent/deliver.ts";

@@ -1,6 +1,6 @@
-import { Type } from "@earendil-works/pi-ai";
 import { defineDoc, defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { Defuddle } from "defuddle/node";
+import { Type } from "typebox";
 import { extractText } from "unpdf";
 
 export const WebResults = defineDoc<{ queries: Record<string, string> }>({

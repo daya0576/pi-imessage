@@ -6,7 +6,7 @@ import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { defineTask } from "@earendil-works/pi-durable";
 import { expect, it, vi } from "vitest";
-import { chatConversation } from "../src/agent/chats.ts";
+import { Chats, chatConversation } from "../src/agent/chats.ts";
 import { Sessions } from "../src/agent/health.ts";
 import { Schedules } from "../src/agent/scheduling.ts";
 import { startService } from "../src/main.ts";
@@ -503,7 +503,7 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 		} finally {
 			releaseChild.resolve();
 		}
-		// Native scans are paged; the tree must not silently stop at the first 100 records.
+		// The overview bounds chat roots by activity, excluding unrelated historical conversations.
 		const fixtureTask = defineTask<null, { phase: "idle" }, null>({
 			name: "fixture.tree",
 			version: 1,
@@ -524,6 +524,10 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 			const ids = [];
 			for (let index = 0; index < 101; index++) {
 				const conversation = await tx.createConversation({ ownership: { kind: "ownerless" } });
+				await tx.appendEntry(conversation.id, {
+					kind: "fixture.activity",
+					model: [{ role: "user", content: "Activity", timestamp: 10000000000000 + index }],
+				});
 				const taskId = await tx.createTask(fixtureTask, null, {
 					conversationId: conversation.id,
 					ownership: { kind: "conversation" },
@@ -532,11 +536,27 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 			}
 			return ids;
 		}, BACKGROUND_CONTEXT);
+		await agent.harness.commit(async (tx) => {
+			const chats = await tx.doc(Chats);
+			for (const item of added.slice(0, 7))
+				chats.items.push({ chatGuid: `recent-${item.conversationId}`, conversationId: item.conversationId });
+		}, BACKGROUND_CONTEXT);
 		const fullTree = await (await fetch(`${base}/tasks/data`)).json();
-		for (const { conversationId, taskId } of added) {
-			expect(fullTree.conversations).toContainEqual(expect.objectContaining({ id: conversationId }));
-			expect(fullTree.tasks).toContainEqual(expect.objectContaining({ id: taskId, conversationId }));
-		}
+		expect(fullTree.conversations.map((item: { id: number }) => item.id)).toEqual(
+			added
+				.slice(2, 7)
+				.reverse()
+				.map((item) => item.conversationId),
+		);
+		expect(fullTree.tasks).toHaveLength(5);
+		// Older chats remain directly addressable without loading the other 100 conversations.
+		const older = added[0];
+		const olderTree = await (await fetch(`${base}/tasks/data?conversationId=${older.conversationId}`)).json();
+		expect(olderTree.conversations).toHaveLength(1);
+		expect(olderTree.tasks).toContainEqual(
+			expect.objectContaining({ id: older.taskId, conversationId: older.conversationId }),
+		);
+		expect((await fetch(`${base}/tasks/data?conversationId=invalid`)).status).toBe(400);
 	} finally {
 		await web?.close();
 		await agent?.close();
