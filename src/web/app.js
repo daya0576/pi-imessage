@@ -590,22 +590,30 @@ function renderScheduled() {
 		if (!runs.length) body.append(element("p", "No executions yet.", "empty"));
 		return body;
 	}
-	for (const job of data.jobs || []) {
+	function formatTokens(count) {
+		if (typeof count !== "number" || count <= 0) return "0 tok";
+		if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M tok`;
+		if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k tok`;
+		return `${count} tok`;
+	}
+	const jobs = (data.jobs || [])
+		.filter((job) => job.enabled)
+		.toSorted((a, b) => (b.tokens || 0) - (a.tokens || 0));
+	for (const job of jobs) {
 		const details = element("details", undefined, "schedule-row");
 		details.id = `schedule-history-${job.id}`;
 		const latest = job.runs?.[0];
-		const status = !job.enabled
-			? "disabled"
-			: ["aborted", "faulted", "failed", "missing"].includes(job.status)
-				? job.status
-				: latest
-					? [latest.status, latest.delivery].filter(Boolean).join(" / ")
-					: "enabled";
+		const status = ["aborted", "faulted", "failed", "missing"].includes(job.status)
+			? job.status
+			: latest
+				? [latest.status, latest.delivery].filter(Boolean).join(" / ")
+				: "enabled";
 		const lastRun = latest ? time(latest.input?.startedAt, job.timezone) : "No executions yet";
 		const cadence = job.time !== undefined ? `daily ${job.time}` : `every ${job.intervalMs / 3600000}h`;
 		const summary = element("summary", undefined, "schedule-summary");
 		summary.append(
 			element("span", job.name, "schedule-name"),
+			element("span", formatTokens(job.tokens), "schedule-tokens"),
 			element(
 				"span",
 				`${cadence} / Next: ${time(job.nextAt, job.timezone)} (${job.timezone})`,
@@ -617,7 +625,7 @@ function renderScheduled() {
 		details.append(summary, history(job.runs || [], job.conversationId, job.timezone));
 		view.append(details);
 	}
-	if (!data.jobs?.length) view.append(element("p", "No scheduled tasks.", "empty"));
+	if (!jobs.length) view.append(element("p", "No scheduled tasks.", "empty"));
 }
 
 function renderTasks() {
