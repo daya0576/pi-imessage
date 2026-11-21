@@ -426,20 +426,24 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 		}
 		expect((await fetch(`${base}/assets/unknown.js`)).status).toBe(404);
 		expect(faux.state.callCount).toBe(3);
-		faux.setResponses([
-			(context) => {
-				const tools = context.messages
-					.filter((message) => message.role === "system")
-					.flatMap((message) => message.toolsAdded ?? []);
-				expect(tools).toEqual([]);
-				return fauxAssistantMessage("OK");
-			},
-		]);
+		const checkHealthContext = (context: { messages: { role: string; toolsAdded?: unknown[] }[] }) => {
+			const tools = context.messages
+				.filter((message) => message.role === "system")
+				.flatMap((message) => message.toolsAdded ?? []);
+			expect(tools).toEqual([]);
+			expect(context.messages.filter((message) => message.role === "user")).toHaveLength(1);
+			return fauxAssistantMessage("OK");
+		};
+		faux.setResponses([checkHealthContext, checkHealthContext]);
 		expect((await fetch(`${base}/health/model`)).status).toBe(200);
-		expect(faux.state.callCount).toBe(4);
+		const firstSessions = await agent.harness.snapshot(Sessions, BACKGROUND_CONTEXT);
+		expect(firstSessions?.items).toHaveLength(1);
+		expect((await fetch(`${base}/health/model`)).status).toBe(200);
+		expect(faux.state.callCount).toBe(5);
 		const sessions = await agent.harness.snapshot(Sessions, BACKGROUND_CONTEXT);
 		expect(sessions?.items).toHaveLength(1);
 		expect(sessions?.items[0]).toMatchObject({ label: "model-health", deliver: false });
+		expect(sessions?.items[0]?.conversationId).not.toBe(firstSessions?.items[0]?.conversationId);
 
 		// The Tasks tab follows subagent ownership and lazily reads the latest native payload.
 		const childStarted = Promise.withResolvers<void>();
