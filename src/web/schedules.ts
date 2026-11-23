@@ -1,13 +1,57 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Harness } from "@earendil-works/pi-durable";
+import {
+	type ConversationId,
+	type Cursor,
+	type Harness,
+	UsageDoc,
+	type UsageState,
+} from "@earendil-works/pi-durable";
 import { DirectSends } from "../agent/direct-send.ts";
 import { EXECUTION_KIND, Schedules } from "../agent/scheduling.ts";
 
+function sumUsageTokens(usage: Readonly<UsageState>): number {
+	let total = 0;
+	for (const bucket of [usage.models, usage.tools]) {
+		for (const item of Object.values(bucket)) {
+			total += item.totalTokens || item.input + item.output + item.cacheRead + item.cacheWrite;
+		}
+	}
+	return total;
+}
+
 /** Native occurrence tasks are the execution history; this view keeps no parallel log. */
-export function readSchedules(harness: Harness) {
-	return harness.commit(async (tx) => {
+export async function readSchedules(harness: Harness) {
+	const { jobs, conversationsByRoot } = await harness.commit(async (tx) => {
 		const schedules = await tx.doc(Schedules);
 		const sends = await tx.doc(DirectSends);
+		const roots = new Set(schedules.items.map((schedule) => schedule.conversationId));
+		const conversationsByRoot = new Map<ConversationId, ConversationId[]>(
+			schedules.items.map((schedule) => [schedule.conversationId, [schedule.conversationId]]),
+		);
+		if (roots.size > 0) {
+			const ownerOf = new Map<ConversationId, ConversationId>();
+			let cursor: Cursor | undefined;
+			do {
+				const page = await tx.scanConversations({}, 500, cursor);
+				for (const conversation of page.items) {
+					if (conversation.owner) ownerOf.set(conversation.id, conversation.owner.conversationId);
+				}
+				cursor = page.next;
+			} while (cursor);
+			for (const id of ownerOf.keys()) {
+				if (roots.has(id)) continue;
+				const seen = new Set<ConversationId>([id]);
+				let current = ownerOf.get(id);
+				while (current !== undefined && !seen.has(current)) {
+					if (roots.has(current)) {
+						conversationsByRoot.get(current)?.push(id);
+						break;
+					}
+					seen.add(current);
+					current = ownerOf.get(current);
+				}
+			}
+		}
 		const jobs = [];
 		for (const schedule of schedules.items) {
 			const task = await tx.task(schedule.taskId);
@@ -58,15 +102,26 @@ export function readSchedules(harness: Harness) {
 				status: task?.state.outcome?.status ?? task?.state.status ?? "missing",
 				phase: state?.phase,
 				nextAt: state?.phase === "sleep" ? state.at : undefined,
+				tokens: 0,
 				runs,
 			});
 		}
-		return {
-			jobs,
-			recent: jobs
-				.flatMap((job) => job.runs.map((run) => ({ ...run, jobId: job.id, name: job.name })))
-				.sort((a, b) => b.id - a.id)
-				.slice(0, 10),
-		};
+		return { jobs, conversationsByRoot };
 	}, BACKGROUND_CONTEXT);
+	for (const job of jobs) {
+		let tokens = 0;
+		for (const id of conversationsByRoot.get(job.conversationId) ?? [job.conversationId]) {
+			const state = await harness.snapshot(UsageDoc, id, BACKGROUND_CONTEXT);
+			if (state) tokens += sumUsageTokens(state);
+		}
+		job.tokens = tokens;
+	}
+	jobs.sort((a, b) => b.tokens - a.tokens);
+	return {
+		jobs,
+		recent: jobs
+			.flatMap((job) => job.runs.map((run) => ({ ...run, jobId: job.id, name: job.name })))
+			.sort((a, b) => b.id - a.id)
+			.slice(0, 10),
+	};
 }

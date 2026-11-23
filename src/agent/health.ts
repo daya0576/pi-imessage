@@ -20,16 +20,16 @@ export const Sessions = defineDoc<{
 	checkpointWhen: () => false,
 });
 
-/** Explicit health checks reuse one tool-less conversation and never deliver to a chat. */
+/** Explicit health checks create a fresh tool-less conversation each time and never deliver to a chat. */
 export async function submitHealth(harness: Harness, defaults: AgentDefaults) {
 	const key = JSON.stringify(["health", "model-health"]);
 	const id = await harness.commit(async (tx) => {
 		const sessions = await tx.doc(Sessions);
-		const found = sessions.items.find((item) => item.key === key);
-		const id =
-			found?.conversationId ?? (await tx.createConversation({ ownership: { kind: "ownerless" } })).id;
+		const id = (await tx.createConversation({ ownership: { kind: "ownerless" } })).id;
 		await configure(tx, id, { ...defaults, tools: [], instructions: "Reply OK. Do not use tools." });
-		if (!found)
+		const found = sessions.items.find((item) => item.key === key);
+		if (found) found.conversationId = id;
+		else
 			sessions.items.push({
 				key,
 				label: "model-health",

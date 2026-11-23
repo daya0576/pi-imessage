@@ -447,8 +447,11 @@ body.page-logs .native-state {
 
 .schedule-summary {
 	display: grid;
-	grid-template-columns: 16px minmax(160px, 1fr) minmax(400px, 2fr) minmax(240px, 1.2fr) minmax(100px, 0.6fr);
-	min-width: 980px;
+	grid-template-columns: 16px minmax(160px, 1fr) minmax(88px, 0.5fr) minmax(380px, 2fr) minmax(220px, 1.2fr) minmax(
+			100px,
+			0.6fr
+		);
+	min-width: 1060px;
 	align-items: center;
 	gap: 10px;
 	padding: 12px 16px;
@@ -469,6 +472,7 @@ body.page-logs .native-state {
 }
 
 .schedule-name,
+.schedule-tokens,
 .schedule-next,
 .schedule-last,
 .schedule-status {
@@ -478,11 +482,16 @@ body.page-logs .native-state {
 	white-space: nowrap;
 }
 
+.schedule-tokens,
 .schedule-next,
 .schedule-last,
 .schedule-status {
 	opacity: 0.55;
 	white-space: nowrap;
+}
+
+.schedule-tokens {
+	text-align: right;
 }
 
 [hidden] {

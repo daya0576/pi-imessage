@@ -13,6 +13,13 @@ export const WebResults = defineDoc<{ queries: Record<string, string> }>({
 	checkpointWhen: () => false,
 });
 
+const FETCH_CONTENT_HEADERS = {
+	"User-Agent":
+		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+	Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+	"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+};
+
 async function fetchBounded(url: string, options: RequestInit = {}) {
 	const parsed = new URL(url);
 	if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password)
@@ -76,7 +83,10 @@ export function webExtension(apiKey = process.env.BRAVE_API_KEY ?? process.env.B
 				parameters: Type.Object({ url: Type.String() }),
 				replay: "safe",
 				async execute(args, _api, context) {
-					const result = await fetchBounded(args.url, { signal: context.abortSignal });
+					const result = await fetchBounded(args.url, {
+						headers: FETCH_CONTENT_HEADERS,
+						signal: context.abortSignal,
+					});
 					const text = result.type.includes("pdf")
 						? (await extractText(new Uint8Array(result.bytes), { mergePages: true })).text
 						: result.type.includes("html")

@@ -72,3 +72,38 @@ jobs:
       - run: npm run check
       - run: npm run test:package
       - run: npm publish --ignore-scripts --access public --provenance
+
+  release:
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.version && format('refs/tags/v{0}', inputs.version) || github.ref }}
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.version && format('v{0}', inputs.version) || github.ref_name }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; skipping."
+            exit 0
+          fi
+
+          git fetch --force --no-tags --depth=1 origin "refs/tags/${TAG}:refs/tags/${TAG}"
+
+          if [ "$(git cat-file -t "refs/tags/$TAG")" = "tag" ]; then
+            notes_file="$(mktemp)"
+            trap 'rm -f "$notes_file"' EXIT
+            git for-each-ref --format='%(contents)' "refs/tags/$TAG" > "$notes_file"
+            if grep -q '[^[:space:]]' "$notes_file"; then
+              gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes-file "$notes_file" --verify-tag
+              exit 0
+            fi
+          fi
+
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes --verify-tag

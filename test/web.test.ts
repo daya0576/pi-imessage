@@ -53,6 +53,10 @@ module.exports = async ({ workingDir, config, Type, defineExtension, defineTool,
 				});
 			}
 			expect(String(url)).toBe("https://example.test/article");
+			expect(options?.headers).toMatchObject({
+				"User-Agent": expect.stringContaining("Mozilla/5.0"),
+				"Accept-Language": expect.stringContaining("zh-CN"),
+			});
 			return new Response(
 				"<html><head><title>Fixture</title></head><body><article><h1>Fixture article</h1><p>Readable source text with enough content to be retained by the parser.</p></article></body></html>",
 				{ headers: { "content-type": "text/html" } },

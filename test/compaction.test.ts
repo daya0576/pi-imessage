@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
-import { defineDoc } from "@earendil-works/pi-durable";
+import { defineDoc, UsageDoc } from "@earendil-works/pi-durable";
 import { expect, it, vi } from "vitest";
 import { compactionReply } from "../src/agent/commands.ts";
 import { DirectSends } from "../src/agent/direct-send.ts";
@@ -315,6 +315,40 @@ module.exports = ({ config, defineDoc, defineTask, defineExtension, ScheduledOut
 			job.id.startsWith("fixture-"),
 		);
 		expect(fixtureJobs.map((job) => job.id)).toEqual(["fixture-daily", "fixture-interval"]);
+		// Token attribution sums the schedule conversation and owned child conversations, and sorts descending.
+		await agent.harness.commit(async (tx) => {
+			const dailyJob = fixtureJobs.find((job) => job.id === "fixture-daily");
+			const intervalJob = fixtureJobs.find((job) => job.id === "fixture-interval");
+			if (!dailyJob || !intervalJob) throw new Error("Missing fixture jobs");
+			const dailyUsage = await tx.doc(UsageDoc, dailyJob.conversationId);
+			dailyUsage.models["faux/test"] = {
+				input: 300,
+				output: 100,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 400,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			};
+			const child = await tx.createConversation({
+				ownership: { kind: "task", taskId: intervalJob.taskId },
+			});
+			const childUsage = await tx.doc(UsageDoc, child.id);
+			childUsage.models["faux/test"] = {
+				input: 1000,
+				output: 500,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 1500,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			};
+		}, BACKGROUND_CONTEXT);
+		const rankedJobs = (await readSchedules(agent.harness)).jobs.filter((job) =>
+			job.id.startsWith("fixture-"),
+		);
+		expect(rankedJobs.map((job) => [job.id, job.tokens])).toEqual([
+			["fixture-interval", 1500],
+			["fixture-daily", 400],
+		]);
 		const savedTasks = await Promise.all(
 			fixtureJobs.map((job) => agent?.harness.getTask(job.taskId, BACKGROUND_CONTEXT)),
 		);
