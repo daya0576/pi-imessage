@@ -1,11 +1,13 @@
+import { existsSync } from "node:fs";
 import { mkdir, open, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
 import { createRegistry, type Extension, Harness, type HarnessSettings } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import { openNodeJsonlStorage } from "@earendil-works/pi-durable/storage/jsonl/node";
+import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { chatBehavior } from "./behavior.ts";
+import { migrateJsonlToSqlite } from "./migrate-jsonl.ts";
 import { RunExtension } from "./run.ts";
 
 export async function openHarness(
@@ -16,12 +18,18 @@ export async function openHarness(
 ) {
 	const directory = join(workingDir, "durable");
 	await mkdir(directory, { recursive: true });
+	const sqlitePath = join(directory, "pi.sqlite");
+	// JSONL recovery holds the whole journal in the heap. Migrate before taking the
+	// owner lock so a crash here does not leave a lock the next start must not steal.
+	if (!existsSync(sqlitePath) && existsSync(join(directory, "main.jsonl"))) {
+		await migrateJsonlToSqlite(directory, sqlitePath);
+	}
 	const lockPath = join(directory, "owner.lock");
 	// Never steal a lock: after an unclean exit the operator must confirm its owner is dead.
 	const lock = await open(lockPath, "wx");
 	try {
 		await lock.writeFile(`${process.pid}\n`);
-		const storage = await openNodeJsonlStorage(directory, BACKGROUND_CONTEXT, { fsync: true });
+		const storage = await openNodeSqliteStorage(sqlitePath);
 		try {
 			const registry = createRegistry();
 			registry.install(chatBehavior(storage));

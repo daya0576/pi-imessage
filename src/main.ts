@@ -434,6 +434,9 @@ export async function startService(
 		deliver() {
 			return track(async () => {
 				const settings = await readSettings(options.workingDir);
+				// Interim sends are queued on commit. SQLite commits return before that microtask
+				// writes the direct-send record, so settle them before deciding the final reply.
+				await progress.flush();
 				await deliverReplies(
 					harness,
 					storage,

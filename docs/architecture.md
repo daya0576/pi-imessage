@@ -100,7 +100,7 @@ agent/chats.ts
   Save row cursor after acceptance; steer if busy
         |
         v
-Pi Durable Harness <--------> durable/ (JSONL)
+Pi Durable Harness <--------> durable/pi.sqlite
         |                          |
         | final answer             +--> web/ (history and live state)
         v
@@ -113,8 +113,10 @@ agent/deliver.ts
 
 ### Inside the Harness
 
-These concepts and files are native to Pi Durable's JSONL storage.
-Paths are relative to `WORKING_DIR/durable/`.
+Runtime storage is SQLite at `WORKING_DIR/durable/pi.sqlite` (since 2026-11-27).
+Startup reads live rows, not the whole history. A JSONL directory left beside
+the database is the archive from before that migration and is not opened.
+The table lists the logical records. The file column is the old JSONL layout.
 
 | Member | Role | File |
 |---|---|---|

@@ -21,7 +21,7 @@ function preamble(workingDir: string) {
 - The final reply is ONLY the message to the user. Never include planning, reasoning, analysis or meta-commentary in it.
 
 ## Environment
-You run directly on the host machine; be careful with system modifications. Bash working directory: ${workingDir}. It holds settings.json, extensions/<name>/, skills/, attachments/<chat>/ (files users shared) and durable/ (all conversations as JSONL; grep it for old messages).
+You run directly on the host machine; be careful with system modifications. Bash working directory: ${workingDir}. It holds settings.json, extensions/<name>/, skills/, attachments/<chat>/ (files users shared) and durable/pi.sqlite (conversations and history; query it read-only with sqlite3). JSONL files beside it are the pre-migration archive.
 
 ## Messaging
 Your final answer is sent to the chat automatically. Use the send_message tool for files or extra messages.
