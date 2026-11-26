@@ -10,6 +10,8 @@ document.getElementById("connection")?.remove();
 let data = JSON.parse(state.textContent);
 let chats = [];
 let memoryQuery = { q: "", namespace: "", kind: "", status: "active", page: 1 };
+let memoryTab = new URLSearchParams(location.search).get("tab");
+if (memoryTab !== "agents" && memoryTab !== "prompt") memoryTab = "records";
 let refreshing = false;
 
 document.body.classList.add(`page-${page.slice(1)}`);
@@ -383,6 +385,25 @@ function renderMemory() {
 	view.append(pagination);
 }
 
+function renderPrompt() {
+	toolbar.replaceChildren();
+	setupToolbar();
+	view.replaceChildren(element("p", data.omitted || "Read-only.", "muted"));
+	const files =
+		memoryTab === "agents"
+			? [
+					...(data.agents || []).map((file) => [file.path, file.content]),
+					...(data.core ? [[data.core.path, data.core.content]] : []),
+				]
+			: (data.sections || []).map((section) => [section.name, section.text]);
+	if (!files.length) view.append(element("p", "Nothing to show.", "empty"));
+	for (const [title, text] of files) {
+		const block = element("section", undefined, "prompt-block");
+		block.append(element("h2", title), element("pre", text));
+		view.append(block);
+	}
+}
+
 function renderSettings() {
 	view.replaceChildren(
 		element(
@@ -739,6 +760,32 @@ function renderTasks() {
 	}
 }
 
+function memoryTabs() {
+	const nav = element("nav", undefined, "memory-tabs");
+	nav.setAttribute("aria-label", "Memory views");
+	for (const [id, label] of [
+		["records", "Records"],
+		["agents", "AGENTS"],
+		["prompt", "System prompt"],
+	]) {
+		const button = element("button", label);
+		button.type = "button";
+		if (memoryTab === id) button.setAttribute("aria-current", "page");
+		button.addEventListener("click", () => {
+			if (memoryTab === id) return;
+			memoryTab = id;
+			const url = new URL(location.href);
+			if (id === "records") url.searchParams.delete("tab");
+			else url.searchParams.set("tab", id);
+			history.replaceState(null, "", url);
+			void refresh();
+			main.scrollTop = 0;
+		});
+		nav.append(button);
+	}
+	return nav;
+}
+
 function setupToolbar() {
 	if (page === "/chat" || page === "/tasks") {
 		if (conversationId) {
@@ -746,7 +793,9 @@ function setupToolbar() {
 			toolbar.append(page === "/chat" ? link("< Messages", "/") : link("< Recent conversations", "/tasks"));
 		}
 	} else if (page === "/memory") {
-		const records = Array.isArray(data) ? memoryRows() : data.records;
+		toolbar.append(memoryTabs());
+		if (memoryTab !== "records") return;
+		const records = Array.isArray(data) ? memoryRows() : data.records || [];
 		const form = element("form", undefined, "toolbar");
 		const searchLabel = element("label", "Search text / subjects / sources", "search");
 		const search = element("input");
@@ -800,8 +849,10 @@ async function render() {
 		Array.from(view.querySelectorAll(".card"), (card) => [card.id, card.scrollTop]),
 	);
 	if (page === "/chat") await loadChats();
-	else if (page === "/memory") renderMemory();
-	else if (page === "/settings") renderSettings();
+	else if (page === "/memory") {
+		if (memoryTab === "records") renderMemory();
+		else renderPrompt();
+	} else if (page === "/settings") renderSettings();
 	else if (page === "/chats") renderChatSettings();
 	else if (page === "/logs") renderLogs();
 	else if (page === "/tasks") renderTasks();
@@ -820,8 +871,9 @@ async function refresh() {
 		const query = new URLSearchParams(location.search);
 		if (page === "/chat") query.set("view", conversationId ? "display" : "overview");
 		if (page === "/memory") {
-			query.set("view", "records");
-			for (const [key, value] of Object.entries(memoryQuery)) query.set(key, String(value));
+			query.set("view", memoryTab === "records" ? "records" : "sources");
+			if (memoryTab === "records")
+				for (const [key, value] of Object.entries(memoryQuery)) query.set(key, String(value));
 		}
 		data = await fetchData(`${page}/data?${query}`);
 		state.textContent = JSON.stringify(data, null, 2);

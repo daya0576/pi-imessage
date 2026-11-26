@@ -36,7 +36,13 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 			send,
 			sendAttachment,
 		});
-		web = await startWeb({ workingDir: directory, agent, host: "127.0.0.1", port: 0 });
+		web = await startWeb({
+			workingDir: directory,
+			agentDir: join(directory, "agent"),
+			agent,
+			host: "127.0.0.1",
+			port: 0,
+		});
 		const base = `http://127.0.0.1:${web.address.port}`;
 		for (const path of [
 			"/send",
@@ -281,6 +287,27 @@ it("records immediate tool sends in chat and serves state without scheduling ent
 		expect((await (await fetch(`${base}/memory/data`)).json())[0].records).toBe("new");
 		await rm(join(memoryDirectory, "fixture.jsonl"));
 		expect(await (await fetch(`${base}/memory/data`)).json()).toEqual([]);
+		await mkdir(join(directory, "agent"), { recursive: true });
+		await writeFile(join(directory, "agent", "AGENTS.md"), "Agent rules PROMPT_TAB_MARKER\n");
+		await writeFile(join(directory, "AGENTS.md"), "Workspace rules PROMPT_TAB_MARKER\n");
+		await writeFile(join(directory, "skills", "file-memory", "core.md"), "Core rules PROMPT_TAB_MARKER\n");
+		const sources = await (await fetch(`${base}/memory/data?view=sources`)).json();
+		expect(sources.view).toBe("sources");
+		expect(sources.agents.map((file: { content: string }) => file.content).join("\n")).toContain(
+			"Agent rules PROMPT_TAB_MARKER",
+		);
+		expect(sources.agents.map((file: { content: string }) => file.content).join("\n")).toContain(
+			"Workspace rules PROMPT_TAB_MARKER",
+		);
+		expect(sources.core.content).toContain("Core rules PROMPT_TAB_MARKER");
+		expect(sources.sections.find((section: { name: string }) => section.name === "preamble").text).toContain(
+			"best friend",
+		);
+		expect(
+			sources.sections.find((section: { name: string }) => section.name === "project_context").text,
+		).toContain("Workspace rules PROMPT_TAB_MARKER");
+		expect(sources.omitted).toContain("host rules");
+		expect(await (await fetch(`${base}/memory?tab=agents`)).text()).toContain("PROMPT_TAB_MARKER");
 		// Memory filters and pages complete records on the server, including cross-namespace supersession.
 		const facts = Array.from({ length: 45 }, (_, index) => ({
 			id: `memory-${index}`,

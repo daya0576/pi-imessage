@@ -629,6 +629,7 @@ export async function startApplication(
 		if (options.web !== false) {
 			web = await startWeb({
 				workingDir: options.workingDir,
+				agentDir: options.agentDir,
 				agent: messaging,
 				...options.web,
 			});

@@ -1,4 +1,5 @@
-import { basename, dirname } from "node:path";
+import { readFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import {
 	DefaultPackageManager,
 	loadProjectContextFiles,
@@ -50,11 +51,7 @@ function skillCatalog(skills: readonly Skill[]) {
 	].join("\n\n");
 }
 
-/**
- * The system prompt: product instructions, AGENTS files and skills, read once per load.
- * `/reload` builds it again; the same extension name replaces the old one in place.
- */
-export async function loadPrompt(workingDir: string, agentDir: string) {
+async function promptPieces(workingDir: string, agentDir: string) {
 	const settings = SettingsManager.create(workingDir, agentDir, { projectTrusted: false });
 	const packages = new DefaultPackageManager({ cwd: workingDir, agentDir, settingsManager: settings });
 	// Discover installed user resources only; never install packages or execute SDK extensions headlessly.
@@ -75,24 +72,32 @@ export async function loadPrompt(workingDir: string, agentDir: string) {
 	// settings.json hiddenSkills keeps rarely used skills out of the catalog; their files stay readable.
 	const hidden = new Set((await readSettings(workingDir)).hiddenSkills);
 	const skills = skillCatalog(loadedSkills.skills.filter((skill) => !hidden.has(skill.name)));
-	const text = preamble(workingDir);
+	const project =
+		agents.length === 0
+			? undefined
+			: [
+					"Project-specific instructions and guidelines:",
+					...agents.map(
+						({ path, content }) =>
+							`<project_instructions path="${path}">\n${content}\n</project_instructions>`,
+					),
+				].join("\n\n");
+	return { agents, preamble: preamble(workingDir), project, skills };
+}
+
+/**
+ * The system prompt: product instructions, AGENTS files and skills, read once per load.
+ * `/reload` builds it again; the same extension name replaces the old one in place.
+ */
+export async function loadPrompt(workingDir: string, agentDir: string) {
+	const pieces = await promptPieces(workingDir, agentDir);
 	return defineExtension({
 		name: "prompt",
 		sections: [
-			section("preamble", () => text, { tag: false }),
-			section("project_context", () =>
-				agents.length === 0
-					? undefined
-					: [
-							"Project-specific instructions and guidelines:",
-							...agents.map(
-								({ path, content }) =>
-									`<project_instructions path="${path}">\n${content}\n</project_instructions>`,
-							),
-						].join("\n\n"),
-			),
+			section("preamble", () => pieces.preamble, { tag: false }),
+			section("project_context", () => pieces.project),
 			section("skills", (input) =>
-				input.agent.tools.some((tool) => tool.name === "read") ? skills : undefined,
+				input.agent.tools.some((tool) => tool.name === "read") ? pieces.skills : undefined,
 			),
 			// Names only: the full set stays constant as tools load, so the section never changes mid-conversation.
 			section("deferred-tools", ({ agent }) => {
@@ -106,4 +111,27 @@ export async function loadPrompt(workingDir: string, agentDir: string) {
 			}),
 		],
 	});
+}
+
+/** Read-only view of the files and static prompt text. Re-read on each request; nothing is cached or written. */
+export async function readPromptSources(workingDir: string, agentDir: string) {
+	const pieces = await promptPieces(workingDir, agentDir);
+	const corePath = join(workingDir, "skills", "file-memory", "core.md");
+	let core: { path: string; content: string } | null = null;
+	try {
+		core = { path: corePath, content: await readFile(corePath, "utf8") };
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+	}
+	const sections = [{ name: "preamble", text: pieces.preamble }];
+	if (pieces.project) sections.push({ name: "project_context", text: pieces.project });
+	if (pieces.skills) sections.push({ name: "skills", text: pieces.skills });
+	return {
+		view: "sources" as const,
+		agents: pieces.agents,
+		core,
+		sections,
+		omitted:
+			"Static text from the prompt extension, read again on each request. Deferred tool names, other extension sections, and per-turn host rules are not included.",
+	};
 }

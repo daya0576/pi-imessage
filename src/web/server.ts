@@ -15,6 +15,7 @@ import {
 import { Chats, interimEnabled, progressEnabled } from "../agent/chats.ts";
 import { DirectSends } from "../agent/direct-send.ts";
 import { Sessions } from "../agent/health.ts";
+import { readPromptSources } from "../agent/prompt.ts";
 import { Deliveries } from "../agent/replies.ts";
 import { Schedules } from "../agent/scheduling.ts";
 import { isReplyEnabled, readSettings } from "../config/settings.ts";
@@ -88,6 +89,7 @@ function json(
 /** Read-only pages and an explicit model health check. Viewing pages never starts work. */
 export async function startWeb(options: {
 	workingDir: string;
+	agentDir?: string;
 	agent: WebAgent;
 	host?: string;
 	port?: number;
@@ -380,7 +382,14 @@ export async function startWeb(options: {
 				throw error;
 			});
 			const namespaces = files.filter((file) => file.endsWith(".jsonl")).sort();
-			if (!url.pathname.endsWith("/data") || url.searchParams.get("view") === "records") {
+			const tab = url.searchParams.get("tab");
+			const sources =
+				url.searchParams.get("view") === "sources" ||
+				(!url.pathname.endsWith("/data") && (tab === "agents" || tab === "prompt"));
+			if (sources) {
+				if (!options.agentDir) throw new Error("agentDir is required");
+				value = await readPromptSources(options.workingDir, options.agentDir);
+			} else if (!url.pathname.endsWith("/data") || url.searchParams.get("view") === "records") {
 				const records = await Promise.all(
 					namespaces.map(async (file) =>
 						parseMemoryFile(await readFile(join(root, file), "utf8"), file.slice(0, -6)),

@@ -313,6 +313,24 @@ pre {
 	margin: 16px 0;
 }
 
+.memory-tabs {
+	display: flex;
+	gap: 8px;
+	margin: 0 0 16px;
+}
+
+.memory-tabs button[aria-current="page"] {
+	border-color: #ccc;
+}
+
+.prompt-block {
+	margin: 0 0 20px;
+}
+
+.prompt-block h2 {
+	margin-bottom: 8px;
+}
+
 .memory-record {
 	max-height: min(560px, 70dvh);
 	overflow: auto;
